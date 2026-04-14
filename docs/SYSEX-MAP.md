@@ -149,8 +149,8 @@ each message and try.
 
 | ID | Symbolic name | Direction | Priority for AM4 Phase 1 |
 |----|---------------|-----------|--------------------------|
-| 0x01 | GET_BLOCK_PARAMETERS_LIST | req | P1 — after 0x02 works |
-| 0x02 | GET/SET_BLOCK_PARAMETER_VALUE | both | **P0 — live-tweak MVP** |
+| 0x01 | (Axe-Fx II GET_BLOCK_PARAMETERS_LIST) | — | 🟢 **on AM4 this is param R/W dispatcher — see §6a** |
+| 0x02 | GET/SET_BLOCK_PARAMETER_VALUE | both | 🔴 **unused by AM4-Edit** — superseded by 0x01 |
 | 0x07 | GET/SET_MODIFIER_VALUE | both | P2 |
 | 0x08 | GET_FIRMWARE_VERSION | both | 🟢 confirmed — v2.00 build Mar 20 2026 |
 | 0x09 | SET_PRESET_NAME | req | P1 — try as AM4 name query (read side may differ) |
@@ -183,12 +183,103 @@ The smallest shippable cut relies on just four function IDs:
 1. **0x08 GET_FIRMWARE_VERSION** — handshake, proves two-way comms, unlocks
    `0x21` change-detected notifications.
 2. **0x14 GET_PRESET_NUMBER** — read current state.
-3. **0x0F GET_PRESET_NAME** — human-readable confirmation we're on the right slot.
-4. **0x02 GET/SET_BLOCK_PARAMETER_VALUE** — tweak a parameter in real time.
+3. **0x0D QUERY_PATCH_NAME** — human-readable preset name (Axe-Fx III opcode,
+   confirmed session 02).
+4. **0x01 PARAMETER_R/W dispatcher** — tweak a parameter in real time
+   (session 04 — see §6a for shape).
 
 If those four work, we have a demo-able product without needing to reverse
 the preset binary format. Everything harder (full preset read/write, scene
 encoding, modifier graphs) comes after.
+
+---
+
+## 6a. 0x01 PARAMETER_R/W Dispatcher 🟢
+
+**Confirmed session 04 (2026-04-14) via USBPcap of AM4-Edit.** AM4 does
+NOT use the Axe-Fx II `0x02 GET/SET_BLOCK_PARAMETER_VALUE` command.
+Instead, function byte `0x01` is a combined read/write dispatcher with an
+action code in the body.
+
+### Read request (18 bytes on wire)
+
+```
+F0 00 01 74 15 01 [addr:4] [read_type:1] 00 00 00 00 [cs] F7
+```
+
+- `addr:4` — 4-byte parameter address (e.g. `3A 00 0B 00` for preset A01
+  Amp Gain).
+- `read_type:1` — selects the response format. Observed values:
+  - `0D` / `10` → 64-byte response (full-block data)
+  - `26` / `0E` → 34-byte response (short parameter read)
+  - `1F` → seen on one address family; response shape TBD
+- Trailing `00 00 00 00` is the payload-length byte (0) + 3-byte reserved.
+  A read carries no payload.
+
+### Write request (23 bytes on wire)
+
+```
+F0 00 01 74 15 01 [addr:4] 01 00 00 00 04 [value:6] [cs] F7
+```
+
+- Action code byte is **`01`** (WRITE) at body offset 5.
+- Payload length byte is **`04`** — meaning "4 raw bytes of value data follow,
+  SysEx-encoded into 6 wire bytes".
+- `value:6` — 32-bit IEEE 754 float packed into 6 7-bit bytes. Packing
+  scheme not yet decoded (🟡); see §6b.
+
+### AM4-Edit behavior observed
+
+- AM4-Edit polls active parameters at ~200 Hz with reads. The vast majority
+  of OUT SysEx traffic is reads, not writes.
+- Writes fire only on **Enter-commit** in the number input field. Slider
+  drags in the UI may also emit writes (untested); physical knob moves on
+  the AM4 itself emit NO USB traffic from AM4-Edit (the amp updates its
+  own state; AM4-Edit sees it via polling).
+
+### Known parameter addresses 🟡
+
+| Address | Parameter | Verified on |
+|---------|-----------|-------------|
+| `3A 00 0B 00` | Amp Gain | preset A01 |
+
+Address stability across presets/scenes is not yet verified.
+
+---
+
+## 6b. Value Encoding — 32-bit Float Packing 🟡
+
+The 6-byte value field carries an IEEE 754 single-precision float. The
+packing scheme has 10 bits of overhead per value (42 wire bits for 32
+data bits) and is not yet decoded. Session 04 collected 8 (float → wire)
+samples covering both zero-mantissa and non-zero-mantissa values:
+
+| Value | Float32 (big-endian) | Wire bytes 15–20 |
+|---|---|---|
+| 0.25 | `3E 80 00 00` | `00 66 73 19 43 60` |
+| 0.50 | `3F 00 00 00` | `00 66 73 09 43 68` |
+| 1.00 | `3F 80 00 00` | `00 66 73 19 43 68` |
+| 1.50 | `3F C0 00 00` | `00 4D 26 23 13 70` |
+| 2.00 | `40 00 00 00` | `00 66 73 09 43 70` |
+| 2.50 | `40 20 00 00` | `00 00 00 10 03 70` |
+| 3.00 | `40 40 00 00` | `00 4D 26 33 13 70` |
+| 4.00 | `40 80 00 00` | `00 66 73 19 43 70` |
+
+Candidate packings to try against this table (pick one, verify against all
+8 rows, encode is correct iff all match):
+
+1. **Fractal "3-septet-per-byte" bit-pack** — the scheme used for Axe-Fx
+   III preset-body packing (forum.fractalaudio.com research). Every 3
+   wire bytes ≈ 21 bits carry 2.625 raw bytes. For a 4-byte value this
+   would round up to ~5 wire bytes of data + 1 framing.
+2. **Roland 8-to-7 with zero-padding** — 4 raw bytes → 5 wire bytes
+   (low-7s + one MSB carrier byte), padded with a leading `00` at
+   wire position 15 for framing. 6 total.
+3. **Per-nibble-plus-frame** — split each raw byte to two 4-bit nibbles,
+   emit 8 nibble bytes, truncate framing.
+
+Cracking this is a finite-search problem (try each scheme, verify against
+all 8 samples, done). `scripts/decode-float-pack.ts` — to be written.
 
 ---
 

@@ -2,66 +2,69 @@
 
 > Read this file at the start of every session. It's kept up-to-date with
 > current phase, the single next action, and recent findings.
-> Last updated: **2026-04-14** (after Session 03).
+> Last updated: **2026-04-14** (after Session 04).
 
 ---
 
 ## Current phase
 
-**Phase 1 — Protocol RE (in progress).** Phase 0 feasibility was confirmed
-(USB MIDI comms, Axe-Fx III command set applies to AM4, preset dump/store
-format known). The blocker for MVP is AM4-Edit's outgoing `0x01` parameter-set
-command format — undocumented, needed to "puppet the device" per the
-architecture decision in `docs/DECISIONS.md` (2026-04-14).
+**Phase 1 — Protocol RE (in progress).** The `0x01` parameter R/W command
+shape is now 🟢 confirmed (Session 04). The remaining Phase 1 work is
+(a) decoding the 6-byte float packing scheme and (b) writing a real
+test write to slot Z04 via `scripts/write-test.ts`. After that, Phase 1
+closes and we move to the transpiler + MCP scaffold.
 
 ## The single next action
 
-**Capture AM4-Edit's outgoing SysEx via USBPcap + Wireshark to decode
-the `0x01` parameter-set command.**
+**Decode the 6-byte IEEE 754 float packing scheme from Session 04's 8
+samples, then write `scripts/write-test.ts` to perform a single verified
+param-set write to slot Z04.**
 
-Exact steps the user is mid-execution on:
+Exact steps:
 
-1. ✅ Install USBPcap and Wireshark.
-2. ⏳ **Reboot Windows** to activate the USBPcap kernel filter driver
-   (current blocker — `sc query USBPcap` shows `STATE : 1 STOPPED` until
-   reboot).
-3. After reboot, reconnect the AM4 via USB and launch AM4-Edit. Load
-   preset A01 and wait 5 seconds.
-4. In Wireshark, identify the USBPcap interface carrying AM4 traffic
-   (double-click each USBPcap1/2/3 until one shows live traffic when
-   wiggling an AM4 knob).
-5. Start a clean capture:
-   - Click green shark fin to start.
-   - Wait 3 seconds (baseline).
-   - In AM4-Edit, move Amp Gain by exactly 1 notch (3.0 → 4.0).
-   - Wait 1 second.
-   - Click red square to stop.
-6. `File → Save As → samples/captured/session-04-gain-change.pcapng`.
-7. Paste the filename back to Claude; parser script will decode the
-   outgoing SysEx and we'll identify the parameter-set command shape.
+1. Write `scripts/decode-float-pack.ts`. Input: the 8 (float → 6 wire
+   bytes) samples from `SYSEX-MAP.md §6b`. Strategy: iterate over
+   candidate unpacking schemes (Roland 8-to-7, Fractal 3-septet, nibble
+   pack, bit-reversed variants) and check which recovers all 8 floats
+   from their wire bytes bijectively. Target: one scheme that produces a
+   `packFloat32(f: number) → Uint8Array(6)` function.
+2. Sanity-check by round-tripping: `pack(4.0)` should equal
+   `00 66 73 19 43 70` byte-for-byte.
+3. Write `scripts/write-test.ts` (not yet created). Read-classify-backup
+   protocol per `DECISIONS.md`:
+   - Back up slot Z04 (read via 0x77/0x78/0x79 store → save to
+     `samples/captured/Z04-backup-YYYY-MM-DD.syx`).
+   - Send a `0x01` WRITE to Amp Gain = 2.50 (non-trivial value,
+     mantissa ≠ 0 to exercise the packing).
+   - Read back via the appropriate `0x01` read-type.
+   - Compare written and read-back values; assert equality.
+4. Update `SYSEX-MAP.md §6b` (🟡 → 🟢) with the decoded packing scheme.
 
 ## Recent breakthroughs (2026-04-14 sessions)
 
-1. **Protocol family = Axe-Fx III** (Session 02). All AM4 responses match
-   the public 3rd-party MIDI spec. Model byte is `0x15`. See `SYSEX-MAP.md`.
-2. **Preset dump format decoded** (Session 03). `0x77` header + 4× `0x78`
-   chunks + `0x79` footer = 12,352 bytes. Bytes 6–7 of header encode
-   `bank_index, slot_within_bank` (0–25, 0–3) → full slot addressing.
-3. **Preset bodies are scrambled per-export** (Session 03). Two clean
-   exports of the same preset differ by ~2,700 bytes. Cracking this is
-   weeks of work with uncertain payoff — so we pivoted architecture.
+1. **`0x01` param-set command shape confirmed** (Session 04). 23-byte OUT
+   writes, 18-byte OUT reads. Action code at body offset 5 (`01` =
+   WRITE; `0D/10/26/0E/1F` = read-by-type). See `SYSEX-MAP.md §6a`.
+2. **Amp Gain parameter address = `3A 00 0B 00`** on preset A01 (Session
+   04). First confirmed AM4 parameter address.
+3. **Value encoding is 32-bit IEEE 754 float** (Session 04). 8 samples
+   captured; zero-mantissa values share `00 66 73 XX 43 XX` skeleton,
+   non-zero-mantissa values break it. Packing scheme TBD — finite-search
+   problem, not blocked.
 4. **Architecture: puppet the device, don't encode binaries.** We
-   configure the AM4's working buffer via live commands (same as AM4-Edit
-   does), then issue the documented store. Device is the encoder.
-   Pending: the live-command format itself.
+   configure the AM4's working buffer via live `0x01` writes (same as
+   AM4-Edit), then issue the documented `0x77/0x78/0x79` store. Device
+   is the encoder. Session 04 unblocked the live-write path.
 
 ## What's known, short version
 
 - Device comms, checksum, envelope, model ID, all documented commands
   `0x08 / 0x0C / 0x0D / 0x0E / 0x13 / 0x14 / 0x64` — **🟢 confirmed**.
 - Preset dump format (`0x77/0x78/0x79`) + slot addressing — **🟢 confirmed**.
-- Parameter-set / channel-set / scene-set via AM4-Edit's `0x01` editor
-  stream — **🔴 shape unknown, Session 04 target**.
+- `0x01` parameter R/W dispatcher shape (header, action codes, length
+  byte) — **🟢 confirmed (Session 04)**.
+- 6-byte float packing scheme inside `0x01` write payload — **🟡 8
+  samples captured; scheme not yet decoded**.
 - Full preset binary layout inside `0x78` chunks — **🔴 scrambled, parked**.
 
 ## MVP scope (committed in `DECISIONS.md`)
@@ -88,11 +91,9 @@ Distribution: signed Windows `.exe`, one-click Claude Desktop config.
 
 ## Roadmap landmarks
 
-- **Next (Session 04):** USB capture + decode `0x01` command format.
-- **After that:** write `scripts/write-test.ts` with one proof-of-concept
-  parameter set + verify by reading back device state.
-- **Then:** build param-set and store helpers in `src/protocol/`; build the
-  preset-IR → command-sequence transpiler.
+- **Next (Session 05):** decode float packing + write `scripts/write-test.ts`.
+- **After that:** build param-set and store helpers in `src/protocol/`; build
+  the preset-IR → command-sequence transpiler.
 - **Then:** scaffold MCP server (`src/server/`) with the first two tools
   (`read_slot`, `apply_preset`).
 - **Then:** natural-language → preset-IR (Claude side).
@@ -112,8 +113,25 @@ Distribution: signed Windows `.exe`, one-click Claude Desktop config.
   by AM4-Edit's port filtering — superseded by USBPcap approach for
   capturing AM4-Edit traffic).
 - `scripts/diff-syx.ts` — byte-level diff of two `.syx` files.
+- `scripts/parse-capture.ts` — parses a `tshark -V -Y sysex` dump of a
+  USBPcap capture and bucketises OUT SysEx by body pattern. Reveals reads
+  vs. writes at a glance.
 - `scripts/scrape-wiki.ts` — Fractal wiki scraper (run `npm run scrape-wiki
   -- P0` to refresh).
+
+## USB capture workflow (for when you need another one)
+
+1. Plug AM4 into the right-side USB port. Confirm `sc query USBPcap`
+   shows `STATE : 4 RUNNING`.
+2. Launch Wireshark **as Administrator**. AM4 is on **USBPcap2**.
+3. Use the surgical-capture procedure: start capture, wait 3s baseline,
+   perform the single action, wait 1s, stop. Save to
+   `samples/captured/<name>.pcapng`.
+4. Dump: `"C:/Program Files/Wireshark/tshark.exe" -r <file>.pcapng -Y sysex
+   -V > samples/captured/decoded/<name>.tshark.txt`
+5. Parse: `npx tsx scripts/parse-capture.ts samples/captured/decoded/<name>.tshark.txt`
+6. 23-byte OUT messages = writes. 18-byte OUT = reads. See Session 04 in
+   `SESSIONS.md` for the worked example.
 
 ## How to use this file
 

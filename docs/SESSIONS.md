@@ -6,6 +6,136 @@ file is the chronological trail that reference is built from.
 
 ---
 
+## 2026-04-14 — Session 04 — USB Capture of AM4-Edit's `0x01` Param-Set Command
+
+**Device / firmware:** AM4 f/w 2.00, same setup. AM4-Edit v1.00.04.
+**Approach:** USBPcap + Wireshark at the USB kernel level (the loopMIDI
+sniffer from Session 02 was blocked by AM4-Edit's virtual-port filter).
+Parser: `scripts/parse-capture.ts` reads a `tshark -V -Y sysex` dump of
+the pcapng and bucketises OUT SysEx by body pattern.
+
+### Setup troubleshooting (one-time, keep this for future USB captures)
+
+1. USBPcap installed standalone → Wireshark's interface list didn't show
+   USBPcap interfaces. Fix: **copy `C:\Program Files\USBPcap\USBPcapCMD.exe`
+   into `C:\Program Files\Wireshark\extcap\`** (needs elevation). Wireshark
+   re-installer with "USBPcap" checkbox does the same thing but is fiddlier
+   when USBPcap is already installed.
+2. **Wireshark must run as Administrator** — extcap won't enumerate USBPcap
+   interfaces without elevation.
+3. A Windows reboot is required once, to load the USBPcap kernel driver
+   after install. `sc query USBPcap` should show `STATE : 4 RUNNING`.
+4. On this ThinkPad, the AM4 enumerates on the same root hub as the
+   fingerprint reader → **USBPcap2**.
+
+### Files captured (in `samples/captured/`)
+
+| File | What | Writes found |
+|------|------|--------------|
+| `capture_1.pcapng` | Exploratory; physical knob moved. AM4-Edit only polled. | 0 |
+| `session-04-gain-3-to-4.pcapng` | Gain field typed 4.00 + Enter in AM4-Edit. | 1 |
+| `session-04-gain-ladder.pcapng` | Ladder 1/2/3/4 typed in sequence. | 4 |
+| `session-04-gain-ladder2.pcapng` | Ladder repeat to verify determinism. | 4 (identical bytes) |
+| `session-04-gain-float-validation.pcapng` | 0.25 / 0.50 / 1.50 / 2.50 to test float hypothesis. | 4 |
+
+Paired `.tshark.txt` dumps live in `samples/captured/decoded/`.
+
+### 🟢 Write-command shape confirmed
+
+AM4-Edit's parameter-set command uses **function byte `0x01`** (not `0x02`
+as the Axe-Fx II template suggested — see retraction below).
+
+```
+F0 00 01 74 15 01 [addr:4] [action:1] 00 00 00 [len:1] [value:6] [cs] F7
+```
+
+| Bytes | Meaning | Read example | Write example |
+|---|---|---|---|
+| 0–4 | Envelope | `F0 00 01 74 15` | `F0 00 01 74 15` |
+| 5 | Function | `01` | `01` |
+| 6–9 | Parameter address (4 bytes) | `3A 00 0B 00` | `3A 00 0B 00` |
+| 10 | **Action code** | `26` / `0D` / `10` / `1F` / `0E` (read-by-type) | **`01` (WRITE)** |
+| 11–13 | Reserved | `00 00 00` | `00 00 00` |
+| 14 | Payload length (raw) | `00` | `04` (4 raw bytes) |
+| 15–20 | Payload (SysEx-packed) | *(none)* | 6 7-bit bytes |
+| 21 | Checksum | ✓ | ✓ |
+| 22 | End | `F7` | `F7` |
+
+- OUT reads are 18 bytes (payload length byte = 0, no value data).
+- OUT writes are 23 bytes (payload length byte = 4, 6 value bytes follow).
+- Every 23-byte OUT in every capture is a write. Every 18-byte OUT is a read.
+- 3,499 reads vs 1 write in the single-value capture → AM4-Edit polls
+  ~200×/s and writes only on Enter-commit. Typing alone doesn't write.
+
+### 🟡 Value encoding — 32-bit IEEE 754 float, packing scheme TBD
+
+The 6-byte `[value]` field carries a 32-bit IEEE 754 float packed into
+6 SysEx-safe 7-bit bytes (4 × 8 = 32 bits of data in 6 × 7 = 42 wire bits,
+leaving 10 overhead bits). Evidence:
+
+| Gain | Float32 | Mantissa | Wire bytes 15–20 |
+|------|---------|----------|------------------|
+| 0.25 | `3E 80 00 00` | 0 | `00 66 73 19 43 60` |
+| 0.50 | `3F 00 00 00` | 0 | `00 66 73 09 43 68` |
+| 1.00 | `3F 80 00 00` | 0 | `00 66 73 19 43 68` |
+| 1.50 | `3F C0 00 00` | ≠0 | `00 4D 26 23 13 70` |
+| 2.00 | `40 00 00 00` | 0 | `00 66 73 09 43 70` |
+| 2.50 | `40 20 00 00` | ≠0 | `00 00 00 10 03 70` |
+| 3.00 | `40 40 00 00` | ≠0 | `00 4D 26 33 13 70` |
+| 4.00 | `40 80 00 00` | 0 | `00 66 73 19 43 70` |
+
+All zero-mantissa values share the `00 66 73 XX 43 XX` skeleton and only
+differ in bytes 18 and 20. Non-zero-mantissa values break this skeleton
+entirely — exactly the prediction the float hypothesis makes, since only
+zero-mantissa floats have three zero bytes in their IEEE layout. The
+exact packing (probably a Fractal-family bit-pack like the Axe-Fx III
+"3-septet-per-byte" scheme — see §10b of `SYSEX-MAP.md`) is not yet
+decoded; 8 samples may be enough to brute-force it.
+
+### 🟢 Amp Gain parameter address (preset A01)
+
+`3A 00 0B 00` — 4-byte parameter address, appears in both reads and the
+matched write. Assumed stable across presets for the Amp block's Gain
+knob, but only verified on A01 at the moment.
+
+### 🟢 Read action codes (partial)
+
+The byte at position 10 selects the kind of read the host wants back:
+
+| Code | Response size | Observed for |
+|------|---------------|--------------|
+| `0D` | 64 B | Common block-data reads (34 B body) |
+| `10` | 64 B | Alternate block-data reads |
+| `1F` | — | Infrequent; one address family |
+| `26` | 34 B | Poll of a short parameter (reads for `3A 00 0B`) |
+| `0E` | 34 B | Used for `4E 01 7X` address family |
+
+Full table will shake out as more parameters get captured.
+
+### Retractions
+
+- **SYSEX-MAP §5 `0x01 GET_BLOCK_PARAMETERS_LIST` (Axe-Fx II) — retracted
+  as the AM4 meaning.** AM4's `0x01` is a generic per-parameter
+  read/write dispatcher with action codes at body-byte 5, not a
+  "list block parameters" command.
+- **SYSEX-MAP §5 `0x02 GET/SET_BLOCK_PARAMETER_VALUE` as "P0 live-tweak
+  MVP" — retracted as the AM4 function byte.** AM4-Edit uses `0x01` for
+  live parameter writes, not `0x02`. `0x02` remains unverified on AM4.
+
+### Next session plan (Session 05)
+
+1. **Decode the 6-byte packing.** Try common Fractal/Roland schemes
+   against the 8 known samples (likely a 5-bytes-of-data + 1-MSB-carrier
+   variant with padding, or the 3-septet-per-byte bit-pack the III uses).
+   Write `scripts/decode-float-pack.ts` to search the scheme space.
+2. **Build `scripts/write-test.ts`** — a one-shot script that sends a
+   single real param-set write for Amp Gain on slot **Z04 only** (per
+   the write-safety rules in `DECISIONS.md`), then reads back to verify.
+3. **Capture one more parameter** (e.g. Amp Bass) at three known values
+   to see whether the encoding is parameter-agnostic float or per-type.
+
+---
+
 ## 2026-04-14 — Session 03 — Preset `.syx` Export Analysis
 
 **Device / firmware:** AM4 f/w 2.00, same setup. AM4-Edit v1.00.04.
