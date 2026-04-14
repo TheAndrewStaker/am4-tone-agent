@@ -1,0 +1,32 @@
+node_modules/
+dist/
+*.log
+.env
+.env.local
+
+# IDE / per-developer config
+.idea/
+.claude/settings.local.json
+
+# Scraped wiki pages — regenerate via `npm run scrape-wiki -- P0`.
+# Not committed because they're large, drift when upstream changes, and
+# the scraper is the source of truth.
+docs/wiki/
+
+# Third-party copyrighted Fractal Audio documentation.
+# Download from https://www.fractalaudio.com/am4-downloads/ to your local
+# clone. See docs/manuals/README.md for the expected file list.
+docs/manuals/*.pdf
+docs/manuals/*.txt
+
+# Fractal-distributed factory preset banks and any preset .syx files
+# derived from Fractal's firmware (which includes all exports via
+# AM4-Edit). The raw preset binary is Fractal's; we don't redistribute.
+# See samples/factory/README.md for what belongs here.
+samples/factory/*.syx
+samples/factory/*.pdf
+samples/factory/*.txt
+
+# Captured traffic from sniffing sessions — may contain debug noise and
+# firmware-specific data. Local-only.
+samples/captured/
