@@ -2,11 +2,10 @@
 
 > Read this file at the start of every session. It's kept up-to-date with
 > current phase, the single next action, and recent findings.
-> Last updated: **2026-04-15** (Session 13 — post-divider region cracked:
-> 17 sub-blocks, 695 additional records, including Reverb Type (79),
-> Delay Type (29), and Drive Type (78). All main effect blocks now
-> located. Post-divider uses a compressed 24-byte record header —
-> different layout from pre-divider.)
+> Last updated: **2026-04-15** (Session 14 — Session 13's scratch parser
+> ported into `scripts/parse-cache.ts` as `parseSection3`. 695 records
+> across 17 sub-blocks now land in `samples/captured/decoded/cache-section3.json`
+> alongside `cabNames[256]` and `cabIds[256]`. Preflight green.)
 
 ---
 
@@ -24,81 +23,58 @@ float32. One open question remains before the IR can cover full presets:
 
 ## The single next action
 
-### Land Session 13 findings in `parse-cache.ts` + auto-generate `KNOWN_PARAMS`
+### Map cache blocks → wire `pidLow`, then auto-generate `KNOWN_PARAMS`
 
-Session 13 decoded the post-divider region in a scratch script
-(`/tmp/parse-post3.mjs` — not committed). **17 sub-blocks, 695
-additional records, including all three missing main effect blocks.**
-Next session: port the scratch parser into `scripts/parse-cache.ts` as
-a `parseSection3` function, commit the enriched `cache-section2.json`
-(or split to a new `cache-section3.json`), and then auto-generate
-`KNOWN_PARAMS` from the JSON.
+With Section 3 now parsed and committed to `cache-section3.json`, the
+remaining blocker before `KNOWN_PARAMS` can be auto-generated is the
+**block → wire-pidLow mapping**. Amp wire `pidLow=0x3A` maps to Section
+2 block 5 (tag=0x98) by characteristic count (151 records, 38 enums).
+But Reverb/Delay/Drive are in Section 3 (sub-blocks 0/1/9) — their
+wire pidLows (`0x42`/`0x46`/`0x76`) need either a capture cross-reference
+(set a Reverb param in AM4-Edit → capture → compare pidHigh order) or
+a heuristic based on characteristic enum membership (e.g., "sub-block
+whose id=10 enum contains `TS808` at index 8 ↔ Drive wire pidLow=0x76").
 
-**Post-divider region layout (Section 3 — 0x136f0 onward):**
+Drive Type enum currently only has `8 → TS808` catalogued in
+`params.ts`; sub-block 9's `id=10` enum (78 entries, `Rat Distortion…
+Swedish Metal`) should already give us the full table once the mapping
+is confirmed.
 
-1. Divider marker `f0 ff 00 00` at 0x136f0 + 18 zero pad (24 bytes
-   total)
-2. User-cab slot *names*: u32 count=256 + 256 × LP-ASCII (all
-   `<EMPTY>` on this install) — 0x13706..0x14209
-3. 2-byte pad + u32 count=256 + 256 × u32 cab IDs (all 0xff
-   sentinel) — 0x1420c..0x1460f
-4. Section 3 block header (32 bytes) at 0x14610 — **different layout
-   from pre-divider 40-byte header**
-5. Section 3 records from 0x14636
+**Layouts (parser is source of truth — see `scripts/parse-cache.ts`):**
 
-**Section 3 record layout (compressed, 24-byte header):**
+- Section 3 begins at divider `f0 ff 00 00` (0x136f0 on this install),
+  followed by `cabNames[256]` (all `<EMPTY>`) and `cabIds[256]` (all
+  `0xff`), then a 32-byte block header at ~0x14610, then records.
+- Section 3 records use a compressed 24-byte header (tc=u16 at +4,
+  floats a/b/c/d at +8..+23). Float records: 32 bytes total (trailer
+  u32=0 + extra u32). Enum records: u32 count + strings + u32 trailer.
+- `cache-section3.json` contains `{ cabNames, cabIds, records }` where
+  each record has `{ offset, block, id, typecode, kind, a, b, c, d,
+  values?, extra? }`.
 
-```
-+0   u16   flag           (0)
-+2   u16   id             (1-based within block)
-+4   u16   tc             (typecode; 0x10 = enum among others)
-+6   u16   pad            (0)
-+8   f32   a              min
-+12  f32   b              max
-+16  f32   c              display-scale
-+20  f32   d              step
-+24  if enum:  u32 count + count×(u32 len + ASCII) + u32 trailer
-     if float: u32 trailer (0) + u32 extra  → record = 32 bytes
-```
+**17 sub-blocks (from `cache-section3.json`, summary printed by
+`parse-cache.ts`):** sub-block 0 = Reverb (72 recs, id=10 enum × 79),
+sub-block 1 = Delay (89 recs, id=10 enum × 29), sub-block 9 = Drive
+(49 recs, id=10 enum × 78). Remaining 14 sub-blocks are Chorus/Flanger
+/Pitch/EQ/Compressor/Filter candidates — role assignment still open.
 
-The "extra" u32 at +28 of float records is structurally padding;
-semantics unclear (sometimes matches next record's id-prefix).
-Enum detection is still structural: try to parse strings, fall back
-to float.
+**Next steps (Session 15+):**
 
-**17 sub-blocks found post-divider (by distinguishing enum):**
-
-| Block | Start     | Recs | Big enum (id=10 or nearby)                                      | Likely role |
-|-------|-----------|------|-----------------------------------------------------------------|-------------|
-| 0     | 0x14636   | 72   | id=10 × 79 `Room, Small … Spring, Vibrato-King Custom`         | **Reverb** |
-| 1     | 0x159eb   | 89   | id=10 × 29 `Digital Mono … Surround Delay`                      | **Delay** |
-| 2     | 0x17f57   | 31   | id=10 × 20 `Digital Mono … Vibrato 2`                           | Multi-Delay? |
-| 3     | 0x18c6a   | 35   | id=10 × 32 `Digital Mono … Manual Cancel Flanger`               | Chorus/Flanger? |
-| 4–7   | 0x198f3…  | —    | id=14/15 × 79 `NONE … 63/64`                                     | Pitch? |
-| 8     | 0x1b74d   | 40   | id=27 × 32 `OFF … 32`                                            | ? |
-| **9** | **0x1c28f** | **49** | **id=10 × 78 `Rat Distortion … Swedish Metal`**            | **Drive** |
-| 10–16 | 0x1d079…  | —    | various                                                          | Compressor/EQ/Filter/etc |
-
-Stopped at 0x1f926 (~49KB left in cache unparsed).
-
-**Next steps (Session 14):**
-
-1. Port `/tmp/parse-post3.mjs` logic into `scripts/parse-cache.ts` as
-   `parseSection3`. Re-run `npm run preflight`.
-2. Cross-reference the 4 "main" blocks (Amp pre-divider, Reverb/Delay/
-   Drive post-divider) against wire `pidLow` values (`0x3A`, `0x42`,
-   `0x46`, `0x76`). The wire-pidLow ordering is NOT the cache block
-   order — this mapping is still open and needs either capture
-   cross-reference or a heuristic based on characteristic params
-   (e.g., find Drive block by its "type=TS808 default" param).
-3. Auto-generate `KNOWN_PARAMS` entries for each confirmed
+1. Cross-reference the 4 main blocks (Amp pre-divider block 5, Reverb/
+   Delay/Drive post-divider sub-blocks 0/1/9) against wire `pidLow`
+   values (`0x3A`, `0x42`, `0x46`, `0x76`). Preferred heuristic:
+   Drive's `id=10` enum at index 8 is `TS808` — matches `params.ts`
+   Drive Type, so sub-block 9 ↔ `pidLow=0x76`. Confirm Reverb/Delay
+   by capturing AM4-Edit setting Reverb Type and Delay Type and
+   matching the resulting `pidHigh` to the cache record IDs.
+2. Auto-generate `KNOWN_PARAMS` entries for each confirmed
    block/param. Start with Reverb and Delay since those are the most
    obvious to validate by ear.
-4. After `KNOWN_PARAMS` is generated, start on **P3-007 Model lineage
+3. After `KNOWN_PARAMS` is generated, start on **P3-007 Model lineage
    dictionary** (see `04-BACKLOG.md`) — the 248-amp × 78-drive ×
    79-reverb × 29-delay model names are ready to feed into the
    wiki-scrape pipeline for the real-world-gear-inspired-by mapping.
-5. Decode the remaining ~49KB tail past 0x1f926 if it turns out to
+4. Decode the remaining ~49KB tail past 0x1f926 if it turns out to
    contain additional blocks (scene templates? preset metadata?).
 
 ## Decoded parameters and unit conventions
@@ -114,8 +90,13 @@ fully populated (0..3 ↔ A..D).
 ## Recent breakthroughs
 
 Older breakthroughs (sessions 04–08, 10–12) are archived in `SESSIONS.md`.
-Only Session 13 (current) is kept here for fast orientation.
+Sessions 13–14 (current) are kept here for fast orientation.
 
+0. **Section 3 parser landed** (Session 14). `scripts/parse-cache.ts`
+   now emits `cache-section3.json` with 256 user-cab names, 256 user-
+   cab IDs, and 695 parameter records across 17 sub-blocks. All wire-
+   visible enum strings (Reverb/Delay/Drive types, 78–79 entries each)
+   are now in committed JSON. `npm run preflight` green.
 1. **Post-divider region cracked — 17 blocks, 695 records**
    (Session 13). The `f0 ff 00 00` marker at 0x136f0 introduces a
    256-entry user-cab slot table (names + IDs, 0xf20 bytes), then
@@ -221,7 +202,8 @@ authoritative in `CLAUDE.md` and `DECISIONS.md` — not duplicated here.
 - `samples/captured/decoded/cache-strings.txt` — 7,610 length-prefixed
   strings extracted from `effectDefinitions_15_2p0.cache`.
 - `samples/captured/decoded/cache-records.json` — parsed Section 1.
-- `samples/captured/decoded/cache-section2.json` — parsed Section 2 block 0 (98 records).
+- `samples/captured/decoded/cache-section2.json` — parsed Section 2 (465 records across 7 blocks: routing + Amp tag=0x98 + Utility blocks).
+- `samples/captured/decoded/cache-section3.json` — parsed Section 3 (695 records across 17 sub-blocks + 256 user-cab names/ids).
 - `scripts/scrape-wiki.ts` — Fractal wiki scraper.
 
 ## How to use this file

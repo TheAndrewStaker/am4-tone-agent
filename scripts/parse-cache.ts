@@ -128,6 +128,28 @@ interface Section2BlockHeader {
 }
 type Section2Record = Section2Float | Section2Enum | Section2BlockHeader;
 
+// Section 3 (post-divider) uses a compressed 24-byte record header.
+// Layout differs from Section 2: tc is u16 at +4 (not u32 at +4), and a
+// 2-byte pad sits at +6. Floats are packed immediately at +8..+23. Float
+// records are 32 bytes total (24 header + u32 trailer=0 + u32 extra).
+interface Section3Base {
+  offset: number;
+  block: number;  // sub-block index, 0-based
+  id: number;     // 1-based within sub-block
+  typecode: number;
+}
+interface Section3Float extends Section3Base {
+  kind: 'float';
+  a: number; b: number; c: number; d: number;
+  extra: number; // u32 at +28 — semantics unclear (sometimes echoes next id)
+}
+interface Section3Enum extends Section3Base {
+  kind: 'enum';
+  a: number; b: number; c: number; d: number;
+  values: string[];
+}
+type Section3Record = Section3Float | Section3Enum;
+
 const HEADER_SIZE = 22; // id + tc + pad + min + max + def + step
 const FLOAT_TRAILER = 10;
 const ENUM_TRAILER = 6;
@@ -344,6 +366,156 @@ function parseSection2(buf: Buffer, start: number): { records: Section2Record[];
   return { records, stoppedAt: off, reason };
 }
 
+/**
+ * Section 3 begins with a `f0 ff 00 00` divider at (on this install) 0x136f0,
+ * followed by padding, then two fixed 256-entry tables:
+ *
+ *   u32 count=256 + 256 × (u32 len + ASCII)    — user-cab slot names
+ *   (2-byte pad)
+ *   u32 count=256 + 256 × u32                   — user-cab IDs
+ *
+ * Then a 32-byte Section 3 block header, then records start at the first
+ * pattern matching the compressed 24-byte header layout (flag=0, pad6=0,
+ * id in [1..2048], tc in [0..0xff], trailing u32=0 for float records).
+ *
+ * Block boundaries within Section 3 are detected by id decrease. The
+ * 32-byte inter-block headers are not emitted as separate records — we
+ * scan past them with seekRecord (up to 64 bytes).
+ */
+const SECTION3_DIVIDER = Buffer.from([0xf0, 0xff, 0x00, 0x00]);
+const CAB_SLOT_COUNT = 256;
+
+function findSection3Divider(buf: Buffer, fromOff: number): number {
+  const at = buf.indexOf(SECTION3_DIVIDER, fromOff);
+  if (at < 0) throw new Error(`Section 3 divider f0 ff 00 00 not found after 0x${fromOff.toString(16)}`);
+  return at;
+}
+
+function tryReadSection3Record(buf: Buffer, off: number): Section3Record | null {
+  if (off + 28 > buf.length) return null;
+  const flag = buf.readUInt16LE(off);
+  const id = buf.readUInt16LE(off + 2);
+  const tc = buf.readUInt16LE(off + 4);
+  const pad6 = buf.readUInt16LE(off + 6);
+  if (flag !== 0 || pad6 !== 0 || id === 0 || id > 2048 || tc > 0xff) return null;
+  const a = buf.readFloatLE(off + 8);
+  const b = buf.readFloatLE(off + 12);
+  const c = buf.readFloatLE(off + 16);
+  const d = buf.readFloatLE(off + 20);
+  const en = tryParseEnumBody(buf, off + 24);
+  if (en) {
+    return {
+      offset: off, block: -1, id, typecode: tc,
+      kind: 'enum', a, b, c, d, values: en.values,
+    };
+  }
+  if (off + 32 > buf.length) return null;
+  const trailer = buf.readUInt32LE(off + 24);
+  if (trailer !== 0) return null;
+  const extra = buf.readUInt32LE(off + 28);
+  return {
+    offset: off, block: -1, id, typecode: tc,
+    kind: 'float', a, b, c, d, extra,
+  };
+}
+
+function seekSection3Record(buf: Buffer, startOff: number, maxSkip: number): { rec: Section3Record; at: number } | null {
+  for (let p = startOff; p <= startOff + maxSkip; p += 2) {
+    const rec = tryReadSection3Record(buf, p);
+    if (rec) return { rec, at: p };
+  }
+  return null;
+}
+
+interface Section3Result {
+  cabNames: string[];
+  cabIds: number[];
+  records: Section3Record[];
+  stoppedAt: number;
+  reason: string;
+}
+
+function parseSection3(buf: Buffer, dividerOff: number): Section3Result {
+  if (!buf.slice(dividerOff, dividerOff + 4).equals(SECTION3_DIVIDER)) {
+    throw new Error(`expected f0 ff 00 00 at 0x${dividerOff.toString(16)}`);
+  }
+
+  // Scan past the divider + zero pad to the u32 count=256 followed by
+  // a plausible LP-ASCII string (or first <EMPTY> marker). Robust to
+  // small layout shifts between installs.
+  let off = dividerOff + 4;
+  while (off + 8 <= buf.length) {
+    const count = buf.readUInt32LE(off);
+    if (count === CAB_SLOT_COUNT) {
+      const firstLen = buf.readUInt32LE(off + 4);
+      if (firstLen > 0 && firstLen <= 64) break;
+    }
+    off += 2;
+  }
+  if (off + 8 > buf.length) throw new Error('Section 3: user-cab name count=256 not found');
+
+  const cabNames: string[] = [];
+  let p = off + 4;
+  for (let i = 0; i < CAB_SLOT_COUNT; i++) {
+    const r = tryReadLPString(buf, p);
+    if (!r) throw new Error(`Section 3: user-cab name ${i} bad at 0x${p.toString(16)}`);
+    cabNames.push(r.s);
+    p = r.next;
+  }
+
+  // Pad + u32 count=256 + 256 × u32 cab IDs. Scan for count=256.
+  while (p + 8 <= buf.length) {
+    const c = buf.readUInt32LE(p);
+    if (c === CAB_SLOT_COUNT) break;
+    p += 2;
+  }
+  if (p + 8 > buf.length) throw new Error('Section 3: user-cab id count=256 not found');
+  p += 4;
+  const cabIds: number[] = [];
+  for (let i = 0; i < CAB_SLOT_COUNT; i++) {
+    cabIds.push(buf.readUInt32LE(p));
+    p += 4;
+  }
+
+  // Scan forward through the 32-byte Section 3 block header for the
+  // first parseable record.
+  const firstHit = seekSection3Record(buf, p, 128);
+  if (!firstHit) throw new Error(`Section 3: no record found after cab IDs @0x${p.toString(16)}`);
+
+  const records: Section3Record[] = [];
+  let cursor = firstHit.at;
+  let prevId = 0;
+  let block = 0;
+  let reason = 'reached end of buffer';
+
+  while (true) {
+    let rec = tryReadSection3Record(buf, cursor);
+    if (!rec) {
+      const hit = seekSection3Record(buf, cursor, 64);
+      if (!hit) {
+        reason = `stopped at 0x${cursor.toString(16)}: no valid record within 64 bytes`;
+        break;
+      }
+      rec = hit.rec;
+      cursor = hit.at;
+    }
+    if (rec.id <= prevId && records.length > 0) block++;
+    prevId = rec.id;
+    rec.block = block;
+    records.push(rec);
+    cursor = rec.kind === 'enum'
+      ? (() => {
+          // enum: advance past strings + u32 trailer. Recompute next offset
+          // since tryParseEnumBody is called again cheaply.
+          const en = tryParseEnumBody(buf, rec.offset + 24)!;
+          return en.next + 4;
+        })()
+      : rec.offset + 32;
+  }
+
+  return { cabNames, cabIds, records, stoppedAt: cursor, reason };
+}
+
 const appdata = process.env.APPDATA;
 if (!appdata) throw new Error('APPDATA not set');
 const cachePath = join(appdata, 'Fractal Audio', 'AM4-Edit', 'effectDefinitions_15_2p0.cache');
@@ -420,3 +592,44 @@ for (const [b, recs] of blocks) {
 const s2Path = join(outDir, 'cache-section2.json');
 writeFileSync(s2Path, JSON.stringify(s2, null, 2));
 console.log(`\nwrote ${s2Path}`);
+
+// --- Section 3 ---
+
+console.log(`\n--- Section 3 ---`);
+const dividerOff = findSection3Divider(buf, s2StoppedAt);
+console.log(`divider f0 ff 00 00 at 0x${dividerOff.toString(16)}`);
+
+const s3 = parseSection3(buf, dividerOff);
+console.log(`parsed ${s3.records.length} records; ${s3.reason}`);
+console.log(`${buf.length - s3.stoppedAt} bytes remaining unparsed after Section 3`);
+
+const nonEmptyCabNames = s3.cabNames.filter(n => n !== '<EMPTY>').length;
+const CAB_ID_SENTINEL = 0xff;
+const nonSentinelCabIds = s3.cabIds.filter(id => id !== CAB_ID_SENTINEL).length;
+console.log(`user-cab slots: ${s3.cabNames.length} names (${nonEmptyCabNames} non-empty), ${s3.cabIds.length} ids (${nonSentinelCabIds} non-sentinel, sentinel=0x${CAB_ID_SENTINEL.toString(16)})`);
+
+// Sub-block summary
+const s3Blocks = new Map<number, Section3Record[]>();
+for (const r of s3.records) {
+  const arr = s3Blocks.get(r.block) ?? [];
+  arr.push(r);
+  s3Blocks.set(r.block, arr);
+}
+console.log(`sub-block count: ${s3Blocks.size}`);
+for (const [b, recs] of s3Blocks) {
+  const enums = recs.filter((r): r is Section3Enum => r.kind === 'enum');
+  const maxId = recs.length ? Math.max(...recs.map(r => r.id)) : 0;
+  const bigEnum = enums.find(r => r.values.length >= 20);
+  const bigNote = bigEnum
+    ? `  BIG enum: id=${bigEnum.id} count=${bigEnum.values.length} [${bigEnum.values[0]}…${bigEnum.values[bigEnum.values.length - 1]}]`
+    : '';
+  console.log(`  sub-block ${b.toString().padStart(2)}: start=0x${recs[0].offset.toString(16).padStart(5, '0')}  ${recs.length.toString().padStart(3)} recs  maxId=${maxId}  enums=${enums.length}${bigNote}`);
+}
+
+const s3Path = join(outDir, 'cache-section3.json');
+writeFileSync(s3Path, JSON.stringify({
+  cabNames: s3.cabNames,
+  cabIds: s3.cabIds,
+  records: s3.records,
+}, null, 2));
+console.log(`\nwrote ${s3Path}`);
