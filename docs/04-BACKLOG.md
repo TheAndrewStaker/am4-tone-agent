@@ -302,3 +302,35 @@ without installing Node, a C++ toolchain, or editing JSON by hand. See
 - Visual slot map
 - Drag to reorder setlist
 - Compare presets side by side
+
+### BK-007 Remote control from Claude mobile app (laptop-as-bridge)
+- Goal: user plays guitar away from laptop, talks to Claude on their
+  phone, and the command flows phone → Claude cloud → laptop → AM4 USB.
+- The laptop stays the MIDI bridge (phone has no USB/driver path to AM4).
+- Requires two capabilities we don't have yet:
+  1. **Remote-reachable MCP transport.** Extend the MCP server (Phase 2)
+     with an HTTPS / streaming-HTTP mode in addition to stdio. Add
+     per-client auth tokens so only the user's Claude instance can
+     reach it. A lot of the MCP ecosystem is moving to this transport
+     already — check `@modelcontextprotocol/sdk` for current support
+     before designing a custom layer.
+  2. **NAT traversal for non-technical users.** Home laptops aren't
+     reachable from the public internet. Leading candidates:
+     - **Cloudflare Tunnel** (free, no router config, stable DNS name)
+     - **Tailscale Funnel** (simpler auth story, runs without extra
+       infra on the user's account)
+     - **ngrok** (easiest demo, paid plan needed for a stable URL)
+     The packager (Phase 5) would bundle whichever we pick and
+     auto-configure a tunnel on first run of `--remote` mode.
+- Claude mobile integration path is the open question: the phone app's
+  ability to reach user-provided MCP servers is evolving. Revisit once
+  the desktop MVP is live — if mobile MCP lands natively, this
+  simplifies to "paste the tunnel URL into your account"; if not, a
+  thin Anthropic-connector shim may be needed.
+- Security constraints: remote mode MUST honour the write-safety rules
+  (`CLAUDE.md` Do Not list; scratch-slot-only writes) and should scope
+  to read-only tools by default, with writes gated on an explicit
+  per-session confirmation the laptop owner approves locally.
+- Out of scope for MVP — parked here so the architecture can leave
+  room for it (keep the MCP server transport pluggable, don't
+  hardcode stdio-only assumptions).

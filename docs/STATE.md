@@ -2,10 +2,9 @@
 
 > Read this file at the start of every session. It's kept up-to-date with
 > current phase, the single next action, and recent findings.
-> Last updated: **2026-04-15** (Session 10 — cache binary schema decoded
-> for Section 1 [global settings, 87 records]; Section 2 [per-block
-> param definitions] identified but not yet parsed — different layout
-> after the `ff ff` marker at 0xaa2d).
+> Last updated: **2026-04-15** (Session 11 — Section 2 record layout
+> decoded; 98 records (15 enums) parsed from block 0 of Section 2
+> before a layout shift at 0xcc80 halts the walker).
 
 ---
 
@@ -23,45 +22,58 @@ float32. One open question remains before the IR can cover full presets:
 
 ## The single next action
 
-### Decode Section 2 of `effectDefinitions_15_2p0.cache`
+### Cross the Section 2 block boundary at `0xcc80`
 
-Session 10 shipped `scripts/parse-cache.ts`, a structural decoder for
-the cache's record format (22-byte header `u16 id, u16 tc, u16 pad,
-f32 min, f32 max, f32 default, f32 step`, then either an enum payload
-or 10-byte trailer). It cleanly parses **Section 1** of the cache —
-87 records covering global/system settings, ids `0x0d..0xa2`. Output:
-`samples/captured/decoded/cache-records.json`.
+Session 11 extended `parse-cache.ts` to walk Section 2. Output:
+`samples/captured/decoded/cache-section2.json` — 98 records from the
+first "block" (15 enums including LFO waveform, beat division, stereo
+routing; 9 "assign template" float knobs at ids 1..9 with identical
+`min=1, max=10, step=0.001`; a bundle of `OFF/ON` bypass switches).
 
-Section 1 is **not** where block-parameter metadata lives. Cache ids in
-Section 1 don't match any `(pidLow, pidHigh)` from Session 08.
+**Block 0 is almost certainly the Modifier/Controller definition**, not
+the Amp block. Evidence: the SINE..ASTABLE LFO waveform enum at id=10,
+no matches for Session 08's known amp params (`amp.gain` pidHigh=11,
+`amp.level`=0), and the presence of 9 identical "assign knob" slots
+which matches Axe-FX/FM-family modifier semantics.
 
-Section 2 starts at the `ff ff 00 00` marker at offset `0xaa2d`:
+Decoded Section 2 record layout (verified on 3 enums and many floats):
 
-1. `0xaa2d..0xb74d` — 104-entry preset-name list (A01…Z04 and
-   `<EMPTY>`). Useful incidentally; not blocking.
-2. `0xb74d..end` — **the per-block parameter definitions**. Each
-   record is 32 bytes with the same `min/max/default/step` shape but
-   non-4-byte aligned and without the id/tc layout we used for
-   Section 1. First clear record boundary at `0xb775` (id=1, knob:
-   min=0.0, max=1.0, def=10.0, step=0.001). Previous block header /
-   preamble between `0xaa2d` and `0xb775` is the puzzle.
+```
++0   u16   flag         (always 0)
++2   u16   id           (1-based, resets per block)
++4   u32   typecode     (0 = float; 0x10 = enum; others seen: 0x20, 0x35, 0x42, 0x44)
++8   f32   a            (float record: min; enum record: min=0)
++12  f32   b            (float record: max; enum record: max = count-1)
++16  f32   c            (float record: step; enum record: default index, often 1)
++20  f32   d            (float record: often 0 or a default; enum record: 0)
++24  if tc == 0x10 (enum):  u32 count + count×LP-ASCII + 4-byte trailer
+     else (float):          4-byte trailer (record = 32 bytes)
+```
 
-**Next steps:**
-1. Hex-dump `0xaa2d..0xb800` with `scripts/dump-cache-head.ts <off>`
-   and hand-align block headers (look for a `pidLow` byte matching
-   `0x3a` (Amp), `0x76` (Drive), `0x42` (Reverb), `0x46` (Delay)).
-2. Once block-header shape is known, extend `parse-cache.ts` to emit
-   `{ pidLow, pidHigh, min, max, default, step, unit, enumValues? }`.
-3. Cross-check against Session 08's eight known params. Expected
-   matches: `amp.gain` (0x3a, 0x0b) knob 0..10; `amp.level` (0x3a, 0x00)
-   dB -80..20; `drive.type` (0x76, 0x0a) enum with ~128 entries
-   including TS808; etc.
-4. Auto-generate `KNOWN_PARAMS` from the parsed JSON (via a
-   codegen step, not by hand).
+The walker halts at `0xcc80` on the first block-1 record:
+- `flag=0 id=3 tc=0x00230000` — **high 16 bits of tc are 0x23 (35)**.
+- Floats in this record are shifted 12 bytes later (at +20/+24/+28
+  instead of +8/+12/+16) — the same `(1.0, 10.0, 0.001)` assign-knob
+  triple appears, just at a different offset.
+- Interpretation: either the record is 40+ bytes (extra 8-byte header),
+  or the high-word of `tc` is a per-block-start tag (block type ID?)
+  that the layout is conditional on.
+
+**Next steps (Session 12):**
+
+1. Hand-decode 3–4 records past `0xcc80` to determine whether block 1
+   uses a 40-byte record or a 32-byte record with a different float
+   offset, and whether the `tc` high-word encodes block type.
+2. Extend `parseSection2` to handle the shifted layout once decoded.
+3. Walk the full section and count blocks; match Session 08's known
+   params (`amp.gain` pidHigh=0x0b → expected as knob 0..10; 
+   `amp.channel` pidHigh=0x07D2 → expected as 4-entry A/B/C/D enum)
+   to identify which block index = Amp / Drive / Reverb / Delay.
+4. Only then auto-generate `KNOWN_PARAMS` from the parsed JSON.
 
 ### Alternative: skip cache-parsing, continue with capture-driven registry
 
-If Section 2's layout resists decoding, fall back to adding
+If the block-1 layout resists decoding, fall back to adding
 captured-bytes `verify-msg` cases one param at a time. We already have
 the method for every new param; it's just slow. The cache is a bulk
 shortcut, not a blocker.
@@ -78,14 +90,22 @@ fully populated (0..3 ↔ A..D).
 
 ## Recent breakthroughs
 
-Older breakthroughs (sessions 04–08) are archived in `SESSIONS.md`. Only
-Session 10 (current) is kept here for fast orientation.
+Older breakthroughs (sessions 04–08, 10) are archived in `SESSIONS.md`.
+Only Session 11 (current) is kept here for fast orientation.
 
-1. **Cache binary schema decoded — Section 1** (Session 10). 87 global
-   setting records parsed cleanly with a 22-byte header + enum/float
-   payload. Enum detection is structural (try parsing strings at +22),
-   not typecode-based — both `tc=0x1d` and `tc=0x2d` carry strings.
-   Section 2 (per-block params) uses a different layout — TBD.
+1. **Section 2 record layout decoded** (Session 11). Unified 24-byte
+   header (flag, id, typecode u32, + 4 floats a/b/c/d) followed by
+   either an enum body (tc=0x10) or 8-byte float-record tail.
+   Verified on SINE-waveform, amp-type (248 entries), and drive-type
+   (78 entries including TS808/Klon) enums. 98 records cleanly parsed
+   from Section 2's block 0 — identified as the Modifier/Controller
+   definition, not a per-effect block.
+2. **Anomaly at 0xcc80** (Session 11). First record of block 1 has
+   `tc=0x00230000` (high bits set) and the canonical assign-knob float
+   triple `(1.0, 10.0, 0.001)` at +20/+24/+28 instead of the expected
+   +8/+12/+16. Suggests either extra per-block prefix bytes or a
+   tc-dependent record layout. Parser halts here pending Session 12
+   work.
 
 Session 08 highlights (still load-bearing):
 
@@ -128,7 +148,7 @@ authoritative in `CLAUDE.md` and `DECISIONS.md` — not duplicated here.
 
 ## Roadmap landmarks
 
-- **Now:** decode cache Section 2 (per-block params) — see single next action above.
+- **Now:** finish decoding cache Section 2 across all blocks — Session 11 cracked block 0, Session 12 needs the block-1 layout shift.
 - **Then:** expand `WorkingBufferIR` → full `PresetIR` (block placement,
   4 scenes, per-block channel assignment) — the transpiler will need to
   emit a channel-select write (now understood) before that block's
@@ -168,6 +188,7 @@ authoritative in `CLAUDE.md` and `DECISIONS.md` — not duplicated here.
 - `samples/captured/decoded/cache-strings.txt` — 7,610 length-prefixed
   strings extracted from `effectDefinitions_15_2p0.cache`.
 - `samples/captured/decoded/cache-records.json` — parsed Section 1.
+- `samples/captured/decoded/cache-section2.json` — parsed Section 2 block 0 (98 records).
 - `scripts/scrape-wiki.ts` — Fractal wiki scraper.
 
 ## How to use this file

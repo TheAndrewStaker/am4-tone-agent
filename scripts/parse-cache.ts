@@ -30,9 +30,38 @@
  *
  * Sections: the cache is partitioned by a 24-byte `ff ff 00 00 …` marker
  * (first one observed at 0xaa2d). Section 1 is global/system params
- * (86 records, ids 0x0d..0xa2). Section 2 starts with a 104-entry
- * preset-name list, then per-block parameter definitions in a
- * different packed layout (not yet fully decoded — see STATE.md).
+ * (86 records, ids 0x0d..0xa2). Section 2 has its own layout:
+ *
+ *   [0xaa2d] ff ff 00 00 … 68 00 00 00         section marker + count=104
+ *   [0xaa47] 104 × preset-slot name            (each: u32 len + len ASCII)
+ *   [end]    run of per-block param records    (24-byte header, see below)
+ *
+ * Section 2 record layout (verified against SINE-waveform enum @0xb893,
+ * amp-type enum @0xe7c0, drive-type enum @0x1c3cc):
+ *
+ *   +0   u16  flag         (always 0 observed)
+ *   +2   u16  id           (1-based, per-block)
+ *   +4   u32  typecode     (0 = float knob, 16 = enum string list)
+ *   +8   u32  pad          (always 0 observed)
+ *   +12  f32  a
+ *   +16  f32  b
+ *   +20  f32  c
+ *   +24  if tc == 0 (float):  f32 d  + 4-byte trailer  (record = 32 bytes)
+ *        if tc == 16 (enum):  u32 count
+ *                             count × (u32 len + len ASCII)
+ *                             4-byte trailer
+ *
+ * For enum records, (a,b,c) = (max, default, min) and (max == count-1).
+ * Verified: SINE enum (count=10, max=9), amp-type (count=248, max=247),
+ * drive-type (count=78, max=77). All have min=0, default=1.
+ *
+ * For float records, the four floats are captured as-is and labelled
+ * (a,b,c,d) pending semantic interpretation — the first block in
+ * section 2 has ids 1..9 that are all (1.0, 10.0, 0.001, 0.0), likely
+ * a 9-slot modifier / assign template rather than block-specific params.
+ *
+ * Block boundaries: ids are 1-based and reset per block. A decrease in
+ * id between consecutive records marks a new block.
  *
  * File header: 16 bytes (two u64 LE = 2, 4), then a 38-byte preamble we
  * currently skip — first parseable record begins at offset 0x36.
@@ -66,6 +95,26 @@ interface FloatRangeRecord extends BaseRecord {
 }
 
 type Record = EnumRecord | FloatRangeRecord;
+
+// Section 2 record types — layout differs from Section 1.
+interface Section2Base {
+  offset: number;
+  block: number; // block index, 0-based, assigned by the parser on id-reset
+  id: number;    // 1-based within block
+  typecode: number;
+}
+interface Section2Float extends Section2Base {
+  kind: 'float';
+  a: number; b: number; c: number; d: number;
+}
+interface Section2Enum extends Section2Base {
+  kind: 'enum';
+  max: number;
+  default: number;
+  min: number;
+  values: string[];
+}
+type Section2Record = Section2Float | Section2Enum;
 
 const HEADER_SIZE = 22; // id + tc + pad + min + max + def + step
 const FLOAT_TRAILER = 10;
@@ -162,6 +211,110 @@ function parse(buf: Buffer): { records: Record[]; stoppedAt: number; reason?: st
   return { records, stoppedAt: off, reason };
 }
 
+/**
+ * Skip past the Section 2 preamble: the `ff ff 00 00` marker, padding,
+ * u32 count (=104), and the 104 variable-length preset-slot names.
+ * Returns the offset of the first parameter record.
+ */
+function skipSection2Preamble(buf: Buffer, markerOff: number): number {
+  // Scan forward from the marker to find the u32 count = 104 (0x68)
+  // followed by 104 LP-strings. The preamble has ~22 bytes of zeros
+  // between the `ff ff` marker and the count.
+  let off = markerOff + 2; // skip `ff ff`
+  // Find the count byte run. Section 2 at 0xaa2d: count at 0xaa43.
+  // Robust: skip forward until a plausible u32 count in [50, 256]
+  // appears AND the next 4 bytes look like an LP-string length.
+  while (off + 8 <= buf.length) {
+    const count = buf.readUInt32LE(off);
+    if (count === 104) {
+      const firstLen = buf.readUInt32LE(off + 4);
+      if (firstLen > 0 && firstLen <= 64) break;
+    }
+    off += 2;
+  }
+  if (off + 8 > buf.length) throw new Error('Section 2 preamble count not found');
+
+  const count = buf.readUInt32LE(off);
+  let p = off + 4;
+  for (let i = 0; i < count; i++) {
+    const len = buf.readUInt32LE(p);
+    if (len === 0 || len > 64) throw new Error(`preset-name ${i} bad len=${len} at 0x${p.toString(16)}`);
+    p += 4 + len;
+  }
+
+  // Then there's a short tail (u32 `02 00 00 00`, u32 `63 00 00 00`,
+  // a run of zeros) before the first record. The first record begins
+  // at the first `[flag=00 00] [id=01 00]` pattern — id=1 marks the
+  // start of the first block's parameter list.
+  while (p + 32 <= buf.length) {
+    const flag = buf.readUInt16LE(p);
+    const id = buf.readUInt16LE(p + 2);
+    if (flag === 0 && id === 1) return p;
+    p++;
+  }
+  throw new Error('Section 2: no id=1 record found after preset names');
+}
+
+function parseSection2(buf: Buffer, start: number): { records: Section2Record[]; stoppedAt: number; reason: string } {
+  // Section 2 record (verified):
+  //   +0  u16 flag (0)
+  //   +2  u16 id (1-based, resets per block)
+  //   +4  u32 typecode
+  //   +8  f32 a
+  //   +12 f32 b
+  //   +16 f32 c
+  //   +20 f32 d
+  //   +24 if enum (strings follow): u32 count + strings + 4-byte trailer
+  //       else: 4-byte trailer (record = 32 bytes)
+  //
+  // Enum detection is structural: try tryParseEnumBody at +24. When the
+  // strings parse cleanly, treat as enum. Typecode 16 appears to always
+  // mean enum; other typecodes (0, 0x35, 0x42, …) mean float-range.
+  const records: Section2Record[] = [];
+  let off = start;
+  let prevId = 0;
+  let block = 0;
+
+  let reason = 'reached end of buffer';
+  while (off + 28 <= buf.length) {
+    const flag = buf.readUInt16LE(off);
+    const id = buf.readUInt16LE(off + 2);
+    const tc = buf.readUInt32LE(off + 4);
+
+    // Record validity: flag=0, id in [1, 2048]. Typecode values seen:
+    // 0, 0x10, 0x20, 0x35, 0x42, 0x44, 0x100 — keep the ceiling loose.
+    // High bits (tc >> 16) are non-zero on the first record of some
+    // later blocks (e.g. block 1 id=3 has tc=0x00230000) — layout there
+    // shifts the floats by 12 bytes, not yet fully decoded.
+    if (flag !== 0 || id === 0 || id > 2048 || tc > 0xffff) {
+      reason = `stopped at 0x${off.toString(16)}: flag=${flag} id=${id} tc=0x${tc.toString(16)}`;
+      break;
+    }
+
+    if (id <= prevId) block++;
+    prevId = id;
+
+    const a = buf.readFloatLE(off + 8);
+    const b = buf.readFloatLE(off + 12);
+    const c = buf.readFloatLE(off + 16);
+    const d = buf.readFloatLE(off + 20);
+
+    const enumBody = tryParseEnumBody(buf, off + 24);
+    if (enumBody) {
+      records.push({
+        offset: off, block, id, typecode: tc,
+        kind: 'enum', min: a, max: b, default: c, values: enumBody.values,
+      });
+      off = enumBody.next + 4;
+    } else {
+      records.push({ offset: off, block, id, typecode: tc, kind: 'float', a, b, c, d });
+      off += 32;
+    }
+  }
+
+  return { records, stoppedAt: off, reason };
+}
+
 const appdata = process.env.APPDATA;
 if (!appdata) throw new Error('APPDATA not set');
 const cachePath = join(appdata, 'Fractal Audio', 'AM4-Edit', 'effectDefinitions_15_2p0.cache');
@@ -205,3 +358,33 @@ const outDir = 'samples/captured/decoded';
 const outPath = join(outDir, 'cache-records.json');
 writeFileSync(outPath, JSON.stringify(records, null, 2));
 console.log(`\nwrote ${outPath}`);
+
+// --- Section 2 ---
+
+console.log(`\n--- Section 2 ---`);
+const section2Start = skipSection2Preamble(buf, stoppedAt);
+console.log(`first record at 0x${section2Start.toString(16)}`);
+
+const { records: s2, stoppedAt: s2StoppedAt, reason: s2Reason } = parseSection2(buf, section2Start);
+console.log(`parsed ${s2.length} records; ${s2Reason}`);
+console.log(`${buf.length - s2StoppedAt} bytes remaining unparsed after block 0`);
+
+// Block summary
+const blocks = new Map<number, Section2Record[]>();
+for (const r of s2) {
+  const arr = blocks.get(r.block) ?? [];
+  arr.push(r);
+  blocks.set(r.block, arr);
+}
+console.log(`block count: ${blocks.size}`);
+for (const [b, recs] of blocks) {
+  const enums = recs.filter(r => r.kind === 'enum') as Section2Enum[];
+  const maxId = Math.max(...recs.map(r => r.id));
+  const firstEnum = enums[0];
+  const peek = firstEnum ? `  first enum: id=${firstEnum.id} count=${firstEnum.values.length} [${firstEnum.values.slice(0, 3).join(', ')}${firstEnum.values.length > 3 ? ', …' : ''}]` : '';
+  console.log(`  block ${b.toString().padStart(2)}: ${recs.length.toString().padStart(3)} records, maxId=${maxId}, enums=${enums.length}${peek}`);
+}
+
+const s2Path = join(outDir, 'cache-section2.json');
+writeFileSync(s2Path, JSON.stringify(s2, null, 2));
+console.log(`\nwrote ${s2Path}`);
