@@ -2,8 +2,8 @@
 
 > Read this file at the start of every session. It's kept up-to-date with
 > current phase, the single next action, and recent findings.
-> Last updated: **2026-04-14** (Session 06 — 6 new parameters decoded,
-> address stability confirmed across presets).
+> Last updated: **2026-04-14** (Session 07 — parameter registry built and
+> hardware-verified end-to-end via captured-byte comparison).
 
 ---
 
@@ -12,190 +12,181 @@
 **Phase 1 — Protocol RE: 🟢 COMPLETE AND HARDWARE-VERIFIED.** First real
 write produced visible parameter change on the device (Session 05).
 
-**Phase 2 — Parameter registry + preset IR + transpiler.** In progress.
-Session 06 captured 6 more parameters and decoded them; the parameter
-ID structure is now understood.
+**Phase 2 — Parameter registry + preset IR + transpiler.** Registry +
+working-buffer IR + transpiler all shipped and capture-verified in
+Session 07. Two open questions remain before the IR can grow to cover
+full presets: **(a) how channel A/B/C/D selection is encoded** (capture
+recipe below), and **(b) bulk parameter discovery** (Ghidra metadata
+table extraction below).
 
 ## The single next action
 
-**Build `src/protocol/params.ts`** — typed parameter registry with
-per-parameter scale + unit conversion. All needed data is already in
-`samples/captured/decoded/session-06-*.tshark.txt`; no more captures
-required to start.
+### Channel-switch capture pair (highest priority)
 
-The registry should:
-1. Define a `Param` type: `{ name, block, pidLow, pidHigh, unit, scale, displayMin, displayMax }`.
-2. Encode the 5 known unit conventions as a `Unit` enum (see "Unit
-   conventions" below).
-3. Provide `encode(param, displayValue) → internalFloat` and
-   `decode(param, internalFloat) → displayValue` helpers.
-4. Seed with the 7 known parameters (Amp Gain + the 6 from session 06 —
-   table below).
-5. Export `KNOWN_PARAMS` keyed by `block.paramName` (e.g.
-   `KNOWN_PARAMS['amp.gain']`).
+Goal: discover whether the active block channel (A/B/C/D) is encoded in
+the SET_PARAM address or selected by a separate message.
 
-After params.ts: build `src/protocol/setParam.ts` higher-level helper
-that takes `(paramKey, displayValue)` and uses the registry to build the
-right SET_PARAM message. Then move on to preset IR + transpiler.
+**Setup (one-time prerequisites — confirmed working in Session 04):**
+- AM4 powered on, USB connected
+- AM4-Edit v1.00.04 running and connected to the AM4
+- Wireshark **launched as Administrator** (right-click → Run as admin)
+- Capture interface: **USBPcap2** (the AM4 enumerates on the same root
+  hub as the fingerprint reader on this ThinkPad)
+- A working Git Bash terminal in `C:/dev/am4-tone-agent/`
 
-## Decoded parameters (sessions 04–06)
+**Capture procedure — repeat once per channel:**
 
-`pidLow` = block ID. `pidHigh` = parameter index within block. **Address
-is preset-independent — confirmed by capturing on A01 and A2 with
-matching pidLow for the Amp block.**
+For each (channel, filename) pair below:
+1. In AM4-Edit, navigate to a preset (any preset is fine — the address
+   is preset-independent). Click the **Amp** block to focus it.
+2. Use AM4-Edit's channel selector to set the Amp block to the target
+   channel (A or B). Confirm the channel indicator updates.
+3. In Wireshark, start capture on **USBPcap2**.
+4. **Wait ~2 seconds** of idle so the steady-state poll baseline is
+   captured before any user action. Then change the **Amp Gain** value
+   to a clearly different number (e.g. type `5.0` and press Enter — not
+   the same value as your starting point, otherwise AM4-Edit may
+   suppress the write).
+5. Wait ~2 more seconds, then stop the capture.
+6. **File → Save As** → save to:
+   - Channel A run: `samples/captured/session-08-amp-gain-channel-A.pcapng`
+   - Channel B run: `samples/captured/session-08-amp-gain-channel-B.pcapng`
 
-| Block | pidLow | Param | pidHigh | UI scale | Notes |
-|---|---|---|---|---|---|
-| Amp | `0x003A` | Gain | `0x000B` | ÷10 (UI 0–10) | session 04, A01 |
-| Amp | `0x003A` | Bass | `0x000C` | ÷10 | session 06, A2 |
-| Amp | `0x003A` | Level | `0x0000` | 1:1 (raw dB) | session 06, A2 |
-| Drive | `0x0076` | Drive | `0x000B` | ÷10 | session 06 |
-| Drive | `0x0076` | Type | `0x000A` | enum (raw int as float; e.g. 8 = TS808) | session 06 |
-| Reverb | `0x0042` | Mix | `0x0001` | ÷100 (UI %) | session 06 |
-| Delay | `0x0046` | Time | `0x000C` | ÷1000 (UI ms → internal s) | session 06 |
+**Decode both captures to text:**
 
-## Unit conventions seen
+```bash
+tshark -r samples/captured/session-08-amp-gain-channel-A.pcapng \
+       -Y sysex -V \
+       > samples/captured/decoded/session-08-amp-gain-channel-A.tshark.txt
 
-1. **`knob_0_10`** — UI shows 0–10, internal stores ÷10 (e.g. Gain, Bass, Drive)
-2. **`db`** — UI shows dB, internal stores raw dB (e.g. Amp Level)
-3. **`percent`** — UI shows 0–100%, internal stores ÷100 (e.g. Reverb Mix)
-4. **`ms`** — UI shows ms, internal stores seconds = ÷1000 (e.g. Delay Time)
-5. **`enum`** — UI shows a name from a dropdown, internal stores the
-   index as a float32 (e.g. Drive Type 8 = TS808). Each enum-typed
-   parameter needs its own value→name table.
+tshark -r samples/captured/session-08-amp-gain-channel-B.pcapng \
+       -Y sysex -V \
+       > samples/captured/decoded/session-08-amp-gain-channel-B.tshark.txt
+```
 
-## Recent breakthroughs (2026-04-14 sessions)
+(`tshark` lives at `C:\Program Files\Wireshark\tshark.exe` — already on
+PATH after a standard Wireshark install.)
 
-1. **Address stability across presets confirmed** (Session 06). Amp
-   block pidLow = `0x003A` on both A01 and A2. Removes a previously
-   open question and means the parameter registry is preset-agnostic.
-2. **Parameter ID structure decoded** (Session 06): pidLow is the
-   block ID, pidHigh is the parameter index *within* that block. Same
-   pidHigh can mean different things in different blocks
-   (`0x000C` = Amp Bass *or* Delay Time).
-3. **5 unit conventions catalogued** (Session 06).
-4. **HARDWARE VERIFICATION** (Session 05 closing): `npm run write-test`
-   produced a visible Amp Gain change on the live AM4. End-to-end
-   protocol layer confirmed working, not just byte-correct in tests.
-5. **`0x01` SET_PARAM message structure fully decoded** (Session 05).
-   Body layout = 5 14-bit LE header fields + 8-to-7 packed value bytes.
-6. **Float packing scheme cracked** (Session 05) via Ghidra RE of
-   `FUN_140156d10` (encoder) and `FUN_140156af0` (decoder) in
-   AM4-Edit.exe. Standard sliding-window 8-to-7 bit-pack of IEEE 754
-   little-endian float bytes. 4 raw bytes → 5 wire septets.
-7. **Implementation built and verified** (Session 05):
-   - `src/protocol/checksum.ts` — Fractal XOR checksum
-   - `src/protocol/packValue.ts` — sliding 8-to-7 bit-pack/unpack
-   - `src/protocol/setParam.ts` — `buildSetFloatParam(param, value)` etc
-   - `src/protocol/midi.ts` — node-midi async wrapper
-   - `scripts/write-test.ts` — first hardware write (passed 🟢)
-   - Verifications: 10/10 pack samples, 2/2 captured-message bytes match.
+**Once both `.tshark.txt` files exist, the analysis steps are:**
 
-## Recent breakthroughs (2026-04-14 sessions)
+1. `npx tsx scripts/parse-capture.ts samples/captured/decoded/session-08-amp-gain-channel-A.tshark.txt`
+   — grep the output for the rare `1×` body that starts with `013a000b` (Amp pidLow `0x003a`,
+   Gain pidHigh `0x000b`) and `0001` action — that's the channel-A write.
+2. Same on `...channel-B.tshark.txt` — same shape, that's the channel-B write.
+3. Locate the full message in each capture (search the .tshark.txt for
+   the body hex inside `[Reassembled data: f000017415... f7]`).
+4. Diff the two full message bytes:
+   - **Identical** → channel selected by an earlier message. Diff the
+     *non-write* OUT traffic between the two captures to find it. Prime
+     suspects: action codes `0x0110` and `0x010d` (logged in SESSIONS.md
+     as Session 07 mysteries — only seen for specific Amp pidHighs).
+   - **Differing** → channel encoded in `pidLow` or `pidHigh`. The diff
+     shows exactly which bits flipped; update `params.ts` accordingly.
 
-1. **HARDWARE VERIFICATION** (Session 05 closing): `npm run write-test`
-   produced a visible Amp Gain change on the live AM4. End-to-end
-   protocol layer confirmed working, not just byte-correct in tests.
-2. **`0x01` SET_PARAM message structure fully decoded** (Session 05).
-   Body layout = 5 14-bit LE header fields + 8-to-7 packed value bytes.
-   Earlier "address is 4 bytes" model was wrong: it's two 14-bit fields
-   (pidLow, pidHigh) plus a type code, a reserved field, and a payload
-   byte count.
-3. **Float packing scheme cracked** (Session 05) via Ghidra RE of
-   `FUN_140156d10` (encoder) and `FUN_140156af0` (decoder) in
-   AM4-Edit.exe. Standard sliding-window 8-to-7 bit-pack of IEEE 754
-   little-endian float bytes. No obfuscation. 4 raw bytes → 5 wire septets.
-4. **Per-parameter scale conversion** discovered (Session 05): firmware
-   stores normalized floats; AM4-Edit applies a per-parameter inverse
-   scale on display (Amp Gain × 10, EQ band ÷12 dB, …). Earlier "linear
-   pack hypothesis failed" was an artifact of mixing two scales in one
-   regression, not a non-linearity in the pack itself.
-5. **Implementation built and verified** (Session 05):
-   - `src/protocol/checksum.ts` — Fractal XOR checksum
-   - `src/protocol/packValue.ts` — sliding 8-to-7 bit-pack/unpack
-   - `src/protocol/setParam.ts` — `buildSetFloatParam(param, value)` etc
-   - `src/protocol/midi.ts` — node-midi async wrapper
-   - `scripts/write-test.ts` — first hardware write (passed 🟢)
-   - Verifications: 10/10 pack samples, 2/2 captured-message bytes match.
+### Parallel: Ghidra-extract AM4-Edit's parameter metadata table
 
-## Recent breakthroughs (2026-04-14 sessions)
+Highest-leverage non-capture work. AM4-Edit must store parameter names,
+ranges, and enum dropdown strings (Amp Type, Cab IR, Drive Type, Reverb
+Type, Delay Type) in static data — finding that table likely bulk-
+unlocks hundreds of params at once.
 
-1. **`0x01` SET_PARAM message structure fully decoded** (Session 05). Body
-   layout = 5 14-bit LE header fields + 8-to-7 packed value bytes. Earlier
-   "address is 4 bytes" model was wrong: it's two 14-bit fields (pidLow,
-   pidHigh) plus a type code, a reserved field, and a payload byte count.
-2. **Float packing scheme cracked** (Session 05) via Ghidra RE of
-   `FUN_140156d10` (encoder) and `FUN_140156af0` (decoder) in
-   AM4-Edit.exe. It's a standard sliding-window 8-to-7 bit-pack of the
-   IEEE 754 little-endian float bytes. No obfuscation, no XOR, no
-   scrambling. 4 raw bytes → 5 wire septets.
-3. **Per-parameter scale conversion** discovered (Session 05): firmware
-   stores normalized floats; AM4-Edit applies a per-parameter inverse
-   scale on display (Amp Gain × 10, EQ band ÷12 dB, …). Earlier "linear
-   pack hypothesis failed" was an artifact of mixing two scales (Amp
-   Gain ×10 and EQ ÷12) in one regression, not a non-linearity in the
-   pack itself.
-4. **Implementation built and verified** (Session 05):
-   - `src/protocol/checksum.ts` — Fractal XOR checksum
-   - `src/protocol/packValue.ts` — sliding 8-to-7 bit-pack/unpack
-   - `src/protocol/setParam.ts` — `buildSetFloatParam(param, value)` etc
-   - `src/protocol/midi.ts` — node-midi async wrapper
-   - `scripts/write-test.ts` — first hardware write attempt
-   - Verifications: 10/10 pack samples, 2/2 captured-message bytes match.
+**Setup:**
+- Open `AM4-Edit.exe` in Ghidra (the same project used in Session 05 to
+  find the float encoder — already analyzed).
+- Existing companion script: `scripts/ghidra/FindEncoder.java` shows
+  the script style (Ghidra Script Manager → New Script).
 
-## What's known, short version
+**What to look for:**
+1. **String search** — likely fastest first pass. Search for known
+   parameter names in the Defined Strings window:
+   - `"Gain"`, `"Bass"`, `"Mid"`, `"Treble"`, `"Master"`, `"Level"`
+   - `"TS808"` (the only Drive Type enum we know)
+   - `"Reverb"`, `"Delay"`, `"Chorus"`, `"Phaser"`, `"Tremolo"`
+   For each hit, list **References → To** and inspect the calling code.
+   A long contiguous run of strings is almost always a metadata table.
+2. **Cross-reference the SET_PARAM call site.** The encoder
+   `FUN_140156d10` is called from somewhere; trace upward to find code
+   that maps a UI control to a `(pidLow, pidHigh, scale, displayName)`
+   tuple. That structure IS the metadata table.
+3. **Look for arrays of struct-like records** near any param name
+   string. Common shape: `{ const char* name; uint16_t pidHigh; float
+   scale; uint8_t unitCode; ... }`.
 
-- Device comms, checksum, envelope, model ID, all documented commands
+**What to capture and drop in the repo:**
+- Save findings to `docs/sessions/session-08-ghidra-notes.md` (create
+  the dir if needed): table address, struct shape guess, screenshot or
+  ASCII paste of 2–3 contiguous records.
+- If an enum string table is found (e.g. all Drive Types in order),
+  paste the raw strings — even unparsed it's gold.
+
+Once the shape is known, write `scripts/ghidra/ExtractParamTable.java`
+modeled on `FindEncoder.java` to dump the table mechanically, and feed
+the output into `KNOWN_PARAMS` (`src/protocol/params.ts`).
+
+## Decoded parameters and unit conventions
+
+Live source of truth: `src/protocol/params.ts` (`KNOWN_PARAMS` + `Unit`
+union). 7 params across 4 blocks (Amp `0x003A`, Drive `0x0076`, Reverb
+`0x0042`, Delay `0x0046`) using 5 unit conventions (`knob_0_10`, `db`,
+`percent`, `ms`, `enum`). `pidLow` = block ID, `pidHigh` = parameter
+index within block; address is preset-independent. Drive Type enum has
+only one entry catalogued so far (8 = `TS808`).
+
+## Recent breakthroughs
+
+Older breakthroughs (sessions 04–06) are archived in `SESSIONS.md`. Only
+session-07 (current) is kept here for fast orientation.
+
+1. **Working-buffer IR + transpiler shipped** (Session 07). `src/ir/`
+   exports `WorkingBufferIR` (flat param map) and `transpile(ir)` →
+   `number[][]`. `npm run verify-transpile` confirms 3/3 emitted
+   messages equal `buildSetParam(key, value)` and `amp.bass=6` still
+   matches the captured AM4-Edit wire bytes.
+2. **Parameter registry shipped and hardware-verified** (Session 07).
+   `src/protocol/params.ts` → `KNOWN_PARAMS` (7 params keyed
+   `block.name`), `Unit` union, `encode`/`decode`. `setParam.ts` gained
+   `buildSetParam(key, displayValue)`. `verify-msg.ts` 4/4. End-to-end
+   pipeline closed: display value → unit scale → float pack → envelope
+   → wire bytes identical to AM4-Edit.
+3. **Channel-evidence partial** (Session 07): identical pidHighs polled
+   across all 4 blocks (`0x0003`, `0x0f5d`, `0x0f66`); `0x0f66` polled
+   most heavily for the focused block — likely block-level metadata
+   (bypass / active channel / type), not per-param. **Channel-switch
+   behaviour itself still needs the capture pair** in "next action".
+   Mystery action codes `0x0026`, `0x0110`, `0x010d` logged in
+   SESSIONS.md for later.
+
+## What's known (status legend)
+
+- Device comms, checksum, envelope, model ID, documented commands
   `0x08 / 0x0C / 0x0D / 0x0E / 0x13 / 0x14 / 0x64` — **🟢 confirmed**.
 - Preset dump format (`0x77/0x78/0x79`) + slot addressing — **🟢 confirmed**.
-- `0x01` SET_PARAM message format AND value encoding — **🟢 fully decoded**.
-- Parameter ID structure (pidLow=block, pidHigh=param-in-block) — **🟢
-  decoded session 06; preset-independent**.
-- 7 parameters across 4 blocks with 5 unit conventions — **🟢 catalogued**
-  (see table above). Many more to add but the pattern is clear.
-- Drive Type → enum-name mapping — **🟡 only TS808 = 8 known; need a
-  capture per type to fill the dropdown table**.
+- `0x01` SET_PARAM message format + value encoding — **🟢 fully decoded**.
+- Parameter ID structure — **🟢 (Session 06, preset-independent)**.
+- 7 params / 4 blocks / 5 units — **🟢 in `params.ts`**.
+- Channel A/B/C/D addressing — **🟡 partial; capture pair pending (see
+  next action)**.
+- Drive Type enum table — **🟡 only `8 → TS808` known**.
 - Full preset binary layout inside `0x78` chunks — **🔴 scrambled, parked**.
 
-## MVP scope (committed in `DECISIONS.md`)
-
-User describes a tone → Claude composes a preset plan → Claude sends
-parameter-set commands to configure AM4's working buffer → Claude issues
-store to a user-chosen slot → AM4 sounds right. Includes: full block
-chain, 4 scenes with per-block channel assignment, reusable channel-block
-library. Does NOT include: live toggles, live tweaks, or scene-switch as a
-feature (those are deliberately out of scope).
-
-Target user: **a guitarist with a Claude account, not a developer.**
-Distribution: signed Windows `.exe`, one-click Claude Desktop config.
-
-## Write-safety protocol (always in force)
-
-- `scripts/probe.ts` is read-only forever.
-- `scripts/write-test.ts` only modifies the **working buffer** (no Z04
-  backup needed — values revert on preset change / power cycle).
-- For PERSISTENT writes (the eventual `0x77` STORE command), only slot
-  **Z04** is ever written during RE. Back it up before every write.
-- MCP layer enforces read-classify-backup-confirm-write; non-bypassable.
-- Full rules in `docs/DECISIONS.md`.
+MVP scope, target-user definition, and write-safety rules are
+authoritative in `CLAUDE.md` and `DECISIONS.md` — not duplicated here.
 
 ## Roadmap landmarks
 
-- **Now:** run `npm run write-test` against the live AM4. Confirm the
-  amp's Gain value actually changes. (Hardware-in-the-loop verification.)
-- **Next:** build a parameter-ID registry (`src/protocol/params.ts`)
-  capturing per-parameter scale + display unit. Capture more parameter
-  addresses (Amp Master, Cab IR, Drive type, Reverb mix, Delay time…).
-- **Then:** preset-IR (`src/ir/preset.ts`) + transpiler (preset-IR →
-  command sequence).
-- **Then:** scaffold MCP server (`src/server/`) with the first two tools
+- **Now:** channel-switch capture pair + Ghidra metadata extraction
+  (both detailed in "single next action").
+- **Then:** expand `WorkingBufferIR` → full `PresetIR` (block placement,
+  4 scenes, per-block channel assignment) — needs (a) above.
+- **Then:** scaffold MCP server (`src/server/`) with first two tools
   (`read_slot`, `apply_preset`).
 - **Then:** natural-language → preset-IR (Claude side).
 - **Phase 5:** packaging to signed `.exe` (see `docs/04-BACKLOG.md`).
 
 ## Where everything lives
 
-- `src/protocol/` — verified protocol layer (checksum, pack, setParam, midi).
+- `src/protocol/` — verified protocol layer (checksum, pack, params, setParam, midi).
+- `src/ir/` — preset IR (`preset.ts` working-buffer scope) + `transpile.ts`.
 - `docs/SESSIONS.md` — every RE session, chronological, with raw captures.
 - `docs/SYSEX-MAP.md` — working protocol reference (🟢/🟡/🔴 tagged).
   §6a/§6b updated 2026-04-14 with the cracked encoding.
@@ -210,6 +201,7 @@ Distribution: signed Windows `.exe`, one-click Claude Desktop config.
 - `scripts/verify-pack.ts` — 10-sample round-trip test of float pack/unpack.
 - `scripts/verify-msg.ts` — built-vs-captured message byte comparison.
 - `scripts/write-test.ts` — first hardware write (Amp Gain).
+- `scripts/verify-transpile.ts` — IR → command sequence round-trip check.
 - `scripts/ghidra/FindEncoder.java` — Ghidra script that found the encoder.
 - `scripts/scrape-wiki.ts` — Fractal wiki scraper.
 

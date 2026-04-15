@@ -2,7 +2,8 @@
  * Verify built SET_PARAM messages match captured wire bytes byte-for-byte.
  * Run:  npx tsx scripts/verify-msg.ts
  */
-import { buildSetFloatParam, KNOWN_PARAMS } from '../src/protocol/setParam.js';
+import { buildSetFloatParam, buildSetParam } from '../src/protocol/setParam.js';
+import { KNOWN_PARAMS } from '../src/protocol/params.js';
 
 function hex(arr: number[]): string {
   return arr.map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -11,13 +12,23 @@ function hex(arr: number[]): string {
 const cases: { label: string; built: number[]; expected: string }[] = [
   {
     label: 'Amp Gain = 0.0 (internal 0.0)',
-    built: buildSetFloatParam(KNOWN_PARAMS.AMP_GAIN_PRESET_A01, 0.0),
+    built: buildSetFloatParam(KNOWN_PARAMS['amp.gain'], 0.0),
     expected: 'f000017415013a000b00010000000400000000000025f7',
   },
   {
     label: 'EQ band 1 = -1.0 dB (internal -1/12)',
     built: buildSetFloatParam({ pidLow: 0x003a, pidHigh: 0x003e }, -1 / 12),
     expected: 'f000017415013a003e00010000000400556a552b6839f7',
+  },
+  {
+    label: 'buildSetParam("amp.gain", 0) — high-level path matches low-level',
+    built: buildSetParam('amp.gain', 0),
+    expected: 'f000017415013a000b00010000000400000000000025f7',
+  },
+  {
+    label: 'buildSetParam("amp.bass", 6) — matches session-06 capture',
+    built: buildSetParam('amp.bass', 6),
+    expected: 'f000017415013a000c000100000004004d2623137801f7',
   },
 ];
 

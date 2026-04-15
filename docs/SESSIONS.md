@@ -6,6 +6,73 @@ file is the chronological trail that reference is built from.
 
 ---
 
+## 2026-04-14 — Session 07 — Param Registry + Channel-Evidence Mining
+
+**Goal:** ship the typed parameter registry from STATE.md; mine existing
+session-06 captures for any channel (A/B/C/D) addressing evidence.
+
+### 🟢 Parameter registry built and hardware-verified
+
+- `src/protocol/params.ts` — `KNOWN_PARAMS` (7 params keyed `block.name`),
+  `Unit` union (5 conventions), `encode`/`decode` scale converters.
+- `src/protocol/setParam.ts` — added `buildSetParam(key, displayValue)`
+  that looks up the param, applies the unit scale, and builds the message.
+- `scripts/verify-msg.ts` extended: 4/4 cases pass, including
+  `buildSetParam('amp.bass', 6)` matching the `session-06-amp-bass-6`
+  captured wire bytes byte-for-byte (envelope, header fields, packed
+  float, AND checksum). End-to-end pipeline now closed:
+  display value → unit scale → IEEE 754 → 8-to-7 bit-pack → envelope →
+  identical to AM4-Edit's wire output.
+- Removed obsolete `KNOWN_PARAMS.AMP_GAIN_PRESET_A01` from `setParam.ts`
+  (preset-suffix was misleading — addresses are preset-independent).
+
+### 🟡 Channel-addressing question — partial evidence, not conclusive
+
+Mined OUT-direction patterns from `session-06-amp-bass-6.tshark.txt`
+(steady-state polling). Findings:
+
+1. **Identical pidHigh values polled across all 4 known blocks** (Amp
+   `0x003a`, Reverb `0x0042`, Delay `0x0046`, Drive `0x0076`):
+   - `pidHigh=0x0003`, action `0x000d` — ~122× per block
+   - `pidHigh=0x0f5d`, action `0x000d` — 28× per block
+   - `pidHigh=0x0f66`, action `0x000d` — 268× for Amp (the block being
+     edited), 133× for the others
+2. **Heuristic:** the high-numbered pidHighs (`0x0f5d`, `0x0f66`) are
+   probably **block-level metadata** — bypass state, active channel,
+   block-type — not per-parameter values. Heavier polling on the focused
+   block matches "UI is showing this block's chrome".
+3. **Action codes seen** beyond the now-known `0x0001`/`0x000d`:
+   - `0x0026` — high-frequency polling (e.g. `013a000c00260000000000` 32×)
+   - `0x0110` — only seen for Amp `pidHigh=0x0009`, 185×. Mystery.
+   - `0x010d` — only seen for Amp `pidHigh=0x0009/0x0014/0x0015`. Mystery.
+   These don't currently block protocol use; flag and revisit when one
+   matters.
+4. **Post-write refresh confirmed** — immediately after the bass write
+   at t=12.186, AM4-Edit fires action-`0x000d` reads against many Amp
+   pidHighs (0x0000, 0x000c, 0x000d, 0x000e, 0x001e, 0x001f, 0x0025,
+   0x002c, 0x0062, 0x0063, 0x0f6c, …). This is the **full Amp parameter
+   index list** — every value here is a parameter we can name later
+   with a targeted single-knob capture.
+
+**Channel question still open.** No channel-switch event in any current
+capture. Need: 2 captures with the same parameter (e.g. Amp Gain) edited
+once on channel A and once on channel B — diff the OUT messages.
+- If the SET_PARAM bytes are identical → channel is selected via a
+  separate message (probably one of the 0x0110/0x010d mysteries).
+- If they differ → there's a channel offset baked into pidLow or pidHigh.
+
+### 🟢 Preset IR + transpiler scaffolding
+
+- `src/ir/preset.ts` — minimal `WorkingBufferIR` (flat param map only).
+- `src/ir/transpile.ts` — `transpile(ir)` → ordered `number[][]` of
+  SET_PARAM messages, one per param entry, insertion-order preserved.
+- `scripts/verify-transpile.ts` — round-trips a 3-param IR and confirms
+  each emitted message equals `buildSetParam(key, value)`.
+
+Scenes, channels, block placement deferred until protocol RE catches up.
+
+---
+
 ## 2026-04-14 — Session 04 — USB Capture of AM4-Edit's `0x01` Param-Set Command
 
 **Device / firmware:** AM4 f/w 2.00, same setup. AM4-Edit v1.00.04.

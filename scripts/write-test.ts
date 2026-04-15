@@ -9,7 +9,7 @@
  * What it does:
  *   1. Opens the AM4 over USB-MIDI.
  *   2. Captures one inbound SysEx baseline so we know polling is working.
- *   3. Sends a SET_PARAM write for Amp Gain on preset A01:
+ *   3. Sends a SET_PARAM write for Amp Gain (address is preset-independent):
  *        - target internal value: 0.05  (= UI displayed value 0.5)
  *      This is a small, audible-but-not-extreme change.
  *   4. Pauses 250 ms.
@@ -19,7 +19,6 @@
  *
  * Pre-requisites:
  *   - AM4 powered on, USB connected
- *   - Currently on preset A01 (Amp Gain address only verified there)
  *   - Headphones or amp NOT at high volume (the sound will change!)
  *
  * Run:  npx tsx scripts/write-test.ts
@@ -28,7 +27,8 @@
  * AM4-Edit if open) jumps to "0.5", then 250 ms later restores to 1.0.
  */
 import { connectAM4, toHex } from '../src/protocol/midi.js';
-import { buildSetFloatParam, KNOWN_PARAMS } from '../src/protocol/setParam.js';
+import { buildSetFloatParam } from '../src/protocol/setParam.js';
+import { KNOWN_PARAMS } from '../src/protocol/params.js';
 
 async function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -49,7 +49,7 @@ async function main(): Promise<void> {
     console.warn('  ⚠️  No baseline traffic. AM4 may still respond, but check connection.');
   }
 
-  const param = KNOWN_PARAMS.AMP_GAIN_PRESET_A01;
+  const param = KNOWN_PARAMS['amp.gain'];
 
   // Test write: set Amp Gain to UI 0.5 (internal 0.05).
   const writeMsg = buildSetFloatParam(param, 0.05);
@@ -72,7 +72,6 @@ async function main(): Promise<void> {
   console.log('  - Amp block, channel A, Gain parameter');
   console.log('  - Should now read 1.0 (after the brief jump to 0.5)');
   console.log('\nIf nothing changed, possible causes:');
-  console.log('  - You are not on preset A01 (Amp Gain address may differ)');
   console.log('  - The Amp block is bypassed');
   console.log('  - The active channel is not A');
 }

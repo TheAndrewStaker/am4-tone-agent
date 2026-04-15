@@ -13,6 +13,7 @@
 
 import { fractalChecksum } from './checksum.js';
 import { packFloat32LE } from './packValue.js';
+import { KNOWN_PARAMS, encode, type ParamKey } from './params.js';
 
 export const AM4_MODEL_ID = 0x15;
 const SYSEX_START = 0xf0;
@@ -37,10 +38,6 @@ export interface ParamId {
   pidHigh: number; // hdr1 — 14-bit
 }
 
-export const KNOWN_PARAMS = {
-  AMP_GAIN_PRESET_A01: { pidLow: 0x003a, pidHigh: 0x000b } as ParamId,
-} as const;
-
 /** Build a 0x01 WRITE message setting `param` to a 32-bit float `value`. */
 export function buildSetFloatParam(param: ParamId, value: number): number[] {
   const valueBytes = Array.from(packFloat32LE(value));
@@ -59,6 +56,18 @@ export function buildSetFloatParam(param: ParamId, value: number): number[] {
   const head = [SYSEX_START, ...FRACTAL_MFR, ...body];
   const cs = fractalChecksum(head);
   return [...head, cs, SYSEX_END];
+}
+
+/**
+ * High-level write: look up `key` in the parameter registry, convert
+ * `displayValue` to its internal float via the param's unit scale, and
+ * build the SET_PARAM message.
+ *
+ * Example: `buildSetParam('amp.gain', 7.5)` → internal float 0.75.
+ */
+export function buildSetParam(key: ParamKey, displayValue: number): number[] {
+  const param = KNOWN_PARAMS[key];
+  return buildSetFloatParam(param, encode(param, displayValue));
 }
 
 /**

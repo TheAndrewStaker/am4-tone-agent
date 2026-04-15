@@ -11,6 +11,7 @@
     "scrape-wiki": "tsx scripts/scrape-wiki.ts",
     "verify-pack": "tsx scripts/verify-pack.ts",
     "verify-msg": "tsx scripts/verify-msg.ts",
+    "verify-transpile": "tsx scripts/verify-transpile.ts",
     "write-test": "tsx scripts/write-test.ts",
     "build": "tsc",
     "test": "jest --testPathIgnorePatterns=integration",
