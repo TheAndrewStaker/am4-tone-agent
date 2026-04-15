@@ -196,90 +196,124 @@ encoding, modifier graphs) comes after.
 
 ## 6a. 0x01 PARAMETER_R/W Dispatcher 🟢
 
-**Confirmed session 04 (2026-04-14) via USBPcap of AM4-Edit.** AM4 does
-NOT use the Axe-Fx II `0x02 GET/SET_BLOCK_PARAMETER_VALUE` command.
-Instead, function byte `0x01` is a combined read/write dispatcher with an
-action code in the body.
+**Confirmed session 04 (USB capture). Encoding fully cracked session 05
+via Ghidra reverse-engineering of `FUN_140156d10` / `FUN_140156af0` in
+AM4-Edit.exe — see `SESSIONS.md` for the trace.**
+
+AM4 does NOT use the Axe-Fx II `0x02 GET/SET_BLOCK_PARAMETER_VALUE`. The
+function byte `0x01` is a combined read/write dispatcher whose body holds
+five 14-bit header fields followed by an 8-to-7-packed payload.
+
+### General body layout (after envelope `F0 00 01 74 15 01`)
+
+```
+[hdr0_lo hdr0_hi] [hdr1_lo hdr1_hi] [hdr2_lo hdr2_hi] [hdr3_lo hdr3_hi] [hdr4_lo hdr4_hi]  ← 10 bytes (5 × 14-bit fields)
+[packed_value_bytes...]                                                                   ← ceil((rawN*8 + 6)/7) wire bytes for rawN raw bytes
+[cs] F7
+```
+
+Each header field is a 14-bit little-endian integer split into two 7-bit
+septets: `value & 0x7F` then `(value >> 7) & 0x7F`.
+
+| Field | Meaning | Notes |
+|---|---|---|
+| hdr0 | Parameter ID low (14 bits) | for Amp Gain on preset A01 = `0x003A` |
+| hdr1 | Parameter ID high (14 bits) | for Amp Gain on preset A01 = `0x000B` |
+| hdr2 | Action / type code | `0x0001` = WRITE (float). Read variants use other values — see read table below. |
+| hdr3 | Reserved / channel | `0x0000` in all observed writes |
+| hdr4 | Payload byte count | `0x0004` for a 32-bit float write; `0x0000` for reads |
+
+### Write request (23 bytes for a float value)
+
+```
+F0 00 01 74 15 01 [pidL_lo pidL_hi] [pidH_lo pidH_hi] [01 00] [00 00] [04 00] [v0 v1 v2 v3 v4] [cs] F7
+```
+
+- 5 packed value bytes carry the 4-byte IEEE 754 little-endian float (see §6b).
+- Captured Amp Gain = 1.0 (internal 0.1):
+  `F0 00 01 74 15 01 3A 00 0B 00 01 00 00 00 04 00 66 73 19 43 68 [cs] F7`
 
 ### Read request (18 bytes on wire)
 
 ```
-F0 00 01 74 15 01 [addr:4] [read_type:1] 00 00 00 00 [cs] F7
+F0 00 01 74 15 01 [pidL_lo pidL_hi] [pidH_lo pidH_hi] [read_type:1] 00 00 00 00 [cs] F7
 ```
 
-- `addr:4` — 4-byte parameter address (e.g. `3A 00 0B 00` for preset A01
-  Amp Gain).
-- `read_type:1` — selects the response format. Observed values:
+- `read_type` observed values (selects response shape):
   - `0D` / `10` → 64-byte response (full-block data)
   - `26` / `0E` → 34-byte response (short parameter read)
   - `1F` → seen on one address family; response shape TBD
-- Trailing `00 00 00 00` is the payload-length byte (0) + 3-byte reserved.
-  A read carries no payload.
-
-### Write request (23 bytes on wire)
-
-```
-F0 00 01 74 15 01 [addr:4] 01 00 00 00 04 [value:6] [cs] F7
-```
-
-- Action code byte is **`01`** (WRITE) at body offset 5.
-- Payload length byte is **`04`** — meaning "4 raw bytes of value data follow,
-  SysEx-encoded into 6 wire bytes".
-- `value:6` — 32-bit IEEE 754 float packed into 6 7-bit bytes. Packing
-  scheme not yet decoded (🟡); see §6b.
 
 ### AM4-Edit behavior observed
 
 - AM4-Edit polls active parameters at ~200 Hz with reads. The vast majority
   of OUT SysEx traffic is reads, not writes.
-- Writes fire only on **Enter-commit** in the number input field. Slider
-  drags in the UI may also emit writes (untested); physical knob moves on
-  the AM4 itself emit NO USB traffic from AM4-Edit (the amp updates its
-  own state; AM4-Edit sees it via polling).
+- Writes fire only on **Enter-commit** in the number input field. Physical
+  knob moves on the AM4 itself emit NO USB traffic from AM4-Edit (the amp
+  updates its own state; AM4-Edit sees it via polling).
 
-### Known parameter addresses 🟡
+### Known parameter IDs 🟡
 
-| Address | Parameter | Verified on |
-|---------|-----------|-------------|
-| `3A 00 0B 00` | Amp Gain | preset A01 |
+| pidL | pidH | Parameter | Internal scale | Verified |
+|---|---|---|---|---|
+| `0x003A` | `0x000B` | Amp Gain | displayed × 0.1 (UI 0–10 → internal 0–1) | preset A01, session 04 |
+| `0x003A` | `0x003E` | Parametric EQ band 1 gain | displayed × (1/12) for −12…+12 dB UI | session 05 |
 
-Address stability across presets/scenes is not yet verified.
+Per-parameter scale must be looked up — the firmware operates in
+normalized units, AM4-Edit converts on display.
 
 ---
 
-## 6b. Value Encoding — 32-bit Float Packing 🟡
+## 6b. Value Encoding — Sliding 8-to-7 Bit-Pack 🟢
 
-The 6-byte value field carries an IEEE 754 single-precision float. The
-packing scheme has 10 bits of overhead per value (42 wire bits for 32
-data bits) and is not yet decoded. Session 04 collected 8 (float → wire)
-samples covering both zero-mantissa and non-zero-mantissa values:
+**Cracked session 05.** The packed value field is a standard sliding-window
+8-to-7 bit-pack of the raw payload bytes (typically 4 bytes for an IEEE 754
+single-precision LE float). N raw bytes → N+1 wire septets; each wire byte
+has bit 7 = 0 (SysEx-legal).
 
-| Value | Float32 (big-endian) | Wire bytes 15–20 |
-|---|---|---|
-| 0.25 | `3E 80 00 00` | `00 66 73 19 43 60` |
-| 0.50 | `3F 00 00 00` | `00 66 73 09 43 68` |
-| 1.00 | `3F 80 00 00` | `00 66 73 19 43 68` |
-| 1.50 | `3F C0 00 00` | `00 4D 26 23 13 70` |
-| 2.00 | `40 00 00 00` | `00 66 73 09 43 70` |
-| 2.50 | `40 20 00 00` | `00 00 00 10 03 70` |
-| 3.00 | `40 40 00 00` | `00 4D 26 33 13 70` |
-| 4.00 | `40 80 00 00` | `00 66 73 19 43 70` |
+### Algorithm
 
-Candidate packings to try against this table (pick one, verify against all
-8 rows, encode is correct iff all match):
+```
+pack(raw[0..N-1]) → wire[0..N]:
+  carry = 0
+  for i = 0..N-1:
+    k = i + 1                     # shift width grows each iter, 1..N
+    wire[i] = ((raw[i] >> k) & 0x7F) | carry
+    carry   = ((~(0x7F << k) & raw[i]) << (7 - k)) & 0x7F
+  wire[N] = carry
+```
 
-1. **Fractal "3-septet-per-byte" bit-pack** — the scheme used for Axe-Fx
-   III preset-body packing (forum.fractalaudio.com research). Every 3
-   wire bytes ≈ 21 bits carry 2.625 raw bytes. For a 4-byte value this
-   would round up to ~5 wire bytes of data + 1 framing.
-2. **Roland 8-to-7 with zero-padding** — 4 raw bytes → 5 wire bytes
-   (low-7s + one MSB carrier byte), padded with a leading `00` at
-   wire position 15 for framing. 6 total.
-3. **Per-nibble-plus-frame** — split each raw byte to two 4-bit nibbles,
-   emit 8 nibble bytes, truncate framing.
+Reference TypeScript implementation: `src/protocol/packValue.ts`
+(verified round-trip on all 10 captured samples — `npm run verify-pack`).
 
-Cracking this is a finite-search problem (try each scheme, verify against
-all 8 samples, done). `scripts/decode-float-pack.ts` — to be written.
+### Captured (displayed_value, internal_float, wire_5_bytes)
+
+The internal float is what the firmware actually stores. The displayed
+value seen in AM4-Edit is `internal × inverse_scale` (e.g. Amp Gain
+displayed = internal × 10).
+
+| Param | Displayed | Internal | Wire bytes (after the 10-byte header) |
+|---|---|---|---|
+| Amp Gain | 0.0 | 0.000 | `00 00 00 00 00` |
+| Amp Gain | 0.25 | 0.025 | `66 73 19 43 60` |
+| Amp Gain | 0.5 | 0.050 | `66 73 09 43 68` |
+| Amp Gain | 1.0 | 0.100 | `66 73 19 43 68` |
+| Amp Gain | 1.5 | 0.150 | `4D 26 23 13 70` |
+| Amp Gain | 2.0 | 0.200 | `66 73 09 43 70` |
+| Amp Gain | 2.5 | 0.250 | `00 00 10 03 70` |
+| Amp Gain | 3.0 | 0.300 | `4D 26 33 13 70` |
+| Amp Gain | 4.0 | 0.400 | `66 73 19 43 70` |
+| EQ b1 | −1.0 dB | −0.0833 | `55 6A 55 2B 68` |
+
+### Important correction to earlier notes
+
+Earlier §6b listed **6** value bytes (positions 15..20) for a write. That
+was wrong. The leading `00` belonged to the **high byte of the 5th 14-bit
+header field** (the byte count `0x0004`, packed as `04 00`). The actual
+value field is 5 bytes (positions 16..20). This is why our linear-pack
+hypothesis appeared non-linear: we were including a header byte in the
+"value" bits, and that header byte differs across parameters even when
+the value is the same.
 
 ---
 

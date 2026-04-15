@@ -9,6 +9,9 @@
     "sniff": "tsx scripts/sniff.ts",
     "diff-syx": "tsx scripts/diff-syx.ts",
     "scrape-wiki": "tsx scripts/scrape-wiki.ts",
+    "verify-pack": "tsx scripts/verify-pack.ts",
+    "verify-msg": "tsx scripts/verify-msg.ts",
+    "write-test": "tsx scripts/write-test.ts",
     "build": "tsc",
     "test": "jest --testPathIgnorePatterns=integration",
     "test:all": "jest"
