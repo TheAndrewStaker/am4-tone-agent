@@ -2,10 +2,12 @@
 
 > Read this file at the start of every session. It's kept up-to-date with
 > current phase, the single next action, and recent findings.
-> Last updated: **2026-04-15** (Session 14 — Session 13's scratch parser
-> ported into `scripts/parse-cache.ts` as `parseSection3`. 695 records
-> across 17 sub-blocks now land in `samples/captured/decoded/cache-section3.json`
-> alongside `cabNames[256]` and `cabIds[256]`. Preflight green.)
+> Last updated: **2026-04-15** (Session 15 — cache-block ↔ wire-pidLow
+> mapping CONFIRMED. Wire `pidHigh` directly equals cache record `id`.
+> All 4 main effect blocks pinned: Amp=S2 block 5, Drive=S3 sub-block 9,
+> Reverb=S3 sub-block 0, Delay=S3 sub-block 1. 6/7 KNOWN_PARAMS
+> structurally verified; `amp.level` (pidHigh=0x0000) is out-of-band like
+> `amp.channel`. Preflight green.)
 
 ---
 
@@ -23,22 +25,33 @@ float32. One open question remains before the IR can cover full presets:
 
 ## The single next action
 
-### Map cache blocks → wire `pidLow`, then auto-generate `KNOWN_PARAMS`
+### Auto-generate `KNOWN_PARAMS` from the mapped blocks
 
-With Section 3 now parsed and committed to `cache-section3.json`, the
-remaining blocker before `KNOWN_PARAMS` can be auto-generated is the
-**block → wire-pidLow mapping**. Amp wire `pidLow=0x3A` maps to Section
-2 block 5 (tag=0x98) by characteristic count (151 records, 38 enums).
-But Reverb/Delay/Drive are in Section 3 (sub-blocks 0/1/9) — their
-wire pidLows (`0x42`/`0x46`/`0x76`) need either a capture cross-reference
-(set a Reverb param in AM4-Edit → capture → compare pidHigh order) or
-a heuristic based on characteristic enum membership (e.g., "sub-block
-whose id=10 enum contains `TS808` at index 8 ↔ Drive wire pidLow=0x76").
+Run `npx tsx scripts/map-cache-params.ts` to see every parameter for
+the 4 main blocks with `a/b/c/d` floats from the cache — this is now
+the authoritative source for `displayMin`/`displayMax`/`step` and the
+full enum tables (Amp Type × 248, Drive Type × 78, Reverb Type × 79,
+Delay Type × 29, plus 138 amp cab models at Amp id=41, 69 amp mic
+models at id=44, etc.).
 
-Drive Type enum currently only has `8 → TS808` catalogued in
-`params.ts`; sub-block 9's `id=10` enum (78 entries, `Rat Distortion…
-Swedish Metal`) should already give us the full table once the mapping
-is confirmed.
+Next session: write `scripts/gen-known-params.ts` that reads the cache
+JSON, emits a strongly-typed `KNOWN_PARAMS` superset, and updates
+`src/protocol/params.ts`. Keep the 7 existing hand-written entries
+stable (they're capture-verified); add new entries from cache data
+with a fresh status tag so we can distinguish "cache-derived,
+untested" from "capture-verified". Validate by re-running preflight.
+
+Open questions to resolve along the way:
+
+- **`amp.level` pidHigh=0x0000** is not in the cache record table
+  (Amp block's ids start at 1). Same pattern as `amp.channel`
+  (pidHigh=0x07D2). These are both "out-of-band" params that live
+  outside the per-block record list. One capture each of Drive/Reverb/
+  Delay *level* will confirm whether pidHigh=0 is a block-generic
+  output-level address or Amp-specific.
+- **`delay.time` displayMax drift**: the cache says `b=8` seconds
+  (so up to 8000 ms); `params.ts` currently has 5000 ms. Update when
+  regenerating.
 
 **Layouts (parser is source of truth — see `scripts/parse-cache.ts`):**
 
@@ -90,8 +103,19 @@ fully populated (0..3 ↔ A..D).
 ## Recent breakthroughs
 
 Older breakthroughs (sessions 04–08, 10–12) are archived in `SESSIONS.md`.
-Sessions 13–14 (current) are kept here for fast orientation.
+Sessions 13–15 (current) are kept here for fast orientation.
 
+00. **Wire pidHigh == cache record id** (Session 15). Cross-referenced
+    `KNOWN_PARAMS` against parsed cache via `scripts/map-cache-params.ts`:
+    6/7 known params line up by id directly (amp.gain → cache id=11,
+    amp.bass → id=12, drive.type → id=10 with 78-entry enum, …). This
+    pins block → wire pidLow: Amp=S2 block 5 (tag=0x98), Drive=S3
+    sub-block 9, Reverb=S3 sub-block 0, Delay=S3 sub-block 1. Two
+    KNOWN_PARAMS are "out-of-band" (pidHigh not in per-block table):
+    `amp.channel` (0x07D2) and `amp.level` (0x0000). The cache now
+    supplies exact displayMin/displayMax/step for every in-band param
+    and full enum tables (248 amps, 78 drives, 79 reverbs, 29 delays,
+    138 cabs, 69 mics).
 0. **Section 3 parser landed** (Session 14). `scripts/parse-cache.ts`
    now emits `cache-section3.json` with 256 user-cab names, 256 user-
    cab IDs, and 695 parameter records across 17 sub-blocks. All wire-
@@ -197,7 +221,12 @@ authoritative in `CLAUDE.md` and `DECISIONS.md` — not duplicated here.
 - `scripts/peek-cache.ts` — scratchpad walker of the AM4-Edit metadata
   cache. Superseded by `parse-cache.ts` but kept for reference.
 - `scripts/parse-cache.ts` — structural decoder for the cache. Parses
-  Section 1 (87 global-setting records) cleanly into typed JSON.
+  Section 1 (87 global-setting records), Section 2 (465 records / 7
+  blocks) and Section 3 (695 records / 17 sub-blocks + cab tables)
+  cleanly into typed JSON.
+- `scripts/map-cache-params.ts` — verifies KNOWN_PARAMS against the
+  parsed cache with the pinned (pidLow → cache block) mapping, and
+  dumps each main block's candidate parameter list.
 - `scripts/dump-cache-head.ts` — hex+ASCII peek tool for cache offsets.
 - `samples/captured/decoded/cache-strings.txt` — 7,610 length-prefixed
   strings extracted from `effectDefinitions_15_2p0.cache`.
