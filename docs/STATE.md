@@ -2,43 +2,94 @@
 
 > Read this file at the start of every session. It's kept up-to-date with
 > current phase, the single next action, and recent findings.
-> Last updated: **2026-04-14** (Session 05 closed — first real write
-> verified on hardware).
+> Last updated: **2026-04-14** (Session 06 — 6 new parameters decoded,
+> address stability confirmed across presets).
 
 ---
 
 ## Current phase
 
-**Phase 1 — Protocol RE: 🟢 COMPLETE AND HARDWARE-VERIFIED.** The 0x01
-SET_PARAM message is fully decoded end-to-end and a code-built write
-produced a visible parameter change on the device (Amp Gain 1.0 → 0.5 →
-1.0, observed on AM4 display, Session 05 closing run).
+**Phase 1 — Protocol RE: 🟢 COMPLETE AND HARDWARE-VERIFIED.** First real
+write produced visible parameter change on the device (Session 05).
 
-Entering **Phase 2 — Parameter registry + preset IR + transpiler.**
+**Phase 2 — Parameter registry + preset IR + transpiler.** In progress.
+Session 06 captured 6 more parameters and decoded them; the parameter
+ID structure is now understood.
 
 ## The single next action
 
-**Capture 4–6 additional parameter writes via USBPcap to seed the
-parameter registry.** Without more parameter IDs and per-parameter
-scales we can't build any real preset. Suggested capture targets, all on
-preset A01:
+**Build `src/protocol/params.ts`** — typed parameter registry with
+per-parameter scale + unit conversion. All needed data is already in
+`samples/captured/decoded/session-06-*.tshark.txt`; no more captures
+required to start.
 
-| # | Action in AM4-Edit | Filename |
-|---|---|---|
-| 1 | Amp block: change **Master** to a non-default value | `session-06-amp-master.pcapng` |
-| 2 | Amp block: change **Bass** to a non-default value | `session-06-amp-bass.pcapng` |
-| 3 | Drive block: change **Type** (e.g. to TS808) | `session-06-drive-type.pcapng` |
-| 4 | Drive block: change **Drive** level | `session-06-drive-level.pcapng` |
-| 5 | Reverb block: change **Mix** to ~30% | `session-06-reverb-mix.pcapng` |
-| 6 | Delay block: change **Time** to 500 ms | `session-06-delay-time.pcapng` |
+The registry should:
+1. Define a `Param` type: `{ name, block, pidLow, pidHigh, unit, scale, displayMin, displayMax }`.
+2. Encode the 5 known unit conventions as a `Unit` enum (see "Unit
+   conventions" below).
+3. Provide `encode(param, displayValue) → internalFloat` and
+   `decode(param, internalFloat) → displayValue` helpers.
+4. Seed with the 7 known parameters (Amp Gain + the 6 from session 06 —
+   table below).
+5. Export `KNOWN_PARAMS` keyed by `block.paramName` (e.g.
+   `KNOWN_PARAMS['amp.gain']`).
 
-Capture procedure: same as Session 05 (see SYSEX-MAP §6 "USB capture
-workflow"). After each capture, drop the file in `samples/captured/` and
-ping me — I'll parse them, infer the parameter IDs, and build
-`src/protocol/params.ts`.
+After params.ts: build `src/protocol/setParam.ts` higher-level helper
+that takes `(paramKey, displayValue)` and uses the registry to build the
+right SET_PARAM message. Then move on to preset IR + transpiler.
 
-Once params.ts exists, the rest of Phase 2 (preset IR + transpiler +
-first multi-parameter preset write) is unblocked.
+## Decoded parameters (sessions 04–06)
+
+`pidLow` = block ID. `pidHigh` = parameter index within block. **Address
+is preset-independent — confirmed by capturing on A01 and A2 with
+matching pidLow for the Amp block.**
+
+| Block | pidLow | Param | pidHigh | UI scale | Notes |
+|---|---|---|---|---|---|
+| Amp | `0x003A` | Gain | `0x000B` | ÷10 (UI 0–10) | session 04, A01 |
+| Amp | `0x003A` | Bass | `0x000C` | ÷10 | session 06, A2 |
+| Amp | `0x003A` | Level | `0x0000` | 1:1 (raw dB) | session 06, A2 |
+| Drive | `0x0076` | Drive | `0x000B` | ÷10 | session 06 |
+| Drive | `0x0076` | Type | `0x000A` | enum (raw int as float; e.g. 8 = TS808) | session 06 |
+| Reverb | `0x0042` | Mix | `0x0001` | ÷100 (UI %) | session 06 |
+| Delay | `0x0046` | Time | `0x000C` | ÷1000 (UI ms → internal s) | session 06 |
+
+## Unit conventions seen
+
+1. **`knob_0_10`** — UI shows 0–10, internal stores ÷10 (e.g. Gain, Bass, Drive)
+2. **`db`** — UI shows dB, internal stores raw dB (e.g. Amp Level)
+3. **`percent`** — UI shows 0–100%, internal stores ÷100 (e.g. Reverb Mix)
+4. **`ms`** — UI shows ms, internal stores seconds = ÷1000 (e.g. Delay Time)
+5. **`enum`** — UI shows a name from a dropdown, internal stores the
+   index as a float32 (e.g. Drive Type 8 = TS808). Each enum-typed
+   parameter needs its own value→name table.
+
+## Recent breakthroughs (2026-04-14 sessions)
+
+1. **Address stability across presets confirmed** (Session 06). Amp
+   block pidLow = `0x003A` on both A01 and A2. Removes a previously
+   open question and means the parameter registry is preset-agnostic.
+2. **Parameter ID structure decoded** (Session 06): pidLow is the
+   block ID, pidHigh is the parameter index *within* that block. Same
+   pidHigh can mean different things in different blocks
+   (`0x000C` = Amp Bass *or* Delay Time).
+3. **5 unit conventions catalogued** (Session 06).
+4. **HARDWARE VERIFICATION** (Session 05 closing): `npm run write-test`
+   produced a visible Amp Gain change on the live AM4. End-to-end
+   protocol layer confirmed working, not just byte-correct in tests.
+5. **`0x01` SET_PARAM message structure fully decoded** (Session 05).
+   Body layout = 5 14-bit LE header fields + 8-to-7 packed value bytes.
+6. **Float packing scheme cracked** (Session 05) via Ghidra RE of
+   `FUN_140156d10` (encoder) and `FUN_140156af0` (decoder) in
+   AM4-Edit.exe. Standard sliding-window 8-to-7 bit-pack of IEEE 754
+   little-endian float bytes. 4 raw bytes → 5 wire septets.
+7. **Implementation built and verified** (Session 05):
+   - `src/protocol/checksum.ts` — Fractal XOR checksum
+   - `src/protocol/packValue.ts` — sliding 8-to-7 bit-pack/unpack
+   - `src/protocol/setParam.ts` — `buildSetFloatParam(param, value)` etc
+   - `src/protocol/midi.ts` — node-midi async wrapper
+   - `scripts/write-test.ts` — first hardware write (passed 🟢)
+   - Verifications: 10/10 pack samples, 2/2 captured-message bytes match.
 
 ## Recent breakthroughs (2026-04-14 sessions)
 
@@ -98,8 +149,12 @@ first multi-parameter preset write) is unblocked.
   `0x08 / 0x0C / 0x0D / 0x0E / 0x13 / 0x14 / 0x64` — **🟢 confirmed**.
 - Preset dump format (`0x77/0x78/0x79`) + slot addressing — **🟢 confirmed**.
 - `0x01` SET_PARAM message format AND value encoding — **🟢 fully decoded**.
-- Per-parameter scales (Amp Gain ×10, EQ ÷12) — **🟡 spot-verified, full
-  table TBD as we add parameters**.
+- Parameter ID structure (pidLow=block, pidHigh=param-in-block) — **🟢
+  decoded session 06; preset-independent**.
+- 7 parameters across 4 blocks with 5 unit conventions — **🟢 catalogued**
+  (see table above). Many more to add but the pattern is clear.
+- Drive Type → enum-name mapping — **🟡 only TS808 = 8 known; need a
+  capture per type to fill the dropdown table**.
 - Full preset binary layout inside `0x78` chunks — **🔴 scrambled, parked**.
 
 ## MVP scope (committed in `DECISIONS.md`)
