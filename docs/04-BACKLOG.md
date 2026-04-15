@@ -194,6 +194,43 @@ the device's own store command to persist. See `docs/DECISIONS.md`.
 - Prompts: "Let me know if you need to adjust amp level
   for your pickups"
 
+### P3-007 Model lineage dictionary (translation layer)
+- **Why:** the AM4 model catalog is a closed vocabulary the agent MUST
+  output correctly (one wrong name = failed SET_PARAM = broken preset).
+  "TS808" is obvious; "Class-A 30W → Vox AC30 Top Boost", "Plexi Normal"
+  vs "Plexi JumpP-to-P", and "FAS Modern → inspired by Soldano SLO /
+  EVH 5150 / Peavey 5150" are subtle enough that fresh-lookup will
+  hallucinate or miss. This is a *correctness* requirement, not a
+  performance optimization.
+- **Scope:** finite, bounded set — counted from the cache (Session 13):
+  - 248 amp models
+  - 78 drive types
+  - 79 reverb types
+  - 29 delay types
+  - + pitch / filter / chorus / flanger / phaser / compressor / EQ
+    (full block list in `cache-section2.json` after Session 13 parser
+    lands)
+- **Artifacts (ship in repo):**
+  - `src/knowledge/amp-lineage.json` — `{am4Name, inspiredBy[], era, family, notes}`
+  - `src/knowledge/drive-lineage.json` — same shape (TS808 → Ibanez Tube Screamer, etc.)
+  - `src/knowledge/cab-lineage.json` — cab model → real mic/cab pairing
+  - `src/knowledge/reverb-types.json`, `delay-types.json` — algorithm descriptions + real hardware inspirations where relevant
+- **Pipeline:** extend `scripts/scrape-wiki.ts` to parse the "inspired
+  by" column from Fractal's public wiki (which documents most lineage
+  explicitly). Cross-check against `cache-strings.txt` to catch any
+  names in the catalog that have no wiki entry → those become `[FLAG —
+  VERIFY]` entries needing manual curation.
+- **Agent integration:** when building a tone, the agent researches
+  artist gear fresh (equipboard, Premier Guitar, Rigged), then uses
+  the lineage dictionary to translate "1983 Marshall JCM800 2203"
+  into the valid AM4 model name. Catalog constrains the output;
+  research fills in the "which of the 5 Marshall variants" judgment.
+- **Non-goal:** NOT a replacement for parameter-level knowledge
+  (P3-002) — that's covered separately. This is specifically the
+  name-translation layer. BLOCK-PARAMS.md holds human prose; these
+  JSON files are machine-readable and consumed by the agent at
+  runtime.
+
 ---
 
 ## PHASE 4 — Library Management

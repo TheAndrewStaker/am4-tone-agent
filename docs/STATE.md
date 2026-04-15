@@ -2,10 +2,11 @@
 
 > Read this file at the start of every session. It's kept up-to-date with
 > current phase, the single next action, and recent findings.
-> Last updated: **2026-04-15** (Session 12 — 7 blocks decoded across
-> Section 2 (442 parameter records, 114 enums). Block 5 (tag=0x98)
-> identified as the Amp block via its 248-entry AMP TYPE enum; id=11
-> matches Session 08's `amp.gain` pidHigh=0x0b).
+> Last updated: **2026-04-15** (Session 13 — post-divider region cracked:
+> 17 sub-blocks, 695 additional records, including Reverb Type (79),
+> Delay Type (29), and Drive Type (78). All main effect blocks now
+> located. Post-divider uses a compressed 24-byte record header —
+> different layout from pre-divider.)
 
 ---
 
@@ -23,77 +24,82 @@ float32. One open question remains before the IR can cover full presets:
 
 ## The single next action
 
-### Decode remaining blocks past the sub-section divider at `0x136ee`
+### Land Session 13 findings in `parse-cache.ts` + auto-generate `KNOWN_PARAMS`
 
-Session 12 extended `parseSection2` with **block-header detection**:
-blocks 1+ begin with a 40-byte header whose u32 at +4 encodes a
-block-type tag in its high 16 bits (`0x00XX0000`). After the header,
-normal 32-byte records (id=1, 2, 3, …) resume with the standard
-layout. This decoded 7 blocks / 442 records before hitting a
-sub-section divider at `0x136ee` (marker `f0 ff 00 00`).
+Session 13 decoded the post-divider region in a scratch script
+(`/tmp/parse-post3.mjs` — not committed). **17 sub-blocks, 695
+additional records, including all three missing main effect blocks.**
+Next session: port the scratch parser into `scripts/parse-cache.ts` as
+a `parseSection3` function, commit the enriched `cache-section2.json`
+(or split to a new `cache-section3.json`), and then auto-generate
+`KNOWN_PARAMS` from the JSON.
 
-| Block | Tag    | Records | First enum                                    | Likely role |
-|-------|--------|---------|-----------------------------------------------|-------------|
-| 0     | —      | 98      | id=10 SINE/TRI/SQUARE (LFO waveforms)          | Modifier/Controller template |
-| 1     | 0x23   | 34      | id=10 NONE/Pedal 1/Pedal 2 (13 entries)        | Pedal/Expression controllers |
-| 2     | 0x2a   | 41      | id=4 Thru/Mute FX Out/Mute Out                 | Input/routing block |
-| 3     | 0x17   | 22      | id=4 Thru/Mute                                 | ? (small block) |
-| 4     | 0x25   | 36      | id=4 Thru/Mute                                 | ? |
-| **5** | **0x98** | **151** | **id=10 = 248 amp models (Plexi, 5153, …)** | **Amp (verified)** |
-| 6     | 0x4f   | 77      | id=4 Thru/Mute                                 | ? |
+**Post-divider region layout (Section 3 — 0x136f0 onward):**
 
-**Amp block verification.** Block 5 id=11 is a tc=0x30 float
-`(a=0, b=1, c=10, d=0.001)` — matches Session 08's `amp.gain`
-pidHigh=0x0b (knob 0..10). The `(0, 1, 10, 0.001)` quad encodes
-*internal 0..1, displayed as 0..10, step 0.001* — the standard
-Fractal knob convention. Same block has the cab (id=44, 69 entries),
-power tube (id=75, 26 entries), preamp tube (id=76, 9 entries),
-mid-boost (id=130), and reactive-load (id=135, 93 entries) enums
-we'd expect on the amp model.
+1. Divider marker `f0 ff 00 00` at 0x136f0 + 18 zero pad (24 bytes
+   total)
+2. User-cab slot *names*: u32 count=256 + 256 × LP-ASCII (all
+   `<EMPTY>` on this install) — 0x13706..0x14209
+3. 2-byte pad + u32 count=256 + 256 × u32 cab IDs (all 0xff
+   sentinel) — 0x1420c..0x1460f
+4. Section 3 block header (32 bytes) at 0x14610 — **different layout
+   from pre-divider 40-byte header**
+5. Section 3 records from 0x14636
 
-**Record layout (final):**
+**Section 3 record layout (compressed, 24-byte header):**
 
 ```
-+0   u16   flag         (always 0)
-+2   u16   id           (1-based within block; for block header: usually 3)
-+4   u32   tc_or_tag    (normal records: typecode in low 16 bits;
-                          block header: tag in high 16 bits, low 16 = 0)
-+8   u32   pad
-+12  f32   a            normal record: min / count-depends
-+16  f32   b            normal record: max / default
-+20  f32   c            normal record: step / display-scale
-+24  f32   d            normal record: 0 or extra
-+24  if tc == 0x10 (enum):  u32 count + count×LP-ASCII + 4-byte trailer
-     else (float):          4-byte trailer (record = 32 bytes)
-
-Block header (40 bytes) precedes the first record of blocks 1+:
-  +0..+3   flag, id-like
-  +4..+7   tag in high 16 bits
-  +8..+19  zeros
-  +20..+31 (1.0, 10.0, 0.001) default knob template
-  +32..+39 zeros
++0   u16   flag           (0)
++2   u16   id             (1-based within block)
++4   u16   tc             (typecode; 0x10 = enum among others)
++6   u16   pad            (0)
++8   f32   a              min
++12  f32   b              max
++16  f32   c              display-scale
++20  f32   d              step
++24  if enum:  u32 count + count×(u32 len + ASCII) + u32 trailer
+     if float: u32 trailer (0) + u32 extra  → record = 32 bytes
 ```
 
-**Next steps (Session 13):**
+The "extra" u32 at +28 of float records is structurally padding;
+semantics unclear (sometimes matches next record's id-prefix).
+Enum detection is still structural: try to parse strings, fall back
+to float.
 
-1. Dump `0x136ee..0x14000` to decode the `f0 ff` sub-section marker
-   and the 256-entry `<EMPTY>` user-cab slot list that follows. That
-   list is almost certainly the USER CAB parameter — skipping past
-   it should reveal more blocks (expect Drive, Reverb, Delay).
-2. Extend the parser to jump past the `f0 ff` divider + the 256
-   user-cab-slot enum and continue block walking.
-3. Identify Drive / Reverb / Delay blocks by their characteristic
-   enums (78-entry Drive type at 0x1c3e4; 79-entry Reverb type at
-   0x147c4 with "Room, Small"…"Spring, Vibrato-King Custom";
-   29-entry Delay type at 0x15b79 with "Digital Mono"…"Surround Delay").
-   All three are past `0x136ee` so decoding the divider unblocks them.
-4. Confirm block tags (0x98, 0x4f, etc.) do NOT correspond to AM4
-   wire pidLow values. Amp wire pidLow=0x3A but block tag=0x98 —
-   tag is an internal AM4-Edit schema index, not the wire address.
-   Need a separate mapping (likely order-based or discovered via
-   capture) from block tag → wire pidLow.
-5. Only after Drive/Reverb/Delay blocks are decoded, auto-generate
-   `KNOWN_PARAMS` from the parsed JSON.
+**17 sub-blocks found post-divider (by distinguishing enum):**
+
+| Block | Start     | Recs | Big enum (id=10 or nearby)                                      | Likely role |
+|-------|-----------|------|-----------------------------------------------------------------|-------------|
+| 0     | 0x14636   | 72   | id=10 × 79 `Room, Small … Spring, Vibrato-King Custom`         | **Reverb** |
+| 1     | 0x159eb   | 89   | id=10 × 29 `Digital Mono … Surround Delay`                      | **Delay** |
+| 2     | 0x17f57   | 31   | id=10 × 20 `Digital Mono … Vibrato 2`                           | Multi-Delay? |
+| 3     | 0x18c6a   | 35   | id=10 × 32 `Digital Mono … Manual Cancel Flanger`               | Chorus/Flanger? |
+| 4–7   | 0x198f3…  | —    | id=14/15 × 79 `NONE … 63/64`                                     | Pitch? |
+| 8     | 0x1b74d   | 40   | id=27 × 32 `OFF … 32`                                            | ? |
+| **9** | **0x1c28f** | **49** | **id=10 × 78 `Rat Distortion … Swedish Metal`**            | **Drive** |
+| 10–16 | 0x1d079…  | —    | various                                                          | Compressor/EQ/Filter/etc |
+
+Stopped at 0x1f926 (~49KB left in cache unparsed).
+
+**Next steps (Session 14):**
+
+1. Port `/tmp/parse-post3.mjs` logic into `scripts/parse-cache.ts` as
+   `parseSection3`. Re-run `npm run preflight`.
+2. Cross-reference the 4 "main" blocks (Amp pre-divider, Reverb/Delay/
+   Drive post-divider) against wire `pidLow` values (`0x3A`, `0x42`,
+   `0x46`, `0x76`). The wire-pidLow ordering is NOT the cache block
+   order — this mapping is still open and needs either capture
+   cross-reference or a heuristic based on characteristic params
+   (e.g., find Drive block by its "type=TS808 default" param).
+3. Auto-generate `KNOWN_PARAMS` entries for each confirmed
+   block/param. Start with Reverb and Delay since those are the most
+   obvious to validate by ear.
+4. After `KNOWN_PARAMS` is generated, start on **P3-007 Model lineage
+   dictionary** (see `04-BACKLOG.md`) — the 248-amp × 78-drive ×
+   79-reverb × 29-delay model names are ready to feed into the
+   wiki-scrape pipeline for the real-world-gear-inspired-by mapping.
+5. Decode the remaining ~49KB tail past 0x1f926 if it turns out to
+   contain additional blocks (scene templates? preset metadata?).
 
 ## Decoded parameters and unit conventions
 
@@ -107,23 +113,32 @@ fully populated (0..3 ↔ A..D).
 
 ## Recent breakthroughs
 
-Older breakthroughs (sessions 04–08, 10–11) are archived in `SESSIONS.md`.
-Only Session 12 (current) is kept here for fast orientation.
+Older breakthroughs (sessions 04–08, 10–12) are archived in `SESSIONS.md`.
+Only Session 13 (current) is kept here for fast orientation.
 
-1. **7 blocks decoded from Section 2** (Session 12). Block-header
-   detection (40-byte prefix with block-type tag in high 16 bits of
-   the tc u32) cracked the layout shift that blocked Session 11.
-   442 parameter records + 114 enums parsed cleanly.
-2. **Amp block identified** (Session 12). Block 5 (tag=0x98) hosts the
-   248-entry AMP TYPE enum at id=10. Block 5 id=11 cross-matches
-   Session 08's `amp.gain` pidHigh=0x0b — the `(0, 1, 10, 0.001)`
-   quad is the *internal 0..1, display 0..10, step 0.001* knob
-   convention.
-3. **Block tag ≠ wire pidLow** (Session 12). The high-16-bits "tag"
-   (0x98 for Amp, 0x4f for block 6, etc.) is AM4-Edit's internal
-   schema index — NOT the wire-protocol pidLow (Amp=0x3A). Block
-   → wire-pidLow mapping is still open and will need capture
-   cross-reference.
+1. **Post-divider region cracked — 17 blocks, 695 records**
+   (Session 13). The `f0 ff 00 00` marker at 0x136f0 introduces a
+   256-entry user-cab slot table (names + IDs, 0xf20 bytes), then
+   Section 3 begins at 0x14610 with a **compressed 24-byte record
+   header** (different from pre-divider's 24-byte-header-with-extra
+   layout). Reverb Type (79), Delay Type (29), and Drive Type (78)
+   all located — closing Phase 1's protocol-RE loop.
+2. **All main effect blocks now enumerated.** Amp (pre-divider, 248
+   models), Drive (post-divider block 9, 78 types), Reverb (block 0,
+   79 types), Delay (block 1, 29 types). The catalog is ready to
+   feed into `KNOWN_PARAMS` auto-generation AND the P3-007 Model
+   Lineage Dictionary work.
+3. **Pre-divider vs post-divider layout difference.** Pre-divider
+   records use 24-byte header with tc=u32 and a/b/c/d floats at
+   +8..+23. Post-divider records use 24-byte header with tc=u16 at
+   +4 (not +8) and a/b/c/d floats at +8..+23 with different total
+   record size (32 bytes for float). Block headers differ too:
+   pre-divider is 40 bytes with tag in high 16 bits of u32 at +4;
+   post-divider is 32 bytes with tag in high 16 bits of u32 at +8.
+4. **Block tag ≠ wire pidLow** (Session 12, still open). Amp wire
+   pidLow=0x3A but block tag=0x98. The cache's block order also
+   differs from wire pidLow order. Block → wire-pidLow mapping is
+   still open.
 
 Session 08 highlights (still load-bearing):
 
