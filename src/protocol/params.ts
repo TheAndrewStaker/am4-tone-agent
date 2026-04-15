@@ -58,6 +58,47 @@ export function decode(param: Param, internalValue: number): number {
   return internalValue * DISPLAY_TO_INTERNAL[param.unit];
 }
 
+/**
+ * Resolve an enum param's display name (or numeric index) to the wire
+ * integer. Accepts numbers directly, exact name matches, and a relaxed
+ * case-insensitive match after collapsing whitespace and punctuation —
+ * `"Marshall 1959SLP"`, `"1959slp normal"`, and `0` all resolve the
+ * same entry.
+ *
+ * Returns `undefined` if no match is found or the param is not an enum.
+ * Callers should treat that as an invalid user input.
+ */
+export function resolveEnumValue(param: Param, input: number | string): number | undefined {
+  if (param.unit !== 'enum' || !param.enumValues) return undefined;
+  if (typeof input === 'number') {
+    return param.enumValues[input] !== undefined ? input : undefined;
+  }
+  const trimmed = input.trim();
+  if (trimmed === '') return undefined;
+
+  // Exact match first (fast path + most accurate).
+  for (const [idx, name] of Object.entries(param.enumValues)) {
+    if (name === trimmed) return Number(idx);
+  }
+
+  // Relaxed match: lowercase, collapse non-alphanumeric to single space.
+  const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const target = normalize(trimmed);
+  for (const [idx, name] of Object.entries(param.enumValues)) {
+    if (normalize(name) === target) return Number(idx);
+  }
+
+  // Substring fallback: pick the entry whose normalized name contains
+  // the query (or vice-versa). Only accept unambiguous matches — if
+  // more than one entry qualifies, bail rather than pick arbitrarily.
+  const hits: number[] = [];
+  for (const [idx, name] of Object.entries(param.enumValues)) {
+    const n = normalize(name);
+    if (n.includes(target) || target.includes(n)) hits.push(Number(idx));
+  }
+  return hits.length === 1 ? hits[0] : undefined;
+}
+
 export const KNOWN_PARAMS = {
   'amp.gain': {
     block: 'amp', name: 'gain',

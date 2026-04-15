@@ -12,9 +12,10 @@
     "verify-pack": "tsx scripts/verify-pack.ts",
     "verify-msg": "tsx scripts/verify-msg.ts",
     "verify-transpile": "tsx scripts/verify-transpile.ts",
+    "verify-enum-lookup": "tsx scripts/verify-enum-lookup.ts",
     "write-test": "tsx scripts/write-test.ts",
     "build": "tsc",
-    "test": "npm run verify-pack && npm run verify-msg && npm run verify-transpile",
+    "test": "npm run verify-pack && npm run verify-msg && npm run verify-transpile && npm run verify-enum-lookup",
     "test:jest": "jest --testPathIgnorePatterns=integration",
     "test:jest:all": "jest",
     "preflight": "tsc --noEmit && npm test"
