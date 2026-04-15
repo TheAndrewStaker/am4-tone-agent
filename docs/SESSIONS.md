@@ -6,6 +6,81 @@ file is the chronological trail that reference is built from.
 
 ---
 
+## 2026-04-15 — Session 08 — Channel Selector Decoded
+
+**Goal:** resolve the Session 07 channel-addressing question with a
+targeted capture pair, then extend coverage to all four channels.
+
+### 🟢 Channel select = a regular SET_PARAM write
+
+Captures:
+- `samples/captured/session-08-amp-gain-channel-A.pcapng` —
+  Amp Gain write on channel A (channel set pre-capture).
+- `samples/captured/session-08-amp-gain-channel-B.pcapng` —
+  same, on channel B.
+- `samples/captured/session-09-channel-toggle.pcapng` — Wireshark running
+  first, then user toggles **A → B → A** in AM4-Edit.
+- `samples/captured/session-09-channel-toggle-a-c-d-a.pcapng` — same
+  shape, toggling **A → C → D → A**.
+
+Findings:
+
+1. **The two Amp-Gain writes on channels A and B are byte-identical.**
+   Same pidLow (`0x003A`), same pidHigh (`0x000B`), same action (WRITE),
+   same payload. Confirms channel is not encoded in the parameter
+   address. Capture-pair interpretation per STATE.md: "identical →
+   channel selected by an earlier message."
+2. **Channel-toggle captures each contain exactly the expected number
+   of WRITE messages** (2 in the A↔B capture at t=11.096s and t=14.479s;
+   3 in the A→C→D→A capture). All channel-select writes target
+   `pidLow=0x003A, pidHigh=0x07D2`.
+3. **Payload = float32 of the channel index.** Running each captured
+   5-byte packed suffix through `unpackFloat32LE`:
+
+   | Capture toggle | Suffix bytes | Decoded float |
+   |---|---|---|
+   | A → B | `00 00 10 03 78` | `1.0` |
+   | B → A | `00 00 00 00 00` | `0.0` |
+   | A → C | `00 00 00 04 00` | `2.0` |
+   | C → D | `00 00 08 04 00` | `3.0` |
+   | D → A | `00 00 00 00 00` | `0.0` |
+
+4. **`amp.channel` added to `KNOWN_PARAMS`** with `unit: 'enum'` and
+   `enumValues: {0:'A', 1:'B', 2:'C', 3:'D'}`. `verify-msg.ts` gained a
+   5th case — `buildSetParam('amp.channel', 1)` produces the exact
+   captured channel-B bytes, checksum and all. 5/5 match.
+
+### 🟡 pidHigh septet-decoding correction
+
+The registry edit initially produced the wrong pidHigh (`0x0F52` from
+naive LE-byte reading) and `verify-msg.ts` caught it. The two body bytes
+at positions 9–10 are **two 7-bit septets of a 14-bit field**, not a
+little-endian 16-bit integer. The correct decode is `(hi << 7) | lo`:
+
+- `52 0F` → `(0x0F << 7) | 0x52 = 0x07D2` ✓
+- `52 0F` as LE → `0x0F52` ✗ (what parse-capture's body-hex display
+  literally shows — it's a diagnostic view, not the decoded field).
+
+Every pidHigh decoded before Session 08 happened to be ≤ `0x7F`, so
+both readings produced the same value. Channel was the first pidHigh
+where they diverge. Now documented in SYSEX-MAP.md §6a.
+
+### Parked for next session
+
+- **Per-block channel pidHigh confirmation.** The Drive / Reverb / Delay
+  channel selectors are probably at `pidHigh=0x07D2` on their respective
+  `pidLow`, but not verified. Will come for free when expanding the IR
+  to full-preset scope and needing to emit channel writes for those
+  blocks.
+- **IR structural change.** The working-buffer IR was intentionally not
+  extended with a per-block `channel` field — that belongs with the
+  full-preset IR expansion (block placement + scenes + channels).
+  Channel is accessible via `'amp.channel'` as a plain param for now.
+- **Ghidra parameter metadata table** — promoted to "single next action"
+  in STATE.md. Unchanged recipe.
+
+---
+
 ## 2026-04-14 — Session 07 — Param Registry + Channel-Evidence Mining
 
 **Goal:** ship the typed parameter registry from STATE.md; mine existing

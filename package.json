@@ -14,8 +14,10 @@
     "verify-transpile": "tsx scripts/verify-transpile.ts",
     "write-test": "tsx scripts/write-test.ts",
     "build": "tsc",
-    "test": "jest --testPathIgnorePatterns=integration",
-    "test:all": "jest"
+    "test": "npm run verify-pack && npm run verify-msg && npm run verify-transpile",
+    "test:jest": "jest --testPathIgnorePatterns=integration",
+    "test:jest:all": "jest",
+    "preflight": "tsc --noEmit && npm test"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",

@@ -68,6 +68,13 @@ export const KNOWN_PARAMS = {
     pidLow: 0x003a, pidHigh: 0x0000,
     unit: 'db', displayMin: -80, displayMax: 20,
   },
+  'amp.channel': {
+    block: 'amp', name: 'channel',
+    pidLow: 0x003a, pidHigh: 0x07d2,
+    unit: 'enum', displayMin: 0, displayMax: 3,
+    // Session 08: A→B→A and A→C→D→A captures confirmed all 4 indices.
+    enumValues: { 0: 'A', 1: 'B', 2: 'C', 3: 'D' },
+  },
   'drive.drive': {
     block: 'drive', name: 'drive',
     pidLow: 0x0076, pidHigh: 0x000b,

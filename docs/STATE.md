@@ -2,8 +2,8 @@
 
 > Read this file at the start of every session. It's kept up-to-date with
 > current phase, the single next action, and recent findings.
-> Last updated: **2026-04-14** (Session 07 — parameter registry built and
-> hardware-verified end-to-end via captured-byte comparison).
+> Last updated: **2026-04-15** (Session 08 — per-block channel selector
+> fully decoded and verify-msg confirmed all 4 channel values).
 
 ---
 
@@ -13,79 +13,17 @@
 write produced visible parameter change on the device (Session 05).
 
 **Phase 2 — Parameter registry + preset IR + transpiler.** Registry +
-working-buffer IR + transpiler all shipped and capture-verified in
-Session 07. Two open questions remain before the IR can grow to cover
-full presets: **(a) how channel A/B/C/D selection is encoded** (capture
-recipe below), and **(b) bulk parameter discovery** (Ghidra metadata
-table extraction below).
+working-buffer IR + transpiler shipped and capture-verified (Session 07).
+Channel-addressing solved in Session 08 — channel A/B/C/D is a regular
+SET_PARAM write at `pidHigh = 0x07D2` with the index (0..3) encoded as a
+float32. One open question remains before the IR can cover full presets:
+**bulk parameter discovery** (Ghidra metadata table extraction below).
 
 ## The single next action
 
-### Channel-switch capture pair (highest priority)
+### Ghidra-extract AM4-Edit's parameter metadata table
 
-Goal: discover whether the active block channel (A/B/C/D) is encoded in
-the SET_PARAM address or selected by a separate message.
-
-**Setup (one-time prerequisites — confirmed working in Session 04):**
-- AM4 powered on, USB connected
-- AM4-Edit v1.00.04 running and connected to the AM4
-- Wireshark **launched as Administrator** (right-click → Run as admin)
-- Capture interface: **USBPcap2** (the AM4 enumerates on the same root
-  hub as the fingerprint reader on this ThinkPad)
-- A working Git Bash terminal in `C:/dev/am4-tone-agent/`
-
-**Capture procedure — repeat once per channel:**
-
-For each (channel, filename) pair below:
-1. In AM4-Edit, navigate to a preset (any preset is fine — the address
-   is preset-independent). Click the **Amp** block to focus it.
-2. Use AM4-Edit's channel selector to set the Amp block to the target
-   channel (A or B). Confirm the channel indicator updates.
-3. In Wireshark, start capture on **USBPcap2**.
-4. **Wait ~2 seconds** of idle so the steady-state poll baseline is
-   captured before any user action. Then change the **Amp Gain** value
-   to a clearly different number (e.g. type `5.0` and press Enter — not
-   the same value as your starting point, otherwise AM4-Edit may
-   suppress the write).
-5. Wait ~2 more seconds, then stop the capture.
-6. **File → Save As** → save to:
-   - Channel A run: `samples/captured/session-08-amp-gain-channel-A.pcapng`
-   - Channel B run: `samples/captured/session-08-amp-gain-channel-B.pcapng`
-
-**Decode both captures to text:**
-
-```bash
-tshark -r samples/captured/session-08-amp-gain-channel-A.pcapng \
-       -Y sysex -V \
-       > samples/captured/decoded/session-08-amp-gain-channel-A.tshark.txt
-
-tshark -r samples/captured/session-08-amp-gain-channel-B.pcapng \
-       -Y sysex -V \
-       > samples/captured/decoded/session-08-amp-gain-channel-B.tshark.txt
-```
-
-(`tshark` lives at `C:\Program Files\Wireshark\tshark.exe` — already on
-PATH after a standard Wireshark install.)
-
-**Once both `.tshark.txt` files exist, the analysis steps are:**
-
-1. `npx tsx scripts/parse-capture.ts samples/captured/decoded/session-08-amp-gain-channel-A.tshark.txt`
-   — grep the output for the rare `1×` body that starts with `013a000b` (Amp pidLow `0x003a`,
-   Gain pidHigh `0x000b`) and `0001` action — that's the channel-A write.
-2. Same on `...channel-B.tshark.txt` — same shape, that's the channel-B write.
-3. Locate the full message in each capture (search the .tshark.txt for
-   the body hex inside `[Reassembled data: f000017415... f7]`).
-4. Diff the two full message bytes:
-   - **Identical** → channel selected by an earlier message. Diff the
-     *non-write* OUT traffic between the two captures to find it. Prime
-     suspects: action codes `0x0110` and `0x010d` (logged in SESSIONS.md
-     as Session 07 mysteries — only seen for specific Amp pidHighs).
-   - **Differing** → channel encoded in `pidLow` or `pidHigh`. The diff
-     shows exactly which bits flipped; update `params.ts` accordingly.
-
-### Parallel: Ghidra-extract AM4-Edit's parameter metadata table
-
-Highest-leverage non-capture work. AM4-Edit must store parameter names,
+Highest-leverage work remaining for Phase 2. AM4-Edit must store parameter names,
 ranges, and enum dropdown strings (Amp Type, Cab IR, Drive Type, Reverb
 Type, Delay Type) in static data — finding that table likely bulk-
 unlocks hundreds of params at once.
@@ -126,35 +64,38 @@ the output into `KNOWN_PARAMS` (`src/protocol/params.ts`).
 ## Decoded parameters and unit conventions
 
 Live source of truth: `src/protocol/params.ts` (`KNOWN_PARAMS` + `Unit`
-union). 7 params across 4 blocks (Amp `0x003A`, Drive `0x0076`, Reverb
+union). 8 params across 4 blocks (Amp `0x003A`, Drive `0x0076`, Reverb
 `0x0042`, Delay `0x0046`) using 5 unit conventions (`knob_0_10`, `db`,
 `percent`, `ms`, `enum`). `pidLow` = block ID, `pidHigh` = parameter
 index within block; address is preset-independent. Drive Type enum has
-only one entry catalogued so far (8 = `TS808`).
+only one entry catalogued so far (8 = `TS808`); Amp Channel enum is
+fully populated (0..3 ↔ A..D).
 
 ## Recent breakthroughs
 
-Older breakthroughs (sessions 04–06) are archived in `SESSIONS.md`. Only
-session-07 (current) is kept here for fast orientation.
+Older breakthroughs (sessions 04–07) are archived in `SESSIONS.md`. Only
+session-08 (current) is kept here for fast orientation.
 
-1. **Working-buffer IR + transpiler shipped** (Session 07). `src/ir/`
-   exports `WorkingBufferIR` (flat param map) and `transpile(ir)` →
-   `number[][]`. `npm run verify-transpile` confirms 3/3 emitted
-   messages equal `buildSetParam(key, value)` and `amp.bass=6` still
-   matches the captured AM4-Edit wire bytes.
-2. **Parameter registry shipped and hardware-verified** (Session 07).
-   `src/protocol/params.ts` → `KNOWN_PARAMS` (7 params keyed
-   `block.name`), `Unit` union, `encode`/`decode`. `setParam.ts` gained
-   `buildSetParam(key, displayValue)`. `verify-msg.ts` 4/4. End-to-end
-   pipeline closed: display value → unit scale → float pack → envelope
-   → wire bytes identical to AM4-Edit.
-3. **Channel-evidence partial** (Session 07): identical pidHighs polled
-   across all 4 blocks (`0x0003`, `0x0f5d`, `0x0f66`); `0x0f66` polled
-   most heavily for the focused block — likely block-level metadata
-   (bypass / active channel / type), not per-param. **Channel-switch
-   behaviour itself still needs the capture pair** in "next action".
-   Mystery action codes `0x0026`, `0x0110`, `0x010d` logged in
-   SESSIONS.md for later.
+1. **Per-block channel selector decoded** (Session 08). Channel A/B/C/D
+   is a regular SET_PARAM write at `pidLow=0x003A` (Amp), `pidHigh=0x07D2`,
+   with the channel index (0..3) packed as an IEEE 754 float32. Two
+   captures proved it: `session-09-channel-toggle.pcapng` (A↔B) and
+   `session-09-channel-toggle-a-c-d-a.pcapng` (A→C→D→A). All four values
+   confirmed by `unpackFloat32LE`. `amp.channel` added to `KNOWN_PARAMS`
+   with `unit: 'enum'` and `enumValues: {0:'A', 1:'B', 2:'C', 3:'D'}`;
+   `verify-msg.ts` now 5/5 including checksum.
+2. **pidHigh decoding correction** (Session 08). Prior to `0x07D2`, every
+   observed pidHigh was ≤ 0x7F, so reading the two body bytes as
+   little-endian (`(hi << 8) | lo`) gave the same answer as the correct
+   septet decode (`(hi << 7) | lo`). Channel was the first param to
+   expose the difference — `parse-capture.ts`'s body-hex display still
+   shows the septet bytes laid out LE, so always convert with `(hi<<7)|lo`
+   when extracting a new `pidHigh` from a capture. Documented in
+   SYSEX-MAP.md §6a.
+3. **Same pidHigh likely applies to other blocks** (Session 08, unverified).
+   The other per-block selectors (Drive/Reverb/Delay) are probably at
+   `pidHigh=0x07D2` on their respective `pidLow`. Worth a one-shot
+   capture when expanding the registry to per-block channel keys.
 
 ## What's known (status legend)
 
@@ -163,9 +104,9 @@ session-07 (current) is kept here for fast orientation.
 - Preset dump format (`0x77/0x78/0x79`) + slot addressing — **🟢 confirmed**.
 - `0x01` SET_PARAM message format + value encoding — **🟢 fully decoded**.
 - Parameter ID structure — **🟢 (Session 06, preset-independent)**.
-- 7 params / 4 blocks / 5 units — **🟢 in `params.ts`**.
-- Channel A/B/C/D addressing — **🟡 partial; capture pair pending (see
-  next action)**.
+- 8 params / 4 blocks / 5 units — **🟢 in `params.ts`**.
+- Channel A/B/C/D addressing — **🟢 (Session 08: Amp `pidHigh=0x07D2`,
+  float32 index 0..3; other blocks' channel pidHigh unverified)**.
 - Drive Type enum table — **🟡 only `8 → TS808` known**.
 - Full preset binary layout inside `0x78` chunks — **🔴 scrambled, parked**.
 
@@ -174,10 +115,11 @@ authoritative in `CLAUDE.md` and `DECISIONS.md` — not duplicated here.
 
 ## Roadmap landmarks
 
-- **Now:** channel-switch capture pair + Ghidra metadata extraction
-  (both detailed in "single next action").
+- **Now:** Ghidra metadata extraction (single next action above).
 - **Then:** expand `WorkingBufferIR` → full `PresetIR` (block placement,
-  4 scenes, per-block channel assignment) — needs (a) above.
+  4 scenes, per-block channel assignment) — the transpiler will need to
+  emit a channel-select write (now understood) before that block's
+  param writes.
 - **Then:** scaffold MCP server (`src/server/`) with first two tools
   (`read_slot`, `apply_preset`).
 - **Then:** natural-language → preset-IR (Claude side).

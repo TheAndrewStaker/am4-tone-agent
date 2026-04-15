@@ -90,6 +90,24 @@ A01–Z04 (104 slots total, 4 per bank, 26 banks A–Z)
 - Sniffing session logs go in docs/SESSIONS.md
 - Tests that require hardware are in tests/integration/ and skipped in CI
 
+## Testing and sign-off
+
+- **`npm run preflight`** is the single command to run before every
+  commit. It runs `tsc --noEmit` and then `npm test`, which chains the
+  three protocol-layer goldens:
+  - `verify-pack` — 10-sample pack/unpack round-trip.
+  - `verify-msg` — built messages vs. captured wire bytes (byte-exact,
+    including checksum).
+  - `verify-transpile` — IR → command sequence goldens.
+- `npm test` alone runs just the goldens; handy for iterating on the
+  protocol layer without waiting for the typecheck.
+- `npm run test:jest` is reserved for future Jest-based unit tests (the
+  scaffolding exists; there are no tests yet).
+- **When adding a new pidHigh to `params.ts`, add a matching case to
+  `verify-msg.ts` built from captured bytes.** That is the only guard
+  against misreading septet-encoded pidHighs as little-endian bytes
+  (the class of bug that hit Session 08 — see SYSEX-MAP.md §6a note).
+
 ## Do Not
 - Do not use AM4-Edit as a dependency or requirement
 - Do not hardcode preset slot values — always use the A01–Z04 naming

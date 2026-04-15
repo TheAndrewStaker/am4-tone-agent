@@ -258,6 +258,16 @@ F0 00 01 74 15 01 [pidL_lo pidL_hi] [pidH_lo pidH_hi] [read_type:1] 00 00 00 00 
 |---|---|---|---|---|
 | `0x003A` | `0x000B` | Amp Gain | displayed × 0.1 (UI 0–10 → internal 0–1) | preset A01, session 04 |
 | `0x003A` | `0x003E` | Parametric EQ band 1 gain | displayed × (1/12) for −12…+12 dB UI | session 05 |
+| `0x003A` | `0x07D2` | Amp active channel (A/B/C/D) | enum int 0..3 packed as float32 | session 08 (toggle captures, all 4 confirmed) |
+
+> The Amp channel-selector parameter (`pidH = 0x07D2`) is the first
+> observation that `0x0f52` in the parse-capture body dump was **two 7-bit
+> septets**, not a little-endian 16-bit value. Since every prior pidHigh
+> was ≤ 0x7F the distinction was invisible. All future pidHighs ≥ 128
+> must be decoded with `(hi << 7) | lo`, not `(hi << 8) | lo`. The other
+> per-block selectors (Drive/Reverb/Delay) likely live at the same
+> pidHigh `0x07D2` on their respective `pidLow` values, but that's not
+> yet confirmed.
 
 Per-parameter scale must be looked up — the firmware operates in
 normalized units, AM4-Edit converts on display.

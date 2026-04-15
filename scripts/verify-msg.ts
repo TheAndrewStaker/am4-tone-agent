@@ -30,6 +30,11 @@ const cases: { label: string; built: number[]; expected: string }[] = [
     built: buildSetParam('amp.bass', 6),
     expected: 'f000017415013a000c000100000004004d2623137801f7',
   },
+  {
+    label: 'buildSetParam("amp.channel", 1) — matches session-09 channel-B toggle',
+    built: buildSetParam('amp.channel', 1),
+    expected: 'f000017415013a00520f010000000400000010037818f7',
+  },
 ];
 
 let pass = 0;
