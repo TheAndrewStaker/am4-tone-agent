@@ -2,9 +2,10 @@
 
 > Read this file at the start of every session. It's kept up-to-date with
 > current phase, the single next action, and recent findings.
-> Last updated: **2026-04-15** (Session 11 — Section 2 record layout
-> decoded; 98 records (15 enums) parsed from block 0 of Section 2
-> before a layout shift at 0xcc80 halts the walker).
+> Last updated: **2026-04-15** (Session 12 — 7 blocks decoded across
+> Section 2 (442 parameter records, 114 enums). Block 5 (tag=0x98)
+> identified as the Amp block via its 248-entry AMP TYPE enum; id=11
+> matches Session 08's `amp.gain` pidHigh=0x0b).
 
 ---
 
@@ -22,61 +23,77 @@ float32. One open question remains before the IR can cover full presets:
 
 ## The single next action
 
-### Cross the Section 2 block boundary at `0xcc80`
+### Decode remaining blocks past the sub-section divider at `0x136ee`
 
-Session 11 extended `parse-cache.ts` to walk Section 2. Output:
-`samples/captured/decoded/cache-section2.json` — 98 records from the
-first "block" (15 enums including LFO waveform, beat division, stereo
-routing; 9 "assign template" float knobs at ids 1..9 with identical
-`min=1, max=10, step=0.001`; a bundle of `OFF/ON` bypass switches).
+Session 12 extended `parseSection2` with **block-header detection**:
+blocks 1+ begin with a 40-byte header whose u32 at +4 encodes a
+block-type tag in its high 16 bits (`0x00XX0000`). After the header,
+normal 32-byte records (id=1, 2, 3, …) resume with the standard
+layout. This decoded 7 blocks / 442 records before hitting a
+sub-section divider at `0x136ee` (marker `f0 ff 00 00`).
 
-**Block 0 is almost certainly the Modifier/Controller definition**, not
-the Amp block. Evidence: the SINE..ASTABLE LFO waveform enum at id=10,
-no matches for Session 08's known amp params (`amp.gain` pidHigh=11,
-`amp.level`=0), and the presence of 9 identical "assign knob" slots
-which matches Axe-FX/FM-family modifier semantics.
+| Block | Tag    | Records | First enum                                    | Likely role |
+|-------|--------|---------|-----------------------------------------------|-------------|
+| 0     | —      | 98      | id=10 SINE/TRI/SQUARE (LFO waveforms)          | Modifier/Controller template |
+| 1     | 0x23   | 34      | id=10 NONE/Pedal 1/Pedal 2 (13 entries)        | Pedal/Expression controllers |
+| 2     | 0x2a   | 41      | id=4 Thru/Mute FX Out/Mute Out                 | Input/routing block |
+| 3     | 0x17   | 22      | id=4 Thru/Mute                                 | ? (small block) |
+| 4     | 0x25   | 36      | id=4 Thru/Mute                                 | ? |
+| **5** | **0x98** | **151** | **id=10 = 248 amp models (Plexi, 5153, …)** | **Amp (verified)** |
+| 6     | 0x4f   | 77      | id=4 Thru/Mute                                 | ? |
 
-Decoded Section 2 record layout (verified on 3 enums and many floats):
+**Amp block verification.** Block 5 id=11 is a tc=0x30 float
+`(a=0, b=1, c=10, d=0.001)` — matches Session 08's `amp.gain`
+pidHigh=0x0b (knob 0..10). The `(0, 1, 10, 0.001)` quad encodes
+*internal 0..1, displayed as 0..10, step 0.001* — the standard
+Fractal knob convention. Same block has the cab (id=44, 69 entries),
+power tube (id=75, 26 entries), preamp tube (id=76, 9 entries),
+mid-boost (id=130), and reactive-load (id=135, 93 entries) enums
+we'd expect on the amp model.
+
+**Record layout (final):**
 
 ```
 +0   u16   flag         (always 0)
-+2   u16   id           (1-based, resets per block)
-+4   u32   typecode     (0 = float; 0x10 = enum; others seen: 0x20, 0x35, 0x42, 0x44)
-+8   f32   a            (float record: min; enum record: min=0)
-+12  f32   b            (float record: max; enum record: max = count-1)
-+16  f32   c            (float record: step; enum record: default index, often 1)
-+20  f32   d            (float record: often 0 or a default; enum record: 0)
++2   u16   id           (1-based within block; for block header: usually 3)
++4   u32   tc_or_tag    (normal records: typecode in low 16 bits;
+                          block header: tag in high 16 bits, low 16 = 0)
++8   u32   pad
++12  f32   a            normal record: min / count-depends
++16  f32   b            normal record: max / default
++20  f32   c            normal record: step / display-scale
++24  f32   d            normal record: 0 or extra
 +24  if tc == 0x10 (enum):  u32 count + count×LP-ASCII + 4-byte trailer
      else (float):          4-byte trailer (record = 32 bytes)
+
+Block header (40 bytes) precedes the first record of blocks 1+:
+  +0..+3   flag, id-like
+  +4..+7   tag in high 16 bits
+  +8..+19  zeros
+  +20..+31 (1.0, 10.0, 0.001) default knob template
+  +32..+39 zeros
 ```
 
-The walker halts at `0xcc80` on the first block-1 record:
-- `flag=0 id=3 tc=0x00230000` — **high 16 bits of tc are 0x23 (35)**.
-- Floats in this record are shifted 12 bytes later (at +20/+24/+28
-  instead of +8/+12/+16) — the same `(1.0, 10.0, 0.001)` assign-knob
-  triple appears, just at a different offset.
-- Interpretation: either the record is 40+ bytes (extra 8-byte header),
-  or the high-word of `tc` is a per-block-start tag (block type ID?)
-  that the layout is conditional on.
+**Next steps (Session 13):**
 
-**Next steps (Session 12):**
-
-1. Hand-decode 3–4 records past `0xcc80` to determine whether block 1
-   uses a 40-byte record or a 32-byte record with a different float
-   offset, and whether the `tc` high-word encodes block type.
-2. Extend `parseSection2` to handle the shifted layout once decoded.
-3. Walk the full section and count blocks; match Session 08's known
-   params (`amp.gain` pidHigh=0x0b → expected as knob 0..10; 
-   `amp.channel` pidHigh=0x07D2 → expected as 4-entry A/B/C/D enum)
-   to identify which block index = Amp / Drive / Reverb / Delay.
-4. Only then auto-generate `KNOWN_PARAMS` from the parsed JSON.
-
-### Alternative: skip cache-parsing, continue with capture-driven registry
-
-If the block-1 layout resists decoding, fall back to adding
-captured-bytes `verify-msg` cases one param at a time. We already have
-the method for every new param; it's just slow. The cache is a bulk
-shortcut, not a blocker.
+1. Dump `0x136ee..0x14000` to decode the `f0 ff` sub-section marker
+   and the 256-entry `<EMPTY>` user-cab slot list that follows. That
+   list is almost certainly the USER CAB parameter — skipping past
+   it should reveal more blocks (expect Drive, Reverb, Delay).
+2. Extend the parser to jump past the `f0 ff` divider + the 256
+   user-cab-slot enum and continue block walking.
+3. Identify Drive / Reverb / Delay blocks by their characteristic
+   enums (78-entry Drive type at 0x1c3e4; 79-entry Reverb type at
+   0x147c4 with "Room, Small"…"Spring, Vibrato-King Custom";
+   29-entry Delay type at 0x15b79 with "Digital Mono"…"Surround Delay").
+   All three are past `0x136ee` so decoding the divider unblocks them.
+4. Confirm block tags (0x98, 0x4f, etc.) do NOT correspond to AM4
+   wire pidLow values. Amp wire pidLow=0x3A but block tag=0x98 —
+   tag is an internal AM4-Edit schema index, not the wire address.
+   Need a separate mapping (likely order-based or discovered via
+   capture) from block tag → wire pidLow.
+5. Only after Drive/Reverb/Delay blocks are decoded, auto-generate
+   `KNOWN_PARAMS` from the parsed JSON.
 
 ## Decoded parameters and unit conventions
 
@@ -90,22 +107,23 @@ fully populated (0..3 ↔ A..D).
 
 ## Recent breakthroughs
 
-Older breakthroughs (sessions 04–08, 10) are archived in `SESSIONS.md`.
-Only Session 11 (current) is kept here for fast orientation.
+Older breakthroughs (sessions 04–08, 10–11) are archived in `SESSIONS.md`.
+Only Session 12 (current) is kept here for fast orientation.
 
-1. **Section 2 record layout decoded** (Session 11). Unified 24-byte
-   header (flag, id, typecode u32, + 4 floats a/b/c/d) followed by
-   either an enum body (tc=0x10) or 8-byte float-record tail.
-   Verified on SINE-waveform, amp-type (248 entries), and drive-type
-   (78 entries including TS808/Klon) enums. 98 records cleanly parsed
-   from Section 2's block 0 — identified as the Modifier/Controller
-   definition, not a per-effect block.
-2. **Anomaly at 0xcc80** (Session 11). First record of block 1 has
-   `tc=0x00230000` (high bits set) and the canonical assign-knob float
-   triple `(1.0, 10.0, 0.001)` at +20/+24/+28 instead of the expected
-   +8/+12/+16. Suggests either extra per-block prefix bytes or a
-   tc-dependent record layout. Parser halts here pending Session 12
-   work.
+1. **7 blocks decoded from Section 2** (Session 12). Block-header
+   detection (40-byte prefix with block-type tag in high 16 bits of
+   the tc u32) cracked the layout shift that blocked Session 11.
+   442 parameter records + 114 enums parsed cleanly.
+2. **Amp block identified** (Session 12). Block 5 (tag=0x98) hosts the
+   248-entry AMP TYPE enum at id=10. Block 5 id=11 cross-matches
+   Session 08's `amp.gain` pidHigh=0x0b — the `(0, 1, 10, 0.001)`
+   quad is the *internal 0..1, display 0..10, step 0.001* knob
+   convention.
+3. **Block tag ≠ wire pidLow** (Session 12). The high-16-bits "tag"
+   (0x98 for Amp, 0x4f for block 6, etc.) is AM4-Edit's internal
+   schema index — NOT the wire-protocol pidLow (Amp=0x3A). Block
+   → wire-pidLow mapping is still open and will need capture
+   cross-reference.
 
 Session 08 highlights (still load-bearing):
 

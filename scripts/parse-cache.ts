@@ -114,7 +114,19 @@ interface Section2Enum extends Section2Base {
   min: number;
   values: string[];
 }
-type Section2Record = Section2Float | Section2Enum;
+// Block header preceding the first parameter record of blocks 1+.
+// 40 bytes; the u32 at +4 has the block-type tag in its high 16 bits
+// (e.g. 0x00230000 → blockType=0x23). Floats at +20/+24/+28 match the
+// assign-knob template (1.0, 10.0, 0.001), so the header also carries
+// a default knob spec.
+interface Section2BlockHeader {
+  kind: 'blockHeader';
+  offset: number;
+  block: number;
+  blockTag: number; // high 16 bits of the tc u32
+  floatsAt20: [number, number, number];
+}
+type Section2Record = Section2Float | Section2Enum | Section2BlockHeader;
 
 const HEADER_SIZE = 22; // id + tc + pad + min + max + def + step
 const FLOAT_TRAILER = 10;
@@ -281,11 +293,28 @@ function parseSection2(buf: Buffer, start: number): { records: Section2Record[];
     const id = buf.readUInt16LE(off + 2);
     const tc = buf.readUInt32LE(off + 4);
 
-    // Record validity: flag=0, id in [1, 2048]. Typecode values seen:
-    // 0, 0x10, 0x20, 0x35, 0x42, 0x44, 0x100 — keep the ceiling loose.
-    // High bits (tc >> 16) are non-zero on the first record of some
-    // later blocks (e.g. block 1 id=3 has tc=0x00230000) — layout there
-    // shifts the floats by 12 bytes, not yet fully decoded.
+    // Block header detection: blocks 1+ begin with a 40-byte header whose
+    // u32 at +4 has its high 16 bits set (blockTag), the floats are at
+    // +20/+24/+28 instead of +12/+16/+20, and the "id" field at +2 is
+    // actually the record count (not a parameter id). After the 40 bytes,
+    // normal 32-byte records (id=1, 2, 3, …) resume.
+    if (flag === 0 && (tc >>> 16) !== 0 && (tc & 0xffff) === 0) {
+      const blockTag = tc >>> 16;
+      const f1 = buf.readFloatLE(off + 20);
+      const f2 = buf.readFloatLE(off + 24);
+      const f3 = buf.readFloatLE(off + 28);
+      block++;
+      records.push({
+        kind: 'blockHeader', offset: off, block, blockTag,
+        floatsAt20: [f1, f2, f3],
+      });
+      off += 40;
+      prevId = 0;
+      continue;
+    }
+
+    // Record validity: flag=0, id in [1, 2048]. Typecodes seen in body:
+    // 0, 0x10, 0x20, 0x35, 0x42, 0x44, 0x100. Ceiling stays loose.
     if (flag !== 0 || id === 0 || id > 2048 || tc > 0xffff) {
       reason = `stopped at 0x${off.toString(16)}: flag=${flag} id=${id} tc=0x${tc.toString(16)}`;
       break;
@@ -378,11 +407,14 @@ for (const r of s2) {
 }
 console.log(`block count: ${blocks.size}`);
 for (const [b, recs] of blocks) {
-  const enums = recs.filter(r => r.kind === 'enum') as Section2Enum[];
-  const maxId = Math.max(...recs.map(r => r.id));
+  const params = recs.filter(r => r.kind !== 'blockHeader') as (Section2Float | Section2Enum)[];
+  const enums = params.filter(r => r.kind === 'enum') as Section2Enum[];
+  const header = recs.find(r => r.kind === 'blockHeader') as Section2BlockHeader | undefined;
+  const maxId = params.length ? Math.max(...params.map(r => r.id)) : 0;
   const firstEnum = enums[0];
   const peek = firstEnum ? `  first enum: id=${firstEnum.id} count=${firstEnum.values.length} [${firstEnum.values.slice(0, 3).join(', ')}${firstEnum.values.length > 3 ? ', …' : ''}]` : '';
-  console.log(`  block ${b.toString().padStart(2)}: ${recs.length.toString().padStart(3)} records, maxId=${maxId}, enums=${enums.length}${peek}`);
+  const tagNote = header ? `  tag=0x${header.blockTag.toString(16)}` : '';
+  console.log(`  block ${b.toString().padStart(2)}: ${params.length.toString().padStart(3)} records, maxId=${maxId}, enums=${enums.length}${tagNote}${peek}`);
 }
 
 const s2Path = join(outDir, 'cache-section2.json');
