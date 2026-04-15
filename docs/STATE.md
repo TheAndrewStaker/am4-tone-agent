@@ -2,12 +2,12 @@
 
 > Read this file at the start of every session. It's kept up-to-date with
 > current phase, the single next action, and recent findings.
-> Last updated: **2026-04-15** (Session 15 — cache-block ↔ wire-pidLow
-> mapping CONFIRMED. Wire `pidHigh` directly equals cache record `id`.
-> All 4 main effect blocks pinned: Amp=S2 block 5, Drive=S3 sub-block 9,
-> Reverb=S3 sub-block 0, Delay=S3 sub-block 1. 6/7 KNOWN_PARAMS
-> structurally verified; `amp.level` (pidHigh=0x0000) is out-of-band like
-> `amp.channel`. Preflight green.)
+> Last updated: **2026-04-15** (Session 16 — 4 type-enum dictionaries
+> generated from cache and wired into `params.ts`: AMP_TYPES×248,
+> DRIVE_TYPES×78, REVERB_TYPES×79, DELAY_TYPES×29. KNOWN_PARAMS grew from
+> 8 to 11 entries; `delay.time` displayMax fixed to 8000 ms.
+> `docs/CACHE-DUMP.md` committed as human-readable listing of every
+> param record across the 4 mapped blocks. Preflight green.)
 
 ---
 
@@ -25,33 +25,33 @@ float32. One open question remains before the IR can cover full presets:
 
 ## The single next action
 
-### Auto-generate `KNOWN_PARAMS` from the mapped blocks
+### Capture a Reverb Type / Delay Type / Amp Type change in AM4-Edit
 
-Run `npx tsx scripts/map-cache-params.ts` to see every parameter for
-the 4 main blocks with `a/b/c/d` floats from the cache — this is now
-the authoritative source for `displayMin`/`displayMax`/`step` and the
-full enum tables (Amp Type × 248, Drive Type × 78, Reverb Type × 79,
-Delay Type × 29, plus 138 amp cab models at Amp id=41, 69 amp mic
-models at id=44, etc.).
+The 4 new enum entries (`amp.type`, `reverb.type`, `delay.type`, plus
+expanded `drive.type`) are structurally correct by Session 15's proof
+that `pidHigh == cache record id`, but untested against wire captures.
+To move them from "cache-derived, untested" to "capture-verified",
+run one capture per block that changes the Type dropdown in AM4-Edit
+and compare the emitted SET_PARAM against `buildSetParam('amp.type', N)`.
+Add a matching case to `verify-msg.ts` for each — the existing
+`drive.type=TS808` (wire index 8) case already covers Drive.
 
-Next session: write `scripts/gen-known-params.ts` that reads the cache
-JSON, emits a strongly-typed `KNOWN_PARAMS` superset, and updates
-`src/protocol/params.ts`. Keep the 7 existing hand-written entries
-stable (they're capture-verified); add new entries from cache data
-with a fresh status tag so we can distinguish "cache-derived,
-untested" from "capture-verified". Validate by re-running preflight.
+Also pending:
 
-Open questions to resolve along the way:
-
-- **`amp.level` pidHigh=0x0000** is not in the cache record table
-  (Amp block's ids start at 1). Same pattern as `amp.channel`
-  (pidHigh=0x07D2). These are both "out-of-band" params that live
-  outside the per-block record list. One capture each of Drive/Reverb/
-  Delay *level* will confirm whether pidHigh=0 is a block-generic
-  output-level address or Amp-specific.
-- **`delay.time` displayMax drift**: the cache says `b=8` seconds
-  (so up to 8000 ms); `params.ts` currently has 5000 ms. Update when
-  regenerating.
+- **Role-map the 20 remaining cache blocks** (S2 blocks 0–4/6 and S3
+  sub-blocks 2–8, 10–16). Each is a specific effect (Chorus/Flanger/
+  Pitch/EQ/Compressor/Filter/etc.) but we don't know which is which
+  without a capture of AM4-Edit adding that effect to a slot. Add role
+  assignments to `CACHE_BLOCK_MAP` in `scripts/map-cache-params.ts`
+  as they're confirmed.
+- **`amp.level` pidHigh=0x0000 is not in the cache record table**
+  (Amp block ids start at 1). Same pattern as `amp.channel`. One
+  capture each of Drive/Reverb/Delay *level* will tell us whether
+  pidHigh=0 is a block-generic output-level address.
+- **P3-007 Model Lineage Dictionary** (see `04-BACKLOG.md`) can now
+  begin — `cacheEnums.ts` is the authoritative input for the wiki-
+  scrape pipeline that maps firmware model names to their real-world
+  gear inspirations.
 
 **Layouts (parser is source of truth — see `scripts/parse-cache.ts`):**
 
@@ -93,17 +93,30 @@ sub-block 1 = Delay (89 recs, id=10 enum × 29), sub-block 9 = Drive
 ## Decoded parameters and unit conventions
 
 Live source of truth: `src/protocol/params.ts` (`KNOWN_PARAMS` + `Unit`
-union). 8 params across 4 blocks (Amp `0x003A`, Drive `0x0076`, Reverb
+union). 11 params across 4 blocks (Amp `0x003A`, Drive `0x0076`, Reverb
 `0x0042`, Delay `0x0046`) using 5 unit conventions (`knob_0_10`, `db`,
 `percent`, `ms`, `enum`). `pidLow` = block ID, `pidHigh` = parameter
-index within block; address is preset-independent. Drive Type enum has
-only one entry catalogued so far (8 = `TS808`); Amp Channel enum is
-fully populated (0..3 ↔ A..D).
+index within block; address is preset-independent. All 4 type enums
+(Amp 248 / Drive 78 / Reverb 79 / Delay 29) are populated from
+`cacheEnums.ts`. Amp Channel enum is fully populated (0..3 ↔ A..D).
+Capture-verified entries: `amp.gain/bass/level/channel`, `drive.drive/
+type=TS808`, `reverb.mix`, `delay.time`. Cache-derived and untested:
+`amp.type`, `reverb.type`, `delay.type`, plus the expanded `drive.type`
+index table (only index 8 has been wire-verified).
 
 ## Recent breakthroughs
 
 Older breakthroughs (sessions 04–08, 10–12) are archived in `SESSIONS.md`.
-Sessions 13–15 (current) are kept here for fast orientation.
+Sessions 13–16 (current) are kept here for fast orientation.
+
+000. **Type-enum dictionaries wired into params.ts** (Session 16).
+     `scripts/gen-cache-enums.ts` emits `src/protocol/cacheEnums.ts`
+     with AMP/DRIVE/REVERB/DELAY type arrays (248/78/79/29 entries).
+     `KNOWN_PARAMS` now carries `amp.type`, `reverb.type`, `delay.type`;
+     `drive.type` expanded from 1 entry to full 78-entry table;
+     `delay.time` displayMax corrected from 5000 ms to 8000 ms.
+     `docs/CACHE-DUMP.md` is the human-readable companion showing
+     every param record for the 4 mapped blocks. Preflight green.
 
 00. **Wire pidHigh == cache record id** (Session 15). Cross-referenced
     `KNOWN_PARAMS` against parsed cache via `scripts/map-cache-params.ts`:
@@ -227,6 +240,12 @@ authoritative in `CLAUDE.md` and `DECISIONS.md` — not duplicated here.
 - `scripts/map-cache-params.ts` — verifies KNOWN_PARAMS against the
   parsed cache with the pinned (pidLow → cache block) mapping, and
   dumps each main block's candidate parameter list.
+- `scripts/gen-cache-enums.ts` — generates `src/protocol/cacheEnums.ts`
+  and `docs/CACHE-DUMP.md` from the parsed cache JSON.
+- `src/protocol/cacheEnums.ts` — generated Amp/Drive/Reverb/Delay type
+  dictionaries, imported by `params.ts`.
+- `docs/CACHE-DUMP.md` — committed human-readable dump of the 4 mapped
+  blocks (ids, kinds, ranges, enum values).
 - `scripts/dump-cache-head.ts` — hex+ASCII peek tool for cache offsets.
 - `samples/captured/decoded/cache-strings.txt` — 7,610 length-prefixed
   strings extracted from `effectDefinitions_15_2p0.cache`.

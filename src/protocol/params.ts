@@ -10,6 +10,12 @@
  */
 
 import type { ParamId } from './setParam.js';
+import {
+  AMP_TYPES_VALUES,
+  DRIVE_TYPES_VALUES,
+  REVERB_TYPES_VALUES,
+  DELAY_TYPES_VALUES,
+} from './cacheEnums.js';
 
 /**
  * How a parameter's display value relates to the float stored on the
@@ -75,6 +81,16 @@ export const KNOWN_PARAMS = {
     // Session 08: A→B→A and A→C→D→A captures confirmed all 4 indices.
     enumValues: { 0: 'A', 1: 'B', 2: 'C', 3: 'D' },
   },
+  'amp.type': {
+    block: 'amp', name: 'type',
+    pidLow: 0x003a, pidHigh: 0x000a,
+    // Session 16: enum dictionary imported from cacheEnums.ts (248 models).
+    // Wire indexing verified via drive.type ground truth; amp.type index
+    // 0 in cache is "1959SLP Normal". Untested against capture — flag as
+    // such when hardening.
+    unit: 'enum', displayMin: 0, displayMax: 247,
+    enumValues: AMP_TYPES_VALUES,
+  },
   'drive.drive': {
     block: 'drive', name: 'drive',
     pidLow: 0x0076, pidHigh: 0x000b,
@@ -83,19 +99,39 @@ export const KNOWN_PARAMS = {
   'drive.type': {
     block: 'drive', name: 'type',
     pidLow: 0x0076, pidHigh: 0x000a,
-    unit: 'enum', displayMin: 0, displayMax: 0,
-    // Only TS808 confirmed (Session 06). Capture per type to fill out.
-    enumValues: { 8: 'TS808' },
+    // Session 06 capture set drive type with wire-value 8; cache lists
+    // index 8 as "T808 Mod" (Fractal's internal label for the TS808
+    // variant AM4-Edit surfaces as "TS808"). Full 78-entry table from
+    // cache lines up 1:1 with AM4-Edit's Drive Type dropdown order.
+    unit: 'enum', displayMin: 0, displayMax: 77,
+    enumValues: DRIVE_TYPES_VALUES,
   },
   'reverb.mix': {
     block: 'reverb', name: 'mix',
     pidLow: 0x0042, pidHigh: 0x0001,
     unit: 'percent', displayMin: 0, displayMax: 100,
   },
+  'reverb.type': {
+    block: 'reverb', name: 'type',
+    pidLow: 0x0042, pidHigh: 0x000a,
+    // Session 16: enum dictionary imported from cacheEnums.ts (79 models).
+    // Untested against capture.
+    unit: 'enum', displayMin: 0, displayMax: 78,
+    enumValues: REVERB_TYPES_VALUES,
+  },
   'delay.time': {
     block: 'delay', name: 'time',
     pidLow: 0x0046, pidHigh: 0x000c,
-    unit: 'ms', displayMin: 0, displayMax: 5000,
+    // Session 16: cache says `b=8` seconds → UI max 8000 ms (was 5000).
+    unit: 'ms', displayMin: 0, displayMax: 8000,
+  },
+  'delay.type': {
+    block: 'delay', name: 'type',
+    pidLow: 0x0046, pidHigh: 0x000a,
+    // Session 16: enum dictionary imported from cacheEnums.ts (29 models).
+    // Untested against capture.
+    unit: 'enum', displayMin: 0, displayMax: 28,
+    enumValues: DELAY_TYPES_VALUES,
   },
 } as const satisfies Record<string, Param>;
 
