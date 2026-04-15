@@ -6,6 +6,99 @@ file is the chronological trail that reference is built from.
 
 ---
 
+## 2026-04-15 — Session 10 — Cache Binary Schema Decoded (Section 1)
+
+**Goal:** turn the 129 KB `effectDefinitions_15_2p0.cache` into a typed
+JSON parameter table (`{ id, min, max, default, step, enumValues? }`) so
+we can stop hand-curating `KNOWN_PARAMS`.
+
+### The short version
+
+The cache is a byte-packed stream of variable-length records. First
+real record at offset `0x36`. Record layout:
+
+```
++0   u16  id
++2   u16  typecode    — 0x1d, 0x2d, 0x37, 0x32, 0x31, 0x35, …
++4   u16  padding
++6   f32  min
++10  f32  max
++14  f32  default
++18  f32  step
++22  payload          — enum list OR 10-byte zero trailer
+```
+
+Key finding: **typecode does not determine whether a record carries an
+enum**. Both `tc=0x1d` (e.g. "OFF/ON") and `tc=0x2d` (e.g. 130-entry
+"CC #1 … OMNI OFF" list) have string enums. The parser detects enums
+structurally — read the `u32` count at `+22` and attempt to parse that
+many length-prefixed ASCII strings; if they all parse, it's an enum.
+
+Enum payload: `u32 count, count × (u32 len, ASCII bytes)`, then 6-byte
+trailer `04 00 00 00 00 00`. Float-range payload: 10-byte zero trailer
+(total record size = 32 bytes).
+
+### Section boundary at 0xaa2d
+
+Scanning stops cleanly at a `ff ff 00 00 …` marker (offset `0xaa2d`).
+Everything before that marker is **Section 1** — 87 clean records with
+monotonically-increasing ids `0x0d..0xa2`. These are global/system
+settings (tuner reference frequency, I/O routing mode, MIDI channel,
+output level curves, LCD on/off, etc.) — **not block parameters**.
+
+Cache id does **not** map to `pidLow` or `pidHigh`. For example
+`amp.level` is `(pidLow=0x3a, pidHigh=0x00)`, but cache id=0 does not
+exist in Section 1 and id=0x3a is "MIDI channel" (1..16 + OMNI). No
+overlap with Session 08's eight known captured params.
+
+Section 1 parser output: `samples/captured/decoded/cache-records.json`.
+
+### Section 2 (unparsed — next session)
+
+After the `ff ff` marker the file uses a different layout that we
+haven't fully cracked:
+
+1. **`0xaa2d..0xb74d`** — a bulk 104-entry preset-name list (A01…Z04,
+   including "<EMPTY>" entries). Our speculative parser happens to
+   pull it out as one giant "enum" with id=0xffff, tc=0, which is fine
+   as a side-effect. The 24-byte preamble between the `ff ff 00 00`
+   marker and the count `68 00 00 00` (=104) is still unexplained.
+
+2. **`0xb74d..end`** — repeating 32-byte param definitions with the
+   knob_0_10 float pattern (min=0.0, max=1.0, def=10.0, step=0.001)
+   and small sequential ids (0, 1, 2, 3, …). These are **per-block
+   parameter definitions** — exactly what we need for `KNOWN_PARAMS`.
+   Alignment is odd: records are not 4-byte aligned. Each "block"
+   probably starts with a header we haven't identified yet.
+
+   First clear record boundary observed at `0xb775` (id=1, knob-type
+   float-range). Previous record ends at `0xb774`. Alignment and
+   block-header structure is the next session's puzzle.
+
+### What shipped
+
+- `scripts/parse-cache.ts` — 22-byte header decoder, enum auto-detect,
+  clean stop at `ff ff` section marker. Parses 87 records (67 enums,
+  20 float-range; 3,914 strings recovered from Section 1).
+- `scripts/dump-cache-head.ts` — hex+ASCII peek at arbitrary offsets.
+  Used for hand-decoding record boundaries.
+- `samples/captured/decoded/cache-records.json` — parsed Section 1.
+
+### Next session — decode Section 2
+
+Session 2 in this cache is where the block-parameter metadata actually
+lives. The next session should:
+
+1. Start at `0xb74d` and look for a block header (plausibly containing
+   block name, block id matching `pidLow`, and param count).
+2. Decode the odd-aligned per-param 32-byte records and recover their
+   `(pidHigh, min, max, default, step, unit)` tuples.
+3. Cross-check against Session 08's eight known `(pidLow, pidHigh)`
+   pairs to confirm id ↔ `pidHigh` correspondence per block.
+4. Emit a typed `KNOWN_PARAMS`-compatible JSON mapping.
+
+---
+
 ## 2026-04-15 — Session 09 — Parameter Metadata Cache Located
 
 **Goal:** find AM4-Edit's parameter metadata (names, ranges, enum values)

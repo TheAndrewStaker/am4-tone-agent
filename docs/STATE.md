@@ -2,9 +2,10 @@
 
 > Read this file at the start of every session. It's kept up-to-date with
 > current phase, the single next action, and recent findings.
-> Last updated: **2026-04-15** (Session 09 — AM4-Edit's parameter
-> metadata cache located at %APPDATA%; contains all 7,610 param names
-> and enum strings we need to bulk-populate `KNOWN_PARAMS`).
+> Last updated: **2026-04-15** (Session 10 — cache binary schema decoded
+> for Section 1 [global settings, 87 records]; Section 2 [per-block
+> param definitions] identified but not yet parsed — different layout
+> after the `ff ff` marker at 0xaa2d).
 
 ---
 
@@ -22,81 +23,48 @@ float32. One open question remains before the IR can cover full presets:
 
 ## The single next action
 
-### Parse `effectDefinitions_15_2p0.cache` into `KNOWN_PARAMS`
+### Decode Section 2 of `effectDefinitions_15_2p0.cache`
 
-Session 09 located the parameter metadata. It's not in the exe — AM4-Edit
-queries the AM4 at startup and caches the result at:
+Session 10 shipped `scripts/parse-cache.ts`, a structural decoder for
+the cache's record format (22-byte header `u16 id, u16 tc, u16 pad,
+f32 min, f32 max, f32 default, f32 step`, then either an enum payload
+or 10-byte trailer). It cleanly parses **Section 1** of the cache —
+87 records covering global/system settings, ids `0x0d..0xa2`. Output:
+`samples/captured/decoded/cache-records.json`.
 
-```
-%APPDATA%\Fractal Audio\AM4-Edit\effectDefinitions_15_2p0.cache
-```
+Section 1 is **not** where block-parameter metadata lives. Cache ids in
+Section 1 don't match any `(pidLow, pidHigh)` from Session 08.
 
-129 KB. Contains **7,610 length-prefixed ASCII strings** (every drive
-model, amp model, reverb type, delay type, cab IR name, MIDI label, and
-routing-mode enum we need) plus float ranges and record headers.
-Extracted string dump: `samples/captured/decoded/cache-strings.txt`.
-Scratchpad walker: `scripts/peek-cache.ts`.
+Section 2 starts at the `ff ff 00 00` marker at offset `0xaa2d`:
 
-**Next step: write `scripts/parse-cache.ts`** — a full schema decoder
-that outputs a typed JSON table `{ (pidLow, pidHigh) → { name, min,
-max, default, step, unit, enumValues? } }`. That replaces the entire
-hand-curated `KNOWN_PARAMS` workflow.
+1. `0xaa2d..0xb74d` — 104-entry preset-name list (A01…Z04 and
+   `<EMPTY>`). Useful incidentally; not blocking.
+2. `0xb74d..end` — **the per-block parameter definitions**. Each
+   record is 32 bytes with the same `min/max/default/step` shape but
+   non-4-byte aligned and without the id/tc layout we used for
+   Section 1. First clear record boundary at `0xb775` (id=1, knob:
+   min=0.0, max=1.0, def=10.0, step=0.001). Previous block header /
+   preamble between `0xaa2d` and `0xb775` is the puzzle.
 
-Schema recipe (see SESSIONS.md Session 09 for full detail):
-1. 16-byte header: two uint64 LE = `(2, 4)` — probably (version, flags).
-2. Record stream. Two observed shapes:
-   - **Float-range:** `[id:u16] 37 00 00 00 00 00 <min:f32> <max:f32>
-     <default:f32> <step:f32> <padding>`.
-   - **Enum:** `[id:u16] 1d 00 ... <count:u32>
-     [<len:u32><ASCII bytes>]*count`.
-3. The heuristic walker in `peek-cache.ts` desyncs after ~950 records —
-   it's scanning blindly; a proper parser should read each record header
-   then step forward by the exact payload size.
-
-Ground-truth validation: Session 08 captures give 8 known `(pidLow,
-pidHigh) → (name, range)` pairs. If cache record `id` field matches
-`pidHigh` 1:1 on those 8, the mapping is direct. If not, we'll discover
-the offset/indirection by diffing.
+**Next steps:**
+1. Hex-dump `0xaa2d..0xb800` with `scripts/dump-cache-head.ts <off>`
+   and hand-align block headers (look for a `pidLow` byte matching
+   `0x3a` (Amp), `0x76` (Drive), `0x42` (Reverb), `0x46` (Delay)).
+2. Once block-header shape is known, extend `parse-cache.ts` to emit
+   `{ pidLow, pidHigh, min, max, default, step, unit, enumValues? }`.
+3. Cross-check against Session 08's eight known params. Expected
+   matches: `amp.gain` (0x3a, 0x0b) knob 0..10; `amp.level` (0x3a, 0x00)
+   dB -80..20; `drive.type` (0x76, 0x0a) enum with ~128 entries
+   including TS808; etc.
+4. Auto-generate `KNOWN_PARAMS` from the parsed JSON (via a
+   codegen step, not by hand).
 
 ### Alternative: skip cache-parsing, continue with capture-driven registry
 
-If the cache schema proves harder than expected, fall back to adding
+If Section 2's layout resists decoding, fall back to adding
 captured-bytes `verify-msg` cases one param at a time. We already have
 the method for every new param; it's just slow. The cache is a bulk
 shortcut, not a blocker.
-
-**Setup:**
-- Open `AM4-Edit.exe` in Ghidra (the same project used in Session 05 to
-  find the float encoder — already analyzed).
-- Existing companion script: `scripts/ghidra/FindEncoder.java` shows
-  the script style (Ghidra Script Manager → New Script).
-
-**What to look for:**
-1. **String search** — likely fastest first pass. Search for known
-   parameter names in the Defined Strings window:
-   - `"Gain"`, `"Bass"`, `"Mid"`, `"Treble"`, `"Master"`, `"Level"`
-   - `"TS808"` (the only Drive Type enum we know)
-   - `"Reverb"`, `"Delay"`, `"Chorus"`, `"Phaser"`, `"Tremolo"`
-   For each hit, list **References → To** and inspect the calling code.
-   A long contiguous run of strings is almost always a metadata table.
-2. **Cross-reference the SET_PARAM call site.** The encoder
-   `FUN_140156d10` is called from somewhere; trace upward to find code
-   that maps a UI control to a `(pidLow, pidHigh, scale, displayName)`
-   tuple. That structure IS the metadata table.
-3. **Look for arrays of struct-like records** near any param name
-   string. Common shape: `{ const char* name; uint16_t pidHigh; float
-   scale; uint8_t unitCode; ... }`.
-
-**What to capture and drop in the repo:**
-- Save findings to `docs/sessions/session-08-ghidra-notes.md` (create
-  the dir if needed): table address, struct shape guess, screenshot or
-  ASCII paste of 2–3 contiguous records.
-- If an enum string table is found (e.g. all Drive Types in order),
-  paste the raw strings — even unparsed it's gold.
-
-Once the shape is known, write `scripts/ghidra/ExtractParamTable.java`
-modeled on `FindEncoder.java` to dump the table mechanically, and feed
-the output into `KNOWN_PARAMS` (`src/protocol/params.ts`).
 
 ## Decoded parameters and unit conventions
 
@@ -110,8 +78,16 @@ fully populated (0..3 ↔ A..D).
 
 ## Recent breakthroughs
 
-Older breakthroughs (sessions 04–07) are archived in `SESSIONS.md`. Only
-session-08 (current) is kept here for fast orientation.
+Older breakthroughs (sessions 04–08) are archived in `SESSIONS.md`. Only
+Session 10 (current) is kept here for fast orientation.
+
+1. **Cache binary schema decoded — Section 1** (Session 10). 87 global
+   setting records parsed cleanly with a 22-byte header + enum/float
+   payload. Enum detection is structural (try parsing strings at +22),
+   not typecode-based — both `tc=0x1d` and `tc=0x2d` carry strings.
+   Section 2 (per-block params) uses a different layout — TBD.
+
+Session 08 highlights (still load-bearing):
 
 1. **Per-block channel selector decoded** (Session 08). Channel A/B/C/D
    is a regular SET_PARAM write at `pidLow=0x003A` (Amp), `pidHigh=0x07D2`,
@@ -152,7 +128,7 @@ authoritative in `CLAUDE.md` and `DECISIONS.md` — not duplicated here.
 
 ## Roadmap landmarks
 
-- **Now:** Ghidra metadata extraction (single next action above).
+- **Now:** decode cache Section 2 (per-block params) — see single next action above.
 - **Then:** expand `WorkingBufferIR` → full `PresetIR` (block placement,
   4 scenes, per-block channel assignment) — the transpiler will need to
   emit a channel-select write (now understood) before that block's
@@ -185,9 +161,13 @@ authoritative in `CLAUDE.md` and `DECISIONS.md` — not duplicated here.
 - `scripts/ghidra/FindParamTable.java` — Ghidra string-cluster search that
   *ruled out* static metadata in the exe (Session 09).
 - `scripts/peek-cache.ts` — scratchpad walker of the AM4-Edit metadata
-  cache. Starting point for the real parser.
+  cache. Superseded by `parse-cache.ts` but kept for reference.
+- `scripts/parse-cache.ts` — structural decoder for the cache. Parses
+  Section 1 (87 global-setting records) cleanly into typed JSON.
+- `scripts/dump-cache-head.ts` — hex+ASCII peek tool for cache offsets.
 - `samples/captured/decoded/cache-strings.txt` — 7,610 length-prefixed
   strings extracted from `effectDefinitions_15_2p0.cache`.
+- `samples/captured/decoded/cache-records.json` — parsed Section 1.
 - `scripts/scrape-wiki.ts` — Fractal wiki scraper.
 
 ## How to use this file
