@@ -2,8 +2,9 @@
 
 > Read this file at the start of every session. It's kept up-to-date with
 > current phase, the single next action, and recent findings.
-> Last updated: **2026-04-15** (Session 08 — per-block channel selector
-> fully decoded and verify-msg confirmed all 4 channel values).
+> Last updated: **2026-04-15** (Session 09 — AM4-Edit's parameter
+> metadata cache located at %APPDATA%; contains all 7,610 param names
+> and enum strings we need to bulk-populate `KNOWN_PARAMS`).
 
 ---
 
@@ -21,12 +22,48 @@ float32. One open question remains before the IR can cover full presets:
 
 ## The single next action
 
-### Ghidra-extract AM4-Edit's parameter metadata table
+### Parse `effectDefinitions_15_2p0.cache` into `KNOWN_PARAMS`
 
-Highest-leverage work remaining for Phase 2. AM4-Edit must store parameter names,
-ranges, and enum dropdown strings (Amp Type, Cab IR, Drive Type, Reverb
-Type, Delay Type) in static data — finding that table likely bulk-
-unlocks hundreds of params at once.
+Session 09 located the parameter metadata. It's not in the exe — AM4-Edit
+queries the AM4 at startup and caches the result at:
+
+```
+%APPDATA%\Fractal Audio\AM4-Edit\effectDefinitions_15_2p0.cache
+```
+
+129 KB. Contains **7,610 length-prefixed ASCII strings** (every drive
+model, amp model, reverb type, delay type, cab IR name, MIDI label, and
+routing-mode enum we need) plus float ranges and record headers.
+Extracted string dump: `samples/captured/decoded/cache-strings.txt`.
+Scratchpad walker: `scripts/peek-cache.ts`.
+
+**Next step: write `scripts/parse-cache.ts`** — a full schema decoder
+that outputs a typed JSON table `{ (pidLow, pidHigh) → { name, min,
+max, default, step, unit, enumValues? } }`. That replaces the entire
+hand-curated `KNOWN_PARAMS` workflow.
+
+Schema recipe (see SESSIONS.md Session 09 for full detail):
+1. 16-byte header: two uint64 LE = `(2, 4)` — probably (version, flags).
+2. Record stream. Two observed shapes:
+   - **Float-range:** `[id:u16] 37 00 00 00 00 00 <min:f32> <max:f32>
+     <default:f32> <step:f32> <padding>`.
+   - **Enum:** `[id:u16] 1d 00 ... <count:u32>
+     [<len:u32><ASCII bytes>]*count`.
+3. The heuristic walker in `peek-cache.ts` desyncs after ~950 records —
+   it's scanning blindly; a proper parser should read each record header
+   then step forward by the exact payload size.
+
+Ground-truth validation: Session 08 captures give 8 known `(pidLow,
+pidHigh) → (name, range)` pairs. If cache record `id` field matches
+`pidHigh` 1:1 on those 8, the mapping is direct. If not, we'll discover
+the offset/indirection by diffing.
+
+### Alternative: skip cache-parsing, continue with capture-driven registry
+
+If the cache schema proves harder than expected, fall back to adding
+captured-bytes `verify-msg` cases one param at a time. We already have
+the method for every new param; it's just slow. The cache is a bulk
+shortcut, not a blocker.
 
 **Setup:**
 - Open `AM4-Edit.exe` in Ghidra (the same project used in Session 05 to
@@ -145,6 +182,12 @@ authoritative in `CLAUDE.md` and `DECISIONS.md` — not duplicated here.
 - `scripts/write-test.ts` — first hardware write (Amp Gain).
 - `scripts/verify-transpile.ts` — IR → command sequence round-trip check.
 - `scripts/ghidra/FindEncoder.java` — Ghidra script that found the encoder.
+- `scripts/ghidra/FindParamTable.java` — Ghidra string-cluster search that
+  *ruled out* static metadata in the exe (Session 09).
+- `scripts/peek-cache.ts` — scratchpad walker of the AM4-Edit metadata
+  cache. Starting point for the real parser.
+- `samples/captured/decoded/cache-strings.txt` — 7,610 length-prefixed
+  strings extracted from `effectDefinitions_15_2p0.cache`.
 - `scripts/scrape-wiki.ts` — Fractal wiki scraper.
 
 ## How to use this file

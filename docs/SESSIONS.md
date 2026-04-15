@@ -6,6 +6,141 @@ file is the chronological trail that reference is built from.
 
 ---
 
+## 2026-04-15 — Session 09 — Parameter Metadata Cache Located
+
+**Goal:** find AM4-Edit's parameter metadata (names, ranges, enum values)
+so `KNOWN_PARAMS` can be bulk-populated instead of one capture at a time.
+
+### The short version
+
+AM4-Edit stores the entire AM4 parameter metadata — all parameter names,
+min/max/default/step values, and enum dropdown strings (amp types, drive
+types, reverb types, delay types, cab names, MIDI labels, routing modes,
+etc.) — in a single binary cache file:
+
+```
+%APPDATA%\Fractal Audio\AM4-Edit\effectDefinitions_15_2p0.cache
+```
+
+- `15` encodes the AM4 model byte (matches the known `0x15`).
+- `2p0` encodes the firmware version (current AM4 is 2.0).
+- Size: **129,320 bytes**.
+- Contents: **7,610 length-prefixed ASCII strings** plus floats (ranges,
+  defaults, steps) and record headers.
+
+### How we got here
+
+1. **Ghidra string search across `AM4-Edit.exe`** (Session 08 script
+   `scripts/ghidra/FindParamTable.java`, output at
+   `samples/captured/decoded/ghidra-paramtable.txt`) found **zero hits**
+   for `TS808`, `Fat Rat`, `Shred`, and other drive-type names in both
+   ASCII and UTF-16LE. The strings aren't in the executable.
+2. **Generic labels (`Gain`, `Bass`, `Reverb`, etc.) hit the 50-match
+   cap** but were scattered UI / debug strings shared across Fractal's
+   entire editor family (Axe-Fx, FM3, FM9, AX8, FX8, AM4). AM4-Edit is
+   a generic Fractal editor — it doesn't hardcode AM4-specific data.
+3. **Scanning all 11,000+ captured SysEx messages for embedded ASCII**
+   produced zero intelligible strings. AM4-Edit does not stream
+   metadata over SysEx at runtime.
+4. **The install dir has only one candidate sibling file**:
+   `english.laxml` — but that's only UI prompts and button labels. The
+   decisive clue was an entry inside it:
+   ```xml
+   <VALUE name="PREFS_DESC_REFRESH_BLOCKDEFS"
+     val="... refresh the Block Definitions and all Cab names from the AM4."/>
+   ```
+5. **Searching `%APPDATA%\Fractal Audio\AM4-Edit\` surfaced the cache.**
+   Last-modified timestamp matches the most recent AM4-Edit launch —
+   it's refreshed on demand from the device.
+
+### Verified in the cache — drive types, amp types, reverb types, cab names
+
+Every class of AM4 enum string we expected is present. A few examples
+out of the 7,610:
+
+- **Drive models:** `Fat Rat`, `Klone Chiron`, `Bender Fuzz`,
+  `Shred Distortion`, `Tube Drive 3-Knob`, `Tube Drive 4-Knob`,
+  `FAS LED-Drive`, `Horizon Precision Drive`, `MCMLXXXI Drive`,
+  `Sonic Drive`, `Hoodoo Drive`, `Shimmer Drive`.
+- **Reverb types:** `Plate, Small/Medium/Large/Deluxe/Tube/London/
+  Sun/Vocal/Gold`, `Spring, Small/Medium/Large/Deluxe/Tube/Studio/
+  Vibrato-King/British`, `Hall, Small/Medium/Large/Concert/
+  Large Deep/St. George's Church/St. Albans Cathedral`, `Room, Small/
+  Medium/Large/Studio/Recording Studio C/Huge/Drum`.
+- **Delay types:** `Dual Delay`, `Reverse Delay`, `Sweep Delay`,
+  `Ducking Delay`, `Graphite Copy Delay`, `DM-Two Delay`,
+  `Diffused Delay`, `Mono Tape`, `Stereo Tape`, `Lo-Fi Tape`, `Worn Tape`.
+- **Amp models:** `5F1 Tweed Champlifier`, `59 Bassguy`, `1959SLP Treble`,
+  `1987X Treble`, `Bogfish Strato`, `Princetone Reverb`, many more.
+- **Cab IRs:** `1x12 Vibrato Lux`, `1x15 Vibrato Verb`, `2x10 Vibrato Lux`,
+  `2x12 Bassbuster`, `4x10 SV Bass`, `8x10 SV Bass`, etc.
+- **MIDI:** `CHAN 1` … `CHAN 16`, `CC #1` … `CC #128`, `OMNI`, `OFF/ON`.
+- **Routing:** `STEREO`, `SUM L+R`, `COPY L->R`, `SPLIT`, `MUTE`,
+  `INVERT`, `NORMAL`, `ANALOG`, `SPDIF`, `USB (CHANNELS 3/4)`.
+
+`samples/captured/decoded/cache-strings.txt` has the full dump
+(7,610 lines, offset + string).
+
+### Schema — partially understood
+
+First 16 bytes look like a header: two uint64 LE values = `2, 4`.
+Probably (version, flags) or (version, block-count).
+
+After the header, records are variable-sized. Heuristic walker in
+`scripts/peek-cache.ts` got clean parses for enum records (first field
+= u32 count, then \`(u32 length, ASCII bytes)\` per entry) but the
+surrounding struct (id, type code, float ranges) isn't a simple
+`[id:u16][len:u16]` stream and the walker desyncs after about 950
+records. Proper schema decode is the next session's work.
+
+Observed record shapes that should survive into the real parser:
+
+- **Float-range record:** 24+ bytes. Signature spot-check:
+  `[id:u16] 37 00 00 00 00 00 <min:f32> <max:f32> <default:f32>
+  <step:f32> <padding>`. Example: the EQ-band-gain records at
+  ids 0x11–0x16 all have min=-25.0, max=+25.0, default=1.0, step=0.05.
+- **Enum record:** `[id:u16] 1d 00 ... <count:u32> [<len:u32><bytes>]*count`.
+  Example: the per-block "input routing" dropdown has four entries
+  `Auto In / Auto Out / Manual In / Manual Out`.
+
+### Why this is the bulk-unlock we expected
+
+Once the file parses into a typed map `{ (pidLow, pidHigh) → { name,
+min, max, default, step, unit, enumValues? } }`, `KNOWN_PARAMS` becomes
+a generated table instead of hand-curated entries. That collapses the
+entire "decode parameters one capture at a time" workflow into a single
+parser pass, and unblocks:
+
+- Full `PresetIR` (need all block-param names to represent a preset).
+- Drive-type / amp-type / reverb-type enum coverage (dropdown strings
+  map enum int → display name).
+- Natural-language → preset generation (Claude needs parameter
+  semantics and value ranges, not just wire addresses).
+
+### Parked for next session
+
+- **Write `scripts/parse-cache.ts`** — full schema decoder. Start from
+  the 16-byte header, iterate records, output JSON. Use the known
+  enum content (`Auto In / Auto Out / Manual In / Manual Out`) as a
+  schema probe: that string list appears at a known offset, so binary-
+  search backwards to find the record header shape.
+- **Map the cache's `id` field to our `pidHigh`.** The Session 08
+  captures give us ground-truth (pidLow, pidHigh) → (name, range) pairs
+  for 8 params; if those match cache record IDs 1:1, the cache field
+  *is* pidHigh. If it's offset, we'll need to find the mapping.
+- **Identify per-block grouping.** The cache is 129 KB; the AM4 has
+  tens of blocks; some form of block-id delimiter or per-block section
+  almost certainly exists. First glance shows no obvious section marker.
+
+### Files touched this session
+
+- `scripts/ghidra/FindParamTable.java` — Ghidra script (new, committed).
+- `samples/captured/decoded/ghidra-paramtable.txt` — 1,151 lines (new).
+- `scripts/peek-cache.ts` — cache-walker scratchpad (new, uncommitted).
+- `samples/captured/decoded/cache-strings.txt` — 7,610-string dump (new).
+
+---
+
 ## 2026-04-15 — Session 08 — Channel Selector Decoded
 
 **Goal:** resolve the Session 07 channel-addressing question with a
