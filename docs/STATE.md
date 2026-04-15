@@ -2,12 +2,15 @@
 
 > Read this file at the start of every session. It's kept up-to-date with
 > current phase, the single next action, and recent findings.
-> Last updated: **2026-04-15** (Session 16 — 4 type-enum dictionaries
-> generated from cache and wired into `params.ts`: AMP_TYPES×248,
-> DRIVE_TYPES×78, REVERB_TYPES×79, DELAY_TYPES×29. KNOWN_PARAMS grew from
-> 8 to 11 entries; `delay.time` displayMax fixed to 8000 ms.
-> `docs/CACHE-DUMP.md` committed as human-readable listing of every
-> param record across the 4 mapped blocks. Preflight green.)
+> Last updated: **2026-04-15** (Session 17 — MCP SERVER SCAFFOLD LANDED.
+> `src/server/index.ts` exposes `set_param`, `list_params`,
+> `list_enum_values` over stdio. Full MCP handshake + tools/list + a
+> `list_params` tool call all verified by `scripts/smoke-server.ts` (now
+> in preflight). `resolveEnumValue()` handles case-insensitive dropdown
+> lookups with 16/16 goldens. `docs/MCP-SETUP.md` + `CACHE-BLOCKS.md`
+> shipped. Next: user captures Amp/Reverb/Delay Type changes on hardware
+> to promote the 3 new type enums from cache-derived → capture-verified,
+> then wires Claude Desktop to the server and runs a live write.)
 
 ---
 
@@ -25,33 +28,46 @@ float32. One open question remains before the IR can cover full presets:
 
 ## The single next action
 
-### Capture a Reverb Type / Delay Type / Amp Type change in AM4-Edit
+### Live end-to-end test via Claude Desktop
 
-The 4 new enum entries (`amp.type`, `reverb.type`, `delay.type`, plus
-expanded `drive.type`) are structurally correct by Session 15's proof
-that `pidHigh == cache record id`, but untested against wire captures.
-To move them from "cache-derived, untested" to "capture-verified",
-run one capture per block that changes the Type dropdown in AM4-Edit
-and compare the emitted SET_PARAM against `buildSetParam('amp.type', N)`.
-Add a matching case to `verify-msg.ts` for each — the existing
-`drive.type=TS808` (wire index 8) case already covers Drive.
+The MCP server is up. Procedure:
 
-Also pending:
+1. Confirm `node-midi` built on this machine: `npm run write-test`
+   should move Amp Gain on the device. If it fails, fix the native
+   build before anything else.
+2. Add the `am4-tone-agent` stanza to
+   `%APPDATA%\Claude\claude_desktop_config.json` — full JSON block
+   is in `docs/MCP-SETUP.md`.
+3. Restart Claude Desktop. Open a new chat. Verify the 3 tools
+   appear in the tool panel.
+4. Ask *"Set the amp gain to 7"*. Expected: Claude calls `set_param`
+   with `(block="amp", name="gain", value=7)`, the tool response
+   contains the wire bytes, the AM4's knob moves.
+5. Ask *"What amp types are available?"* → `list_enum_values` with
+   `(block="amp", name="type")` returns 248 rows.
+6. Ask *"Switch the amp to a plexi."* → Claude picks an entry from
+   `AMP_TYPES` (fuzzy match "plexi" against 1959SLP/1987X/etc. is
+   Claude's call — the server accepts whatever exact name it sends
+   via `resolveEnumValue`).
 
-- **Role-map the 20 remaining cache blocks** (S2 blocks 0–4/6 and S3
-  sub-blocks 2–8, 10–16). Each is a specific effect (Chorus/Flanger/
-  Pitch/EQ/Compressor/Filter/etc.) but we don't know which is which
-  without a capture of AM4-Edit adding that effect to a slot. Add role
-  assignments to `CACHE_BLOCK_MAP` in `scripts/map-cache-params.ts`
-  as they're confirmed.
-- **`amp.level` pidHigh=0x0000 is not in the cache record table**
-  (Amp block ids start at 1). Same pattern as `amp.channel`. One
-  capture each of Drive/Reverb/Delay *level* will tell us whether
-  pidHigh=0 is a block-generic output-level address.
-- **P3-007 Model Lineage Dictionary** (see `04-BACKLOG.md`) can now
-  begin — `cacheEnums.ts` is the authoritative input for the wiki-
-  scrape pipeline that maps firmware model names to their real-world
-  gear inspirations.
+### Deferred (needs captures)
+
+- **Promote the 3 untested enum entries to capture-verified.**
+  `amp.type`, `reverb.type`, `delay.type` are structurally correct by
+  Session 15's `pidHigh == cache record id` proof but not yet proven
+  on the wire. Capture one Type-dropdown change per block in AM4-Edit
+  and add cases to `verify-msg.ts`. See the dedicated capture section
+  below.
+- **Role-map the 20 remaining cache blocks** per `docs/CACHE-BLOCKS.md`.
+  Tentative assignments are in place; each needs one capture of an
+  AM4-Edit action in that block to confirm the wire `pidLow` and then
+  expose it via `KNOWN_PARAMS`.
+- **`amp.level` pidHigh=0x0000** is not in the cache record table.
+  One capture each of Drive/Reverb/Delay *level* will reveal whether
+  pidHigh=0 is block-generic.
+- **P3-007 Model Lineage Dictionary** (see `04-BACKLOG.md`) —
+  `cacheEnums.ts` is the authoritative input for the wiki-scrape
+  pipeline.
 
 **Layouts (parser is source of truth — see `scripts/parse-cache.ts`):**
 
@@ -107,7 +123,20 @@ index table (only index 8 has been wire-verified).
 ## Recent breakthroughs
 
 Older breakthroughs (sessions 04–08, 10–12) are archived in `SESSIONS.md`.
-Sessions 13–16 (current) are kept here for fast orientation.
+Sessions 13–17 (current) are kept here for fast orientation.
+
+0000. **MCP server scaffold shipped** (Session 17). `src/server/index.ts`
+      is a stdio MCP server exposing `set_param`, `list_params`, and
+      `list_enum_values`. It lazily opens the MIDI port on the first
+      tool call so the server can still register with Claude Desktop
+      if the AM4 is unplugged. `scripts/smoke-server.ts` does the full
+      MCP handshake + tools/list + a tool call in preflight. Setup
+      instructions for the Claude Desktop side live in
+      `docs/MCP-SETUP.md`. Hand-curated `resolveEnumValue()` in
+      `params.ts` gives case-insensitive fuzzy lookup of enum values
+      (`"Marshall 1959SLP"` → wire index 0) with 16/16 goldens.
+      `docs/CACHE-BLOCKS.md` maps all 24 cache blocks to tentative
+      effect roles (4 confirmed, 20 tentative).
 
 000. **Type-enum dictionaries wired into params.ts** (Session 16).
      `scripts/gen-cache-enums.ts` emits `src/protocol/cacheEnums.ts`
@@ -246,6 +275,13 @@ authoritative in `CLAUDE.md` and `DECISIONS.md` — not duplicated here.
   dictionaries, imported by `params.ts`.
 - `docs/CACHE-DUMP.md` — committed human-readable dump of the 4 mapped
   blocks (ids, kinds, ranges, enum values).
+- `docs/CACHE-BLOCKS.md` — every cache block with tentative effect-role
+  assignment + evidence + capture TODO list.
+- `src/server/index.ts` — MCP server over stdio. Tools: `set_param`,
+  `list_params`, `list_enum_values`.
+- `scripts/smoke-server.ts` — client-side MCP handshake harness
+  verifying the server comes up and serves tool listings.
+- `docs/MCP-SETUP.md` — Claude Desktop wiring instructions.
 - `scripts/dump-cache-head.ts` — hex+ASCII peek tool for cache offsets.
 - `samples/captured/decoded/cache-strings.txt` — 7,610 length-prefixed
   strings extracted from `effectDefinitions_15_2p0.cache`.
