@@ -2,15 +2,17 @@
 
 > Read this file at the start of every session. It's kept up-to-date with
 > current phase, the single next action, and recent findings.
-> Last updated: **2026-04-15** (Session 17 — MCP SERVER SCAFFOLD LANDED.
-> `src/server/index.ts` exposes `set_param`, `list_params`,
-> `list_enum_values` over stdio. Full MCP handshake + tools/list + a
-> `list_params` tool call all verified by `scripts/smoke-server.ts` (now
-> in preflight). `resolveEnumValue()` handles case-insensitive dropdown
-> lookups with 16/16 goldens. `docs/MCP-SETUP.md` + `CACHE-BLOCKS.md`
-> shipped. Next: user captures Amp/Reverb/Delay Type changes on hardware
-> to promote the 3 new type enums from cache-derived → capture-verified,
-> then wires Claude Desktop to the server and runs a live write.)
+> Last updated: **2026-04-16** (Session 17.1 — MCP server tested live
+> against Claude Desktop on hardware. `set_param` confirmed writing
+> correctly (amp.gain tweak moved the knob). `read_param` and `set_params`
+> (batched write) both shipped. **Open finding:** `read_param` returns raw
+> response bytes fine but mis-decodes the value — read responses are
+> 23-byte frames, and the 5-byte payload does NOT match the write-side
+> 8-to-7 pack. Needs one Rosetta capture of AM4-Edit reading a known-value
+> param (Session 18 Capture 0). Second open finding: v0.1 writes are
+> silently absorbed when the target block isn't present in the active
+> preset — block-placement and block-type-assignment commands are not yet
+> decoded. Session 18 plan (`docs/SESSION-18-PLAN.md`) covers both.)
 
 ---
 

@@ -34,7 +34,19 @@ Desktop so you can control the AM4 from chat.
 ## Wire up Claude Desktop
 
 Edit `%APPDATA%\Claude\claude_desktop_config.json`. If the file
-doesn't exist yet, create it. Add an entry under `mcpServers`:
+doesn't exist yet, create it.
+
+**If you installed Claude Desktop from the Microsoft Store** (UWP
+package), the above path is sandboxed — the real file lives at:
+
+```
+C:\Users\<you>\AppData\Local\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\claude_desktop_config.json
+```
+
+Use that path instead. The direct-download installer from claude.ai
+uses the plain `%APPDATA%\Claude\` path.
+
+Add an entry under `mcpServers`:
 
 ```json
 {
@@ -52,8 +64,21 @@ Adjust the path to wherever the repo lives. If you have other MCP
 servers already, just add the `am4-tone-agent` key alongside them
 inside `mcpServers`.
 
-Restart Claude Desktop. In a new chat, the AM4 tools should appear in
-the tool panel. If they don't:
+Fully quit Claude Desktop (system tray → Quit, not just the window's X
+— especially on the Store build) and relaunch.
+
+**Where the tools show up:** in a new chat, click the **`+` button at
+the bottom of the chat input → "Connectors"**. `am4-tone-agent` should
+be listed with its 3 tools. `Settings → Developer` also shows per-server
+connection status and log tails. (Older docs mention a "hammer icon" —
+that's the old UI; it's now under the `+` menu.)
+
+**How to invoke:** just ask in plain English. Claude decides to call the
+tool on its own. On the first message of a session it helps to name the
+server explicitly — e.g. *"Using am4-tone-agent, set the amp gain to 7"*
+— after that you can drop the preamble.
+
+If Connectors is empty or the tools don't fire:
 
 - Check `%APPDATA%\Claude\logs\` for the MCP server log — it logs to
   stderr and Claude Desktop tees that to disk.
