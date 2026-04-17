@@ -71,29 +71,78 @@ export function buildSetParam(key: ParamKey, displayValue: number): number[] {
 }
 
 /**
- * Predicate for `receiveSysExMatching` that accepts the device's echo of a
- * WRITE we just sent. After a successful write to a *placed* block the AM4
- * emits a SysEx carrying the same pidLow/pidHigh and the `0x0001` action
- * byte pair (typically a 64-byte frame with a 40-byte param descriptor,
- * but we only need the header to match).
+ * Predicate for `receiveSysExMatching` that accepts the AM4's wire-level
+ * acknowledgement of a WRITE we just sent — a 64-byte frame carrying the
+ * same pidLow/pidHigh, action `0x0001`, and `hdr4 = 0x0028` (40-byte
+ * param descriptor).
  *
- * Writes to a block that isn't placed in the active preset are silently
- * absorbed — no echo arrives, so `receiveSysExMatching` times out and the
- * caller can surface a clear "block not placed" error instead of pretending
- * the write took.
+ * This matches the shape of the ack but does NOT tell apply from absorb.
+ * Session 19 hardware testing proved the AM4 emits this same 64-byte ack
+ * for writes to absent blocks (write had no audible effect) as well as
+ * for writes to placed blocks (write landed). The 40-byte payload likely
+ * contains a discriminator we haven't decoded — future work.
+ *
+ * A separate 23-byte frame byte-identical to our outgoing write also
+ * appears on the input port (USB-MIDI receipt-echo or driver loopback);
+ * the `hdr4 = 0x0028` check here filters that receipt-echo out so the
+ * predicate matches the genuine device-originated ack.
  */
 export function isWriteEcho(write: number[], response: number[]): boolean {
-  // Minimum viable echo envelope: F0 00 01 74 15 01 + pidLow septets +
-  // pidHigh septets + action septets = 12 bytes before any payload/cs/F7.
-  if (response.length < 14) return false;
+  // Header runs bytes 0..15 (envelope + func + 5 × 14-bit fields).
+  if (response.length < 16) return false;
   // Envelope + function byte (bytes 0..5 of the write) must match exactly.
   for (let i = 0; i < 6; i++) if (response[i] !== write[i]) return false;
   // pidLow (bytes 6..7) and pidHigh (bytes 8..9) septets must match.
   for (let i = 6; i < 10; i++) if (response[i] !== write[i]) return false;
-  // Action must be WRITE (0x0001) — the 64-byte echo and the 23-byte "short
-  // echo" both use this action. 0x0026 is AM4-Edit's status poll, not an echo.
+  // Action must be WRITE (0x0001) — 0x0026 is AM4-Edit's status poll.
   if (response[10] !== 0x01 || response[11] !== 0x00) return false;
+  // hdr4 must be 0x0028 (40-byte param descriptor payload). A 0x0004 here
+  // is our own write reflected back (loopback/receipt-echo), not an apply.
+  if (response[14] !== 0x28 || response[15] !== 0x00) return false;
   return true;
+}
+
+/**
+ * Block-placement register: pidLow that addresses the "which block occupies
+ * slot N" state. The AM4 exposes 4 slots (positions 1..4 in the signal
+ * chain) at pidHigh = 0x000F, 0x0010, 0x0011, 0x0012 respectively. Writing
+ * a block's own pidLow as the float32 value places that block in the slot;
+ * writing 0 clears the slot to "none" (empty). pidHigh = 0x0013 is NOT a
+ * valid slot — the AM4 emits a structurally different ack and may produce
+ * side effects on unrelated slots (observed Session 19 hardware test).
+ *
+ * Decoded Session 19 from Session 18 captures — see SYSEX-MAP.md §6c.
+ */
+export const BLOCK_SLOT_PID_LOW = 0x00ce;
+export const BLOCK_SLOT_PID_HIGH_BASE = 0x000f;
+
+/**
+ * Build a WRITE that places `blockTypeValue` into slot `position` (1..4).
+ * `blockTypeValue` is the target block's own pidLow (see `blockTypes.ts`);
+ * pass 0 to clear the slot.
+ *
+ * Hardware-mapped Session 19: sending pidHigh 0x10/0x11/0x12 landed on
+ * device slots 2/3/4, and pidHigh 0x13 produced an invalid-ack with
+ * side effects on an unrelated slot — hence the base 0x000F so that
+ * position 1..4 map to pidHigh 0x0F..0x12. Position 1 (pidHigh 0x000F)
+ * isn't exercised by any capture on disk, but fits the linear pattern;
+ * expected to land on device slot 1, pending independent hardware
+ * confirmation after the base-address fix.
+ */
+export function buildSetBlockType(
+  position: 1 | 2 | 3 | 4,
+  blockTypeValue: number,
+): number[] {
+  if (position < 1 || position > 4 || !Number.isInteger(position)) {
+    throw new Error(`Block position must be an integer 1..4, got ${position}`);
+  }
+  return buildSetFloatParam(
+    {
+      pidLow: BLOCK_SLOT_PID_LOW,
+      pidHigh: BLOCK_SLOT_PID_HIGH_BASE + (position - 1),
+    },
+    blockTypeValue,
+  );
 }
 
 /**

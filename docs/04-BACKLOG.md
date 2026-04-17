@@ -371,3 +371,32 @@ without installing Node, a C++ toolchain, or editing JSON by hand. See
 - Out of scope for MVP — parked here so the architecture can leave
   room for it (keep the MCP server transport pluggable, don't
   hardcode stdio-only assumptions).
+
+### BK-008 Decode the 40-byte write-ack payload (apply vs absorb discriminator)
+- **Context:** every AM4 write produces a 64-byte ack with a 40-byte param
+  descriptor (`hdr4 = 0x0028`). Session 18 hypothesized "ack arrives ⇒ write
+  landed; no ack ⇒ absorbed by absent block". Session 19 hardware testing
+  falsified this — the ack arrives identically for writes to absent blocks
+  that produce no audible change. The server now labels the ack as a
+  wire-level ack and explicitly warns it does NOT confirm audible change.
+- **Open question:** does the 40-byte payload carry a placed-vs-absent flag
+  we haven't decoded? Two paired samples exist (A01 amp.gain=6 applied in
+  Session 18; reverb.mix=50 absorbed in Session 19) and they differ in
+  trailing payload content (applied has zeros from byte 14; absorb has
+  non-zero content through byte 23). Sample size of 2 is too small to
+  claim a discriminator — needs paired captures for the same param with
+  block placed vs not placed.
+- **Minimum viable work:**
+  1. Capture paired writes for 3–4 params (reverb.mix, delay.time,
+     drive.drive, comp.attack) with block placed and absent.
+  2. Byte-diff the 40-byte payloads within each pair.
+  3. If a consistent discriminator byte (or pattern) falls out, wire it
+     into `isWriteEcho` or a sibling `isAppliedEcho` predicate.
+  4. If no consistent discriminator exists in the write-ack payload,
+     fall back to one of: (a) decode the 0x0D READ response format and
+     use read-diff-after-write, or (b) find + decode a block-layout
+     query command and precheck client-side.
+- **Unlock:** honest apply/absorb detection. Today the tool says "ack
+  received, ack is not a confirmation of audible change"; with this
+  work it could say "write landed" or "write absorbed — block not
+  placed" with confidence.

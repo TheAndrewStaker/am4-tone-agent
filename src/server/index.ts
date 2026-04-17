@@ -37,7 +37,13 @@ import {
   type Param,
   type ParamKey,
 } from '../protocol/params.js';
-import { buildSetParam, isWriteEcho } from '../protocol/setParam.js';
+import { buildSetBlockType, buildSetParam, isWriteEcho } from '../protocol/setParam.js';
+import {
+  BLOCK_NAMES_BY_VALUE,
+  BLOCK_TYPE_VALUES,
+  resolveBlockType,
+  type BlockTypeName,
+} from '../protocol/blockTypes.js';
 import { connectAM4, type AM4Connection, toHex } from '../protocol/midi.js';
 
 /**
@@ -106,15 +112,20 @@ const server = new McpServer({
 
 server.registerTool('set_param', {
   description: [
-    'Write a single parameter on the connected Fractal AM4 and verify the',
-    'write took effect. The parameter is addressed by (block, name) — e.g.',
-    'block="amp", name="gain". For numeric params, pass the user-facing',
-    'display value (0–10 knob, dB, ms, %). For enum params, pass the',
-    'dropdown name ("1959SLP Normal") or wire index (0).',
-    'The AM4 silently absorbs writes targeting blocks that aren\'t present',
-    'in the active preset; this tool detects that via the device echo and',
-    'returns an explicit error instead of a false success. Call list_params',
-    'first if unsure what is available.',
+    'Write a single parameter on the connected Fractal AM4. The parameter',
+    'is addressed by (block, name) — e.g. block="amp", name="gain". For',
+    'numeric params, pass the user-facing display value (0–10 knob, dB,',
+    'ms, %). For enum params, pass the dropdown name ("1959SLP Normal")',
+    'or wire index (0).',
+    'IMPORTANT: the tool cannot currently tell whether a write actually',
+    'landed on the audio path. If the target block isn\'t placed in the',
+    'active preset, the AM4 still acknowledges the write on the wire but',
+    'produces no audible change. The response includes the raw ack bytes',
+    'for diagnostic purposes, but the only trustworthy signal that a',
+    'change took effect is the user confirming via the AM4\'s own display.',
+    'If the user expects an audible change and reports none, the likely',
+    'cause is that the target block isn\'t placed in the active preset.',
+    'Call list_params first if unsure what is available.',
   ].join(' '),
   inputSchema: {
     block: z.string().describe('Block name, e.g. "amp", "drive", "reverb", "delay"'),
@@ -129,6 +140,15 @@ server.registerTool('set_param', {
   const resolved = resolveValue(param, value);
   const bytes = buildSetParam(key, resolved);
   const conn = ensureMidi();
+  // Capture every inbound SysEx during the write window so we can report
+  // the raw protocol traffic alongside our verdict. This is diagnostic
+  // output added in Session 19 to debug false-confirm reports — the
+  // matched echo alone isn't enough to tell apply from absorb if the
+  // `isWriteEcho` predicate is still too loose.
+  const captured: number[][] = [];
+  const unsubscribe = conn.onMessage((msg) => {
+    if (msg[0] === 0xf0) captured.push([...msg]);
+  });
   // Register the echo listener BEFORE sending so a fast device response
   // can't race ahead of us.
   const echoPromise = conn.receiveSysExMatching(
@@ -143,28 +163,44 @@ server.registerTool('set_param', {
   const display = param.unit === 'enum'
     ? `${resolved} (${enumNameFor(resolved) ?? '?'})`
     : String(resolved);
+  const formatCaptured = (): string => {
+    if (captured.length === 0) return '  (none)';
+    return captured.map((m, i) => `  [${i}] (${m.length}B) ${toHex(m)}`).join('\n');
+  };
   try {
-    await echoPromise;
-  } catch {
+    const ack = await echoPromise;
+    unsubscribe();
     return {
       content: [{
         type: 'text',
         text:
-          `Wrote ${key} = ${display} but the device did not echo the write ` +
-          `within ${WRITE_ECHO_TIMEOUT_MS} ms. This almost always means the ` +
-          `${param.block} block is NOT placed in the active preset — the AM4 ` +
-          `silently absorbs writes to absent blocks. Switch to a preset that ` +
-          `has ${param.block} placed (most factory presets do) and retry.\n` +
-          `Wire bytes sent: ${toHex(bytes)}`,
+          `Sent ${key} = ${display}. AM4 wire-acked the write. NOTE: the ack ` +
+          `does NOT confirm an audible change — the AM4 acks writes to absent ` +
+          `blocks the same way it acks writes to placed ones. If the user ` +
+          `expected a sound change and reports none, the ${param.block} block ` +
+          `is probably not placed in the active preset.\n` +
+          `Sent (${bytes.length}B): ${toHex(bytes)}\n` +
+          `Ack (${ack.length}B): ${toHex(ack)}\n` +
+          `All inbound SysEx during the ${WRITE_ECHO_TIMEOUT_MS} ms window:\n` +
+          formatCaptured(),
+      }],
+    };
+  } catch {
+    unsubscribe();
+    return {
+      content: [{
+        type: 'text',
+        text:
+          `Sent ${key} = ${display}. No ack within ${WRITE_ECHO_TIMEOUT_MS} ms — ` +
+          `this is unusual (the AM4 normally acks every write). Check the USB ` +
+          `connection, the AM4 power state, and that Claude Desktop still has ` +
+          `the MIDI port open.\n` +
+          `Sent (${bytes.length}B): ${toHex(bytes)}\n` +
+          `All inbound SysEx during the ${WRITE_ECHO_TIMEOUT_MS} ms window:\n` +
+          formatCaptured(),
       }],
     };
   }
-  return {
-    content: [{
-      type: 'text',
-      text: `Sent ${key} = ${display}. Device confirmed. Wire bytes: ${toHex(bytes)}`,
-    }],
-  };
 });
 
 server.registerTool('list_params', {
@@ -190,10 +226,15 @@ server.registerTool('set_params', {
   description: [
     'Apply multiple parameter writes in one call. Prefer this over many',
     'set_param calls when applying a scene, preset, or any grouped change —',
-    'it is less chatty and validates all inputs before sending any MIDI',
-    '(either the whole batch applies or nothing does). Same value rules as',
-    'set_param: numbers for knobs/dB/ms/%, strings or wire indices for enum',
-    'params. Writes are sent in the provided order.',
+    'it\'s less chatty and validates all inputs before sending any MIDI',
+    '(a bad value in one entry rejects the whole call with nothing sent).',
+    'Same value rules as set_param: numbers for knobs/dB/ms/%, strings or',
+    'wire indices for enum params. Writes are sent in the provided order.',
+    'IMPORTANT: same caveat as set_param — the AM4 acks every write on the',
+    'wire whether or not the target block is placed, so an ack is not a',
+    'confirmation of audible change. If the user expects audible changes',
+    'and reports none, the most likely cause is that one or more target',
+    'blocks are not placed in the active preset.',
   ].join(' '),
   inputSchema: {
     writes: z.array(z.object({
@@ -206,9 +247,9 @@ server.registerTool('set_params', {
   if (writes.length === 0) {
     return { content: [{ type: 'text', text: 'No writes supplied. Nothing to do.' }] };
   }
-  // Validate + encode every entry BEFORE sending any MIDI. This keeps the
-  // batch atomic from the caller's POV: a bad value in entry 7 won't leave
-  // entries 0..6 half-applied.
+  // Validate + encode every entry BEFORE sending any MIDI. A bad value in
+  // entry 7 would otherwise leave entries 0..6 half-sent; the pre-flight
+  // pass keeps input-validation failures atomic.
   const prepared = writes.map((w, i) => {
     try {
       const key = paramKey(w.block, w.name);
@@ -226,9 +267,12 @@ server.registerTool('set_params', {
     }
   });
   const conn = ensureMidi();
-  const confirmed: string[] = [];
+  const lines: string[] = [];
+  let acked = 0;
+  let unacked = 0;
   for (let i = 0; i < prepared.length; i++) {
-    const { key, param, bytes, display } = prepared[i];
+    const { key, display } = prepared[i];
+    const { bytes } = prepared[i];
     const echoPromise = conn.receiveSysExMatching(
       (resp) => isWriteEcho(bytes, resp),
       WRITE_ECHO_TIMEOUT_MS,
@@ -236,28 +280,241 @@ server.registerTool('set_params', {
     conn.send(bytes);
     try {
       await echoPromise;
+      acked++;
+      lines.push(`  ✓ ${key} = ${display} — wire-acked`);
     } catch {
-      return {
-        content: [{
-          type: 'text',
-          text:
-            `Applied ${confirmed.length}/${prepared.length} writes, then write #${i + 1} was silently absorbed:\n` +
-            confirmed.map((l) => `  ${l}`).join('\n') +
-            (confirmed.length ? '\n' : '') +
-            `  ✗ ${key} = ${display} — ${param.block} block is NOT placed in the active preset.\n` +
-            `Switch to a preset that has ${param.block} placed and retry this batch.`,
-        }],
-      };
+      unacked++;
+      lines.push(`  ? ${key} = ${display} — no ack within ${WRITE_ECHO_TIMEOUT_MS} ms (USB/driver issue?)`);
     }
-    confirmed.push(`${key} = ${display}`);
   }
+  const summary =
+    unacked === 0
+      ? `Sent all ${prepared.length} writes; AM4 wire-acked each one. Acks do NOT confirm audible change — if the user reports no change on the device, the target blocks are probably not placed in the active preset.`
+      : `Sent ${prepared.length} writes; ${acked} acked, ${unacked} un-acked (un-acked is unusual — check USB/driver).`;
+  return {
+    content: [{ type: 'text', text: `${summary}\n${lines.join('\n')}` }],
+  };
+});
+
+server.registerTool('set_block_type', {
+  description: [
+    'Place a block (or clear the slot) at one of the AM4\'s four signal-chain',
+    'positions. The AM4 has 4 block slots, numbered 1..4 left-to-right in the',
+    'signal chain. Each slot can hold at most one block of a given type, and',
+    'a preset\'s layout is defined by which block is in which slot.',
+    'Block types (case-insensitive): "none" (empty slot), "amp", "compressor",',
+    '"geq", "peq", "reverb", "delay", "chorus", "flanger", "rotary", "phaser",',
+    '"wah", "volpan", "tremolo", "filter", "drive", "enhancer", "gate".',
+    'Typical use: build a preset by first calling set_block_type for each slot',
+    'to lay out the chain, then use set_param / set_params to dial in the',
+    'parameters for each placed block.',
+    'Same ack caveat as set_param: the AM4 wire-acks the placement; whether',
+    'it was actually accepted is best confirmed by the user on the device.',
+  ].join(' '),
+  inputSchema: {
+    position: z.number().int().min(1).max(4).describe(
+      'Slot position in the signal chain (1..4). Slot 1 is leftmost / first.',
+    ),
+    block_type: z.string().describe(
+      'Block name (e.g. "compressor", "reverb", "drive") or "none" to clear.',
+    ),
+  },
+}, async ({ position, block_type }) => {
+  const value = resolveBlockType(block_type);
+  if (value === undefined) {
+    const known = Object.keys(BLOCK_TYPE_VALUES).join(', ');
+    throw new Error(`Unknown block_type "${block_type}". Known: ${known}`);
+  }
+  const pos = position as 1 | 2 | 3 | 4;
+  const bytes = buildSetBlockType(pos, value);
+  const conn = ensureMidi();
+  const captured: number[][] = [];
+  const unsubscribe = conn.onMessage((msg) => {
+    if (msg[0] === 0xf0) captured.push([...msg]);
+  });
+  const echoPromise = conn.receiveSysExMatching(
+    (resp) => isWriteEcho(bytes, resp),
+    WRITE_ECHO_TIMEOUT_MS,
+  );
+  conn.send(bytes);
+  const displayName = BLOCK_NAMES_BY_VALUE[value] ?? `0x${value.toString(16)}`;
+  const formatCaptured = (): string => {
+    if (captured.length === 0) return '  (none)';
+    return captured.map((m, i) => `  [${i}] (${m.length}B) ${toHex(m)}`).join('\n');
+  };
+  try {
+    const ack = await echoPromise;
+    unsubscribe();
+    return {
+      content: [{
+        type: 'text',
+        text:
+          `Placed ${displayName} in slot ${pos}. AM4 wire-acked the change. ` +
+          `NOTE: the ack does NOT confirm the block-slot layout actually ` +
+          `updated on the device — cross-check on the AM4 if it matters.\n` +
+          `Sent (${bytes.length}B): ${toHex(bytes)}\n` +
+          `Ack (${ack.length}B): ${toHex(ack)}\n` +
+          `All inbound SysEx during the ${WRITE_ECHO_TIMEOUT_MS} ms window:\n` +
+          formatCaptured(),
+      }],
+    };
+  } catch {
+    unsubscribe();
+    return {
+      content: [{
+        type: 'text',
+        text:
+          `Sent block placement (slot ${pos} → ${displayName}). No ack within ` +
+          `${WRITE_ECHO_TIMEOUT_MS} ms — this is unusual. Check the USB ` +
+          `connection and that the AM4 is on.\n` +
+          `Sent (${bytes.length}B): ${toHex(bytes)}\n` +
+          `All inbound SysEx during the ${WRITE_ECHO_TIMEOUT_MS} ms window:\n` +
+          formatCaptured(),
+      }],
+    };
+  }
+});
+
+server.registerTool('list_block_types', {
+  description:
+    'List every block type that can be placed via set_block_type, together ' +
+    'with its wire pidLow (mostly for debugging — callers normally pass the ' +
+    'block name, not the numeric value). "none" clears a slot to empty.',
+  inputSchema: {},
+}, async () => {
+  const rows = (Object.entries(BLOCK_TYPE_VALUES) as [BlockTypeName, number][]).map(
+    ([name, value]) => `  ${name} (pidLow=0x${value.toString(16).padStart(4, '0')})`,
+  );
   return {
     content: [{
       type: 'text',
-      text:
-        `Applied ${prepared.length} writes (all confirmed by device echo):\n` +
-        confirmed.map((l) => `  ${l}`).join('\n'),
+      text: `Block types available for set_block_type (${rows.length}):\n${rows.join('\n')}`,
     }],
+  };
+});
+
+server.registerTool('apply_preset', {
+  description: [
+    'Lay out an entire preset in one call: place (or clear) each block slot',
+    'and set the parameters within each placed block. Use this when the',
+    'user is building a tone from scratch or applying a named preset concept',
+    '— it replaces a sequence of set_block_type + set_params calls with a',
+    'single structured request.',
+    'Shape: { slots: [{ position: 1..4, block_type: "amp"|..., params?: {...} }] }.',
+    'For each slot the tool emits the block-placement write first, then one',
+    'set-param write per entry in `params`. Params are keyed by the',
+    'parameter name within the block (e.g. { gain: 6, bass: 5 }) — the tool',
+    'joins `block_type` + param name internally. Skip `params` to just place',
+    'the block.',
+    'Validation happens up-front; if any slot/param is invalid (duplicate',
+    'position, unknown block type, unknown param for that block, value out',
+    'of range, unknown enum name) the entire call is rejected with nothing',
+    'sent. Same ack caveat as set_param/set_params: wire-acks confirm receipt,',
+    'not audible change.',
+  ].join(' '),
+  inputSchema: {
+    slots: z.array(z.object({
+      position: z.number().int().min(1).max(4).describe('Slot position 1..4 (1 = leftmost)'),
+      block_type: z.string().describe(
+        'Block name ("amp", "reverb", "compressor", "none", …). Call list_block_types for the full list.',
+      ),
+      params: z.record(z.string(), z.union([z.number(), z.string()])).optional().describe(
+        'Map of param name → display value within the block, e.g. { gain: 6, bass: 5 }. Omit or leave empty to just place the block without parameters.',
+      ),
+    })).min(1).describe('Ordered list of slots to configure'),
+  },
+}, async ({ slots }) => {
+  // --- Validation pass (no MIDI yet) ---
+  const seenPositions = new Set<number>();
+  type PreparedWrite =
+    | { kind: 'place'; position: 1 | 2 | 3 | 4; blockName: string; bytes: number[] }
+    | { kind: 'param'; key: ParamKey; display: string; bytes: number[] };
+  const prepared: PreparedWrite[] = [];
+
+  slots.forEach((slot, i) => {
+    const at = `slots[${i}] (position ${slot.position}, ${slot.block_type})`;
+    if (seenPositions.has(slot.position)) {
+      throw new Error(`${at}: position ${slot.position} used twice — each slot may appear at most once per call`);
+    }
+    seenPositions.add(slot.position);
+
+    const blockTypeValue = resolveBlockType(slot.block_type);
+    if (blockTypeValue === undefined) {
+      const known = Object.keys(BLOCK_TYPE_VALUES).join(', ');
+      throw new Error(`${at}: unknown block_type "${slot.block_type}". Known: ${known}`);
+    }
+    const canonicalBlock = BLOCK_NAMES_BY_VALUE[blockTypeValue] ?? slot.block_type;
+    const pos = slot.position as 1 | 2 | 3 | 4;
+    prepared.push({
+      kind: 'place',
+      position: pos,
+      blockName: canonicalBlock,
+      bytes: buildSetBlockType(pos, blockTypeValue),
+    });
+
+    if (slot.params && Object.keys(slot.params).length > 0) {
+      if (canonicalBlock === 'none') {
+        throw new Error(`${at}: params supplied but block_type is "none" (empty slot). Remove params or pick a real block type.`);
+      }
+      for (const [paramName, value] of Object.entries(slot.params)) {
+        const key = `${canonicalBlock}.${paramName}` as ParamKey;
+        if (!(key in KNOWN_PARAMS)) {
+          const sameBlock = Object.keys(KNOWN_PARAMS).filter((k) => k.startsWith(`${canonicalBlock}.`));
+          throw new Error(
+            `${at}: unknown param "${paramName}" for block "${canonicalBlock}". ` +
+            (sameBlock.length ? `Known params for ${canonicalBlock}: ${sameBlock.join(', ')}.` : `No params registered for ${canonicalBlock} yet.`),
+          );
+        }
+        const param: Param = KNOWN_PARAMS[key];
+        let resolved: number;
+        try {
+          resolved = resolveValue(param, value);
+        } catch (err) {
+          throw new Error(`${at}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+        const enumNameFor = (idx: number): string | undefined =>
+          (param.enumValues as Record<number, string> | undefined)?.[idx];
+        const display = param.unit === 'enum'
+          ? `${resolved} (${enumNameFor(resolved) ?? '?'})`
+          : String(resolved);
+        prepared.push({
+          kind: 'param',
+          key,
+          display,
+          bytes: buildSetParam(key, resolved),
+        });
+      }
+    }
+  });
+
+  // --- Send pass ---
+  const conn = ensureMidi();
+  const lines: string[] = [];
+  let acked = 0;
+  let unacked = 0;
+  for (const w of prepared) {
+    const echoPromise = conn.receiveSysExMatching(
+      (resp) => isWriteEcho(w.bytes, resp),
+      WRITE_ECHO_TIMEOUT_MS,
+    );
+    conn.send(w.bytes);
+    const label = w.kind === 'place'
+      ? `place slot ${w.position} → ${w.blockName}`
+      : `${w.key} = ${w.display}`;
+    try {
+      await echoPromise;
+      acked++;
+      lines.push(`  ✓ ${label}`);
+    } catch {
+      unacked++;
+      lines.push(`  ? ${label} — no ack within ${WRITE_ECHO_TIMEOUT_MS} ms`);
+    }
+  }
+  const header = unacked === 0
+    ? `Applied preset: ${prepared.length} writes, all wire-acked. Acks don't confirm audible change — cross-check on the AM4 if it matters.`
+    : `Applied preset: ${prepared.length} writes, ${acked} acked, ${unacked} un-acked (unusual — check USB).`;
+  return {
+    content: [{ type: 'text', text: `${header}\n${lines.join('\n')}` }],
   };
 });
 

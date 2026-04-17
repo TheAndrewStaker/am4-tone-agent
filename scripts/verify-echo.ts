@@ -43,10 +43,26 @@ const cases: Case[] = [
     expected: true,
   },
   {
-    label: '23-byte short-form echo (hypothetical; same pidLow/pidHigh/action) — ACCEPT',
+    label: '23-byte receipt-echo of our own write (hdr4=0x0004) — REJECT',
+    // Session 19 hardware test: this frame appears on the input port even
+    // when the target block is absent from the active preset (the write was
+    // silently absorbed). Byte-identical to `buildSetParam('amp.gain', 6)`.
+    // Treating it as success caused four confirmed false-positives against
+    // live hardware before the fix.
     write: writeAmpGain6,
     response: bytes('f000017415013a000b000100000004004d2623137806f7'),
-    expected: true,
+    expected: false,
+  },
+  {
+    label: '23-byte receipt-echo of an absorbed reverb.type=Ambience write — REJECT',
+    // Captured in the same Session 19 hardware test, different block/param:
+    // reverb.type=21 (Ambience) sent to a preset with no reverb block placed.
+    // The response was byte-identical to the outgoing write (same class of
+    // receipt-echo as the amp.gain case above) — we assert the general
+    // property "an outgoing write reflected back is not an apply-echo".
+    write: buildSetParam('reverb.type', 21),
+    response: buildSetParam('reverb.type', 21),
+    expected: false,
   },
   {
     label: '23-byte AM4-Edit status poll response (action=0x0026) — REJECT',

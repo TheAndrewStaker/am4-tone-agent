@@ -2,13 +2,20 @@
 
 > Read this file at the start of every session. It's kept up-to-date with
 > current phase, the single next action, and recent findings.
-> Last updated: **2026-04-16** (Session 18 — v0.2 shipped. Write-echo
-> confirmation detects silent-absorb; `read_param` removed; 17 params
-> across 15 confirmed blocks; Tier-3 captures promoted 11 tentative
-> cache-block roles to CONFIRMED. READ-response format is NOT decoded
-> (bytes 0-7 are a rotating descriptor/counter, value not at fixed
-> offset) — deferred to a future session that will need Ghidra work on
-> AM4-Edit's response parser rather than pure capture diffing.)
+> Last updated: **2026-04-16** (Session 19 — three protocol wins, one
+> correction, one new tool. (a) False-confirm bug triaged: AM4 wire-acks
+> every write regardless of block placement, so ack-based apply/absorb
+> detection can't work with what we currently decode (BK-008). Tool
+> language made honest. (b) Block placement cracked: pidLow=0x00CE,
+> pidHigh=0x000F..0x0012 (slots 1–4), value=block pidLow as float32 —
+> see SYSEX-MAP §6c. (c) Off-by-one corrected after hardware test
+> (`BLOCK_SLOT_PID_HIGH_BASE` 0x0010 → 0x000F), pidHigh 0x0013 flagged
+> invalid (observed to clobber an unrelated slot). Block placement then
+> hardware-verified end-to-end: one-shot preset build (compressor/amp/
+> delay/reverb in slots 1–4 + amp.gain + reverb.mix) landed audibly.
+> (d) New MCP tool `apply_preset` collapses placement + params into a
+> single call. Server now exposes **7 tools**. 19/19 verify-msg, 8/8
+> verify-echo.)
 
 ---
 
@@ -26,31 +33,49 @@ float32. One open question remains before the IR can cover full presets:
 
 ## The single next action
 
-### Test v0.2 write-echo behavior live against hardware
+### Test `apply_preset` live — one-call full-preset build
 
-Session 18 shipped echo-verified writes. Before building further, sanity
--check the new failure mode against a real device:
+Block placement now hardware-verified end-to-end (Session 19: compressor
+→ slot 1, amp/delay/reverb → slots 2/3/4, then `set_params` for gain and
+mix all landed audibly). Session 19 also shipped the `apply_preset` MCP
+tool that collapses placement + params into a single call. 7 tools now
+register on the server.
 
-1. Confirm `npm run preflight` still green (it is at commit time —
-   16/16 verify-msg goldens, 7/7 verify-echo goldens, smoke-server
-   reports 4 tools).
-2. Reconnect hardware. Run `npm run write-test` — sanity-check the
-   native build.
-3. Update `%APPDATA%\Claude\claude_desktop_config.json` (no change
-   to stanza; the server path is stable).
-4. Restart Claude Desktop. Verify **4** tools now register
-   (`set_param`, `set_params`, `list_params`, `list_enum_values`).
-   `read_param` is intentionally removed.
-5. Load factory preset **A01** (has Amp). Ask *"Set amp gain to 6"*.
-   Expected: tool returns "Device confirmed", AM4's display shows 6.0.
-6. Load a preset **without Drive placed** (or Z04 scratch). Ask
-   *"Set drive.drive to 7"*. Expected: tool returns the silent-absorb
-   error — "drive block is NOT placed in the active preset". This is
-   the key new behavior vs v0.1.
-7. Ask *"Change the reverb type to a spring and the delay to 400 ms
-   and compressor type to VCA Modern"* — triggers `set_params` batch.
-   Expect per-write echo confirmation and, if any block is missing,
-   "Applied N/3 writes, then write #X was silently absorbed".
+1. Restart Claude Desktop to pick up `apply_preset`.
+2. Load **Z04**, clear blocks on the device.
+3. Ask Claude something like *"build me a clean preset with compressor,
+   amp (gain 4, bass 6), delay (time 350 ms), and reverb (spring studio,
+   mix 35%)"*. Expect Claude to emit a single `apply_preset` tool call
+   with the structured slots list, and the AM4 to land at the right
+   layout + params in one shot.
+4. Verify on the hardware: chain matches, amp gain/bass match, delay time
+   matches, reverb type/mix match. Any unintended state from a previous
+   preset at slots 5+ (none exist) or unused params (stale values from
+   the prior preset — apply_preset doesn't currently reset every param,
+   only the ones specified) is a known limitation, not a bug.
+
+Open follow-ons (bigger scopes, see backlog):
+
+- **Scenes.** 4 scenes per preset; `session-18-switch-scene.pcapng`
+  exists but builders aren't written. Extending `apply_preset` to take
+  `scenes: [...]` unlocks full preset fidelity.
+- **Per-block channels.** amp.channel (A/B/C/D) is decoded; other blocks'
+  channel pidHigh is extrapolated from amp — worth one capture each to
+  confirm before exposing channel control in `apply_preset`.
+- **Save to slot / switch preset.** `session-18-save-preset-z04.pcapng`,
+  `session-18-switch-preset.pcapng` are captured but not decoded.
+  Decoding closes the loop for persistent preset generation.
+
+### What's deferred
+
+- **Apply/absorb discriminator** — the AM4 wire-acks writes whether or
+  not the target block is placed (Session 19 hardware finding). Echo
+  timing can't tell applied from absorbed. Parked as `BK-008`; unblocks
+  truly honest audible-change detection once decoded.
+- **Preset save / load / scene switch protocol decode.** Captures exist
+  (`session-18-save-preset-z04.pcapng`, `session-18-switch-scene.pcapng`,
+  `session-18-switch-preset.pcapng`) but builders aren't written yet.
+  Unblocks persistent preset generation (build from scratch + store).
 
 ### Deferred
 
@@ -131,7 +156,55 @@ index table (only index 8 has been wire-verified).
 ## Recent breakthroughs
 
 Older breakthroughs (sessions 04–08, 10–14) are archived in `SESSIONS.md`.
-Sessions 15–18 (current) are kept here for fast orientation.
+Sessions 15–19 (current) are kept here for fast orientation.
+
+000000. **Session 19 — three wins: ack triage, block-placement decode, new
+        MCP tools.**
+
+        **19a (ack triage):** Hardware testing via Claude Desktop produced
+        four false-confirms on absent-block writes (amp.gain, drive.drive,
+        flanger.type, reverb.type/Ambience). First fix attempted: tighten
+        `isWriteEcho` to require `hdr4 = 0x0028` (reject the 23-byte
+        receipt-echo of our own bytes, accept only the 64-byte device
+        frame). Second hardware test killed that hypothesis — the AM4
+        emits the 64-byte frame for absorbed writes too. Triage: ack
+        presence does NOT indicate apply. Tool language reworked to be
+        honest ("wire-acked; not a confirmation of audible change") and
+        `set_params` no longer aborts on missing acks. Diagnostic capture
+        of all inbound SysEx during the write window now included in
+        every tool response. Apply/absorb detection parked as BK-008.
+
+        **19b (block placement cracked):** Three Session-18 captures
+        (block-clear, GEQ→Reverb, none→Amp) decoded into one protocol
+        rule: block placement is a regular WRITE to pidLow=0x00CE,
+        pidHigh=0x0010+slot-1, with the target block's own pidLow as
+        the float32 value (0 = "none"). See SYSEX-MAP §6c. The decoded
+        values matched the known pidLow table exactly (Reverb=0x42,
+        Amp=0x3A). `buildSetBlockType` landed with 3/3 byte-exact
+        `verify-msg` goldens against captured wire bytes.
+
+        **19c (new MCP tools):** `set_block_type(position, block_type)`
+        and `list_block_types` registered. Server now exposes 6 tools.
+        Block-type dictionary (18 entries incl. "none") lives in
+        `src/protocol/blockTypes.ts`.
+
+        **19d (off-by-one correction):** First hardware test of
+        `set_block_type` landed position 1 on device slot 2, and position
+        4 (pidHigh 0x0013) produced a structurally different ack plus
+        observed side effects on an unrelated slot. Concluded the three
+        Session-18 captures were slots 2/3/4, not 1/2/3. Fixed base
+        from `0x0010` to `0x000F` so positions 1..4 map to pidHighs
+        0x0F..0x12. Re-test confirmed: compressor→slot 1, amp→slot 2,
+        delay→slot 3, reverb→slot 4 all landed on the labelled AM4 slot,
+        then amp.gain=6 + reverb.mix=40 both audibly applied.
+
+        **19e (apply_preset tool):** Collapses the N block placements +
+        M param writes of a full preset into a single MCP call. Takes
+        `{ slots: [{ position, block_type, params? }] }`. Validates all
+        input up-front (unknown block/param, out-of-range value, enum
+        name typo, duplicate position) before sending any MIDI. Returns
+        a per-write ack summary same shape as `set_params`. 7th MCP
+        tool registered.
 
 00000. **Session 18 — write-echo confirmation + 11 blocks confirmed.**
        Three sub-phases:

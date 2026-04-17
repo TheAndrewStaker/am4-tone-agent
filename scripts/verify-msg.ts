@@ -2,8 +2,9 @@
  * Verify built SET_PARAM messages match captured wire bytes byte-for-byte.
  * Run:  npx tsx scripts/verify-msg.ts
  */
-import { buildSetFloatParam, buildSetParam } from '../src/protocol/setParam.js';
+import { buildSetBlockType, buildSetFloatParam, buildSetParam } from '../src/protocol/setParam.js';
 import { KNOWN_PARAMS } from '../src/protocol/params.js';
+import { BLOCK_TYPE_VALUES } from '../src/protocol/blockTypes.js';
 
 function hex(arr: number[]): string {
   return arr.map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -89,6 +90,26 @@ const cases: { label: string; built: number[]; expected: string }[] = [
     label: 'buildSetParam("volpan.mode", 1) — matches session-18 volpan-taper (actually Mode dropdown)',
     built: buildSetParam('volpan.mode', 1),
     expected: 'f0000174150166000f00010000000400000010037816f7',
+  },
+  // Session-18 block-placement captures. pidHigh base was 0x0010 when we
+  // first wrote these tests; Session 19 hardware mapping showed position
+  // 1 should send pidHigh 0x000F, not 0x0010, so captured pidHighs
+  // 0x10/0x11/0x12 correspond to positions 2/3/4 under the corrected
+  // base address (not 1/2/3 as initially assumed from filenames).
+  {
+    label: 'buildSetBlockType(2, none) — matches session-18 block-clear-to-none',
+    built: buildSetBlockType(2, BLOCK_TYPE_VALUES.none),
+    expected: 'f000017415014e01100001000000040000000000004bf7',
+  },
+  {
+    label: 'buildSetBlockType(3, reverb) — matches session-18 block-type-gte-to-rev',
+    built: buildSetBlockType(3, BLOCK_TYPE_VALUES.reverb),
+    expected: 'f000017415014e01110001000000040000001044100ef7',
+  },
+  {
+    label: 'buildSetBlockType(4, amp) — matches session-18 block-add-none-to-amp',
+    built: buildSetBlockType(4, BLOCK_TYPE_VALUES.amp),
+    expected: 'f000017415014e01120001000000040000000d041050f7',
   },
 ];
 

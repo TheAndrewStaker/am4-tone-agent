@@ -1,7 +1,7 @@
 /**
  * Smoke test for the MCP server — spawns it as a child process, does the
- * MCP initialize handshake over stdio, lists tools, and checks the three
- * registered tools come back. Does NOT call any tool that touches MIDI;
+ * MCP initialize handshake over stdio, lists tools, and checks every
+ * registered tool shows up. Does NOT call any tool that touches MIDI;
  * this is a harness-level check.
  *
  *   npx tsx scripts/smoke-server.ts
@@ -86,7 +86,15 @@ async function main(): Promise<void> {
   const names = tools.map((t) => t.name).sort();
   console.log(`✓ tools/list returned: ${names.join(', ')}`);
 
-  const expected = ['list_enum_values', 'list_params', 'set_param', 'set_params'];
+  const expected = [
+    'apply_preset',
+    'list_block_types',
+    'list_enum_values',
+    'list_params',
+    'set_block_type',
+    'set_param',
+    'set_params',
+  ];
   for (const exp of expected) {
     if (!names.includes(exp)) throw new Error(`missing tool: ${exp}`);
   }

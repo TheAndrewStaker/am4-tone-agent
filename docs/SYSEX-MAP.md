@@ -327,6 +327,77 @@ the value is the same.
 
 ---
 
+## 6c. Block Slot Placement Register 🟢
+
+**Cracked Session 19** from three Session-18 captures (`session-18-block-
+clear-to-none.pcapng`, `session-18-block-type-gte-to-rev.pcapng`,
+`session-18-block-add-none-to-amp.pcapng`). Block placement — which block
+type occupies each of the AM4's four signal-chain slots — is a regular
+0x01 PARAMETER_R/W **WRITE** to a dedicated parameter-family register.
+
+### Address
+
+- **pidLow** `0x00CE` — block-slot register (fixed).
+- **pidHigh** `0x000F`–`0x0012` — slot index for positions 1, 2, 3, 4.
+  - `0x0013` is **NOT** a valid slot — sending it produces a structurally
+    different ack and was observed to have side effects on an unrelated
+    slot (Session 19 hardware test). Clients MUST validate 1 ≤ position
+    ≤ 4 and stop at pidHigh 0x0012.
+
+### Value
+
+Float32 containing the target block's own pidLow. `0.0` clears the slot
+to "none" (empty). Known block-type values (same as pidLow elsewhere in
+this map):
+
+| Block | pidLow (float32 value) |
+|-------|------------------------|
+| (none / empty) | `0x0000` |
+| Compressor | `0x002E` |
+| GEQ | `0x0032` |
+| PEQ | `0x0036` |
+| Amp | `0x003A` |
+| Reverb | `0x0042` |
+| Delay | `0x0046` |
+| Chorus | `0x004E` |
+| Flanger | `0x0052` |
+| Rotary | `0x0056` |
+| Phaser | `0x005A` |
+| Wah | `0x005E` |
+| Volume/Pan | `0x0066` |
+| Tremolo | `0x006A` |
+| Filter | `0x0072` |
+| Drive | `0x0076` |
+| Enhancer | `0x007A` |
+| Gate | `0x0092` |
+
+### Captured goldens (byte-exact in `verify-msg`)
+
+| Capture | Built by | Wire (with checksum) |
+|---------|----------|----------------------|
+| Slot 2 → none | `buildSetBlockType(2, 0)` | `F0 00 01 74 15 01 4E 01 10 00 01 00 00 00 04 00 00 00 00 00 00 4B F7` |
+| Slot 3 → Reverb | `buildSetBlockType(3, 0x42)` | `F0 00 01 74 15 01 4E 01 11 00 01 00 00 00 04 00 00 00 10 44 10 0E F7` |
+| Slot 4 → Amp | `buildSetBlockType(4, 0x3A)` | `F0 00 01 74 15 01 4E 01 12 00 01 00 00 00 04 00 00 00 0D 04 10 50 F7` |
+
+The AM4-Edit filenames ("block-clear-to-none" etc.) didn't record which
+slot the user targeted, so these were initially mis-labelled "slots 1/2/3".
+Session 19 hardware mapping corrected that — pidHigh 0x10/0x11/0x12 are
+device slots 2/3/4, leaving pidHigh 0x0F as slot 1 (no capture on disk,
+but fits the linear pattern; verified live on hardware).
+
+### Observation — related 0x0017 "action" traffic
+
+Alongside the block-placement WRITE, AM4-Edit issues several bursts of a
+different command shape: action byte `0x0017` (not WRITE `0x0001`) to
+the placed block's own pidLow, with a zeroed 4-byte payload. The action
+repeats 4–6× in a ~15 ms window after the placement WRITE. Hypothesis:
+this is an initialization / defaults-reset broadcast for the newly-
+placed block. Not required for placement itself — our builder emits only
+the pidLow=0xCE WRITE and that matches the capture byte-for-byte. Revisit
+if block placement without the 0x0017 burst misbehaves on hardware.
+
+---
+
 ## 6. Byte-Level Templates for Phase 1 Commands 🟡
 
 All payloads below are **Axe-Fx II/AX8-derived guesses** for AM4. Expected
