@@ -430,6 +430,67 @@ without installing Node, a C++ toolchain, or editing JSON by hand. See
   room for it (keep the MCP server transport pluggable, don't
   hardcode stdio-only assumptions).
 
+### BK-012 Abstract protocol into a standalone npm package
+- **Context:** `src/protocol/` is already IO-free and MCP-free — it's a
+  pure SysEx library with the checksum, value pack/unpack, params
+  registry, block types, slot naming, and command builders. Splitting
+  it out lets third parties (other Fractal owners, community editors,
+  alternative MCP implementations, CLIs) reuse the protocol work
+  without adopting the MCP server, and keeps this repo's MCP surface
+  small + focused.
+- **Target shape (monorepo, npm workspaces):**
+  ```
+  packages/
+    am4-protocol/         # pure: checksum, packValue, params,
+                          # blockTypes, slots, builders. No Node deps.
+                          # Publishable.
+    am4-midi/             # thin MIDI wrapper (node-midi). Depends on
+                          # am4-protocol. Node-only. Publishable.
+    am4-mcp-server/       # current src/server/. Depends on both.
+                          # Publishable separately or bundled via MCPB
+                          # (P5-008).
+  ```
+  Keep everything in one repo initially so protocol changes + MCP
+  consumer updates land in one PR. Publish separately when each
+  package stabilises.
+- **API stability:** before publishing, audit `src/protocol/` exports
+  for public-surface quality — consistent naming (e.g. `buildSetParam`
+  vs `buildSetFloatParam` vs `buildSetBlockType` is fine but document
+  the convention), minimal surface, no leaking-implementation types.
+  SemVer from 0.x until stable.
+- **Community gesture:** reach out to Fractal before publishing anything
+  that trades on their product names. Their SysEx docs are public and
+  third-party editors exist, so precedent is favorable — but a
+  heads-up email + link to the repo is the right etiquette. Trademark
+  non-endorsement language from P5-010 applies to all packages.
+- **Relation to other items:**
+  - P5-008 (MCPB bundle) wraps `am4-mcp-server` — unchanged by this
+    split.
+  - P5-010 (license + trademark) applies per-package, same terms.
+  - BK-009 / BK-010 / BK-011 (future protocol features) land in
+    `am4-protocol` by default, with MCP tool wiring in the server
+    package.
+
+### BK-011 Preset and scene naming
+- **Context:** the AM4 supports editable names on both presets and
+  scenes (visible on the device display). The current toolset places
+  blocks and saves to slots but never sets the name, so saved presets
+  keep whatever name the slot had before, which is confusing once a
+  user has built several Z04-style scratch presets.
+- **Prereqs:** capture AM4-Edit renaming a preset AND renaming a scene
+  (separate commands — probably). Likely another PARAM_RW (function
+  0x01) variant with a new action byte and an ASCII payload. Preset
+  name length on Fractal hardware is typically 16–32 chars; scene
+  names typically ~8. Confirm by capture.
+- **Scope:** decode both commands; add `set_preset_name(name)` and
+  `set_scene_name(scene_index, name)` MCP tools; extend `apply_preset`
+  to take an optional `name` field; extend the (future) scene payload
+  to take per-scene names. Validation: length limits + ASCII-only
+  per the device's character set.
+- **Unlock:** when a user says "build the Boston Rockman tone and save
+  it", the resulting Z04 entry reads "Boston Rockman" on the device
+  instead of "Z04 scratch" or leftover name.
+
 ### BK-009 `get_block_layout` — read current working-buffer chain
 - **Context:** Claude Desktop suggested (Session 19) that additive tweaks
   are painful without a way to see what's currently on the unit. `apply_preset`
