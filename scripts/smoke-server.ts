@@ -92,7 +92,7 @@ async function main(): Promise<void> {
     'list_enum_values',
     'list_params',
     'reconnect_midi',
-    'save_to_slot',
+    'save_to_location',
     'set_block_type',
     'set_param',
     'set_params',

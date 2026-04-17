@@ -235,27 +235,93 @@ the device's own store command to persist. See `docs/DECISIONS.md`.
 
 ## PHASE 4 — Library Management
 
-### P4-001 List all slots with status
-- Shows all 104 slots: name, type (factory/user/empty), last modified
+### P4-001 List all preset locations with status
+- Shows all 104 preset locations: name, type (factory/user/empty),
+  last modified
 - Formatted as compact table for readability
 
-### P4-002 Bulk preset build from setlist
-- Input: list of songs
-- Claude builds all presets, assigns to consecutive slots
-- Single confirmation for the whole batch
-- Example: "I'm doing a 311 set — Amber, Down, Creatures, All Mixed Up"
+### P4-002 Setlist-to-presets workflow (`apply_setlist`)
+- **Target prompt shape:** *"I have a gig coming up with this setlist:
+  {N songs}. Build a preset per song with scenes for the most distinctive
+  guitar parts. Store them in banks W–Z."*
+- **Flow:**
+  1. **Plan** — Claude researches each song's guitar gear/parts (uses
+     P3-007 lineage dictionary to translate real hardware → AM4 models),
+     drafts a preset IR per song (blocks + params + scenes + names).
+  2. **Authorize the target range** (see "Probing is too slow" below).
+     Claude tells the user: *"I'll write N presets to locations W01–Z04.
+     Anything stored there now will be overwritten. If that range
+     includes presets you want to keep, say so and I'll pick a
+     different range."* No probing; the user's explicit response is
+     authorization. If the user is uncertain, offer `P4-001`'s listing
+     as a separate opt-in step (also not free — see notes).
+  3. **Summarize + confirm** — present a single table: song → preset
+     location → new preset name → block summary. User confirms once
+     for the whole batch.
+  4. **Apply + save + name** — for each song, run `apply_preset` +
+     `save_to_location` + `set_preset_name` in order. Fail-fast: halt
+     on the first write that doesn't wire-ack and return partial
+     progress (which locations landed, which didn't).
+  5. **Audition (optional)** — `load_location` each saved preset in
+     turn so the user hears the result. Skippable per the latency
+     budget — a 16-preset audition is ~16 × (load + wait).
+- **Probing is too slow (decision):** the original plan called for
+  reading every target preset location's metadata before writing. At
+  ~50 ms per metadata read (if such a cheap command exists; none
+  decoded yet) × 16 locations = 800 ms — acceptable if cheap, but a
+  full preset dump (`0x77/0x78/0x79`) would be 5–8 seconds, which
+  violates the CLAUDE.md latency budget. Until we either (a) decode
+  a bulk "read all preset names" command, or (b) cache names after
+  first read, the batch writer does NOT probe — it trusts the user's
+  bank-range authorization in step 2. This converts probing from a
+  perf cost into a UX moment (user explicitly names safe banks) and
+  is the safer default anyway.
+- **Confirmation policy** (MCP layer; applies to all write tools, not
+  just this one):
+  | Situation | Behavior |
+  |---|---|
+  | Single preset, target = currently-loaded location | Apply to working buffer. **Do not auto-save** — user audits and decides. |
+  | Single preset, explicit location target ≠ currently loaded | Summarize → confirm → `apply_preset` + `save_to_location` + `set_preset_name`. |
+  | Batch (≥ 2 preset locations) | Authorize the target range with the user (step 2 above) → summarize plan → single batch confirmation → apply + save + name each. |
+  | Write touching ≥ 3 blocks (even on active preset) | Show summary + confirm before sending. |
+  | Target = factory-classified preset location (P1-008) | Hard block. Refuse without explicit override. |
+  | Target = non-empty non-factory user location, known from prior `P4-001` listing | Warn with current name, require explicit confirmation. |
+- **Prereqs (hard blockers):**
+  - P1-008 factory-preset safety classification (relaxes Z04-only gate).
+  - BK-010 scenes in `apply_preset` (setlist prompt specifically asks
+    for per-part scenes).
+  - BK-011 scene naming finish (3 more captures for sceneIdx → pidHigh).
+  - Preset-switch command decode (for audition step;
+    `session-18-switch-preset.pcapng` already captured but inconclusive).
+- **Prereqs (soft / nice-to-have):**
+  - P3-007 model lineage dictionary — makes the song-research step
+    reliable instead of hallucination-prone.
+  - BK-009 `get_block_layout` — lets the batch planner diff before
+    overwriting on partial edits.
+  - Bulk "read all preset names" command decode — would let us cheaply
+    list populated locations and remove step 2's friction. Track as a
+    backlog item when a plausible capture surfaces.
+- **Non-goals:**
+  - Does NOT replace `apply_preset` for single-preset authoring on Z04 —
+    that's the audit-and-save-yourself default.
+  - Does NOT build a GUI setlist editor (that's P4-005).
+  - Does NOT probe individual preset locations before writing (see
+    "Probing is too slow" above).
 
-### P4-003 Slot range write with batch safety check
-- Read all target slots before any writes
-- Report any non-empty non-factory slots that would be overwritten
-- Single confirmation covers entire batch
+### P4-003 Preset-location range write with batch safety check
+- Subsumed by P4-002's confirmation policy. Keep as a pointer: any
+  tool that touches more than one preset location MUST authorize the
+  range with the user first and present a single pre-write summary.
 
 ### P4-004 Backup all user presets
-- Export all non-factory, non-empty slots to timestamped JSON
+- Export all non-factory, non-empty preset locations to timestamped JSON
 - Stored locally in backups/ directory
+- **Latency note:** a full backup is 104 × full-preset-dump = ~30–60 s.
+  Runs out of band (user invokes explicitly; not inline in a
+  conversation turn). Show progress.
 
 ### P4-005 Setlist mode
-- Assign presets to ordered list for a specific show
+- Assign presets to an ordered list for a specific show
 - View/edit setlist by talking to Claude
 - "Move Amber before Down in tonight's setlist"
 

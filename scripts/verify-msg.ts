@@ -3,15 +3,16 @@
  * Run:  npx tsx scripts/verify-msg.ts
  */
 import {
-  buildSaveToSlot,
+  buildSaveToLocation,
   buildSetBlockType,
   buildSetFloatParam,
   buildSetParam,
   buildSetPresetName,
+  buildSwitchScene,
 } from '../src/protocol/setParam.js';
 import { KNOWN_PARAMS } from '../src/protocol/params.js';
 import { BLOCK_TYPE_VALUES } from '../src/protocol/blockTypes.js';
-import { parseSlotName } from '../src/protocol/slots.js';
+import { parseLocationCode } from '../src/protocol/locations.js';
 
 function hex(arr: number[]): string {
   return arr.map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -42,6 +43,21 @@ const cases: { label: string; built: number[]; expected: string }[] = [
     label: 'buildSetParam("amp.channel", 1) — matches session-09 channel-B toggle',
     built: buildSetParam('amp.channel', 1),
     expected: 'f000017415013a00520f010000000400000010037818f7',
+  },
+  {
+    label: 'buildSetParam("drive.channel", 1) — matches session-18 drive-channel-a-b',
+    built: buildSetParam('drive.channel', 1),
+    expected: 'f000017415017600520f010000000400000010037854f7',
+  },
+  {
+    label: 'buildSetParam("reverb.channel", 1) — matches session-18 reverb-channel-a-b',
+    built: buildSetParam('reverb.channel', 1),
+    expected: 'f000017415014200520f010000000400000010037860f7',
+  },
+  {
+    label: 'buildSetParam("delay.channel", 1) — matches session-18 delay-channel-a-b',
+    built: buildSetParam('delay.channel', 1),
+    expected: 'f000017415014600520f010000000400000010037864f7',
   },
   {
     label: 'buildSetParam("chorus.type", 1) — matches session-18 chorus-type',
@@ -119,14 +135,22 @@ const cases: { label: string; built: number[]; expected: string }[] = [
     expected: 'f000017415014e01120001000000040000000d041050f7',
   },
   {
-    label: 'buildSaveToSlot(Z04) — matches session-18 save-preset-z04',
-    built: buildSaveToSlot(parseSlotName('Z04')),
+    label: 'buildSaveToLocation(Z04) — matches session-18 save-preset-z04',
+    built: buildSaveToLocation(parseLocationCode('Z04')),
     expected: 'f00001741501000000001b000000040033400000007df7',
   },
   {
     label: 'buildSetPresetName(Z04, "boston") — matches session-20-rename-preset',
-    built: buildSetPresetName(parseSlotName('Z04'), 'boston'),
+    built: buildSetPresetName(parseLocationCode('Z04'), 'boston'),
     expected: 'f000017415014e010b000c00000024003340000003095e733a1b6d6201004020100804020100402010080402010040201008040201004020100009f7',
+  },
+  {
+    // TENTATIVE — only switch-to-scene-2 captured. pidHigh=0x000D + value=u32
+    // scene index is extrapolated from the block-placement / save-to-slot
+    // pattern. Need captures of switches to scenes 1/3/4 to confirm.
+    label: 'buildSwitchScene(1) — matches session-18-switch-scene',
+    built: buildSwitchScene(1),
+    expected: 'f000017415014e010d00010000000400004000000016f7',
   },
 ];
 

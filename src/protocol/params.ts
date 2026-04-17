@@ -148,6 +148,12 @@ export const KNOWN_PARAMS = {
     pidLow: 0x0076, pidHigh: 0x000b,
     unit: 'knob_0_10', displayMin: 0, displayMax: 10,
   },
+  'drive.channel': {
+    block: 'drive', name: 'channel',
+    pidLow: 0x0076, pidHigh: 0x07d2,
+    unit: 'enum', displayMin: 0, displayMax: 3,
+    enumValues: { 0: 'A', 1: 'B', 2: 'C', 3: 'D' },
+  },
   'drive.type': {
     block: 'drive', name: 'type',
     pidLow: 0x0076, pidHigh: 0x000a,
@@ -163,6 +169,12 @@ export const KNOWN_PARAMS = {
     pidLow: 0x0042, pidHigh: 0x0001,
     unit: 'percent', displayMin: 0, displayMax: 100,
   },
+  'reverb.channel': {
+    block: 'reverb', name: 'channel',
+    pidLow: 0x0042, pidHigh: 0x07d2,
+    unit: 'enum', displayMin: 0, displayMax: 3,
+    enumValues: { 0: 'A', 1: 'B', 2: 'C', 3: 'D' },
+  },
   'reverb.type': {
     block: 'reverb', name: 'type',
     pidLow: 0x0042, pidHigh: 0x000a,
@@ -176,6 +188,12 @@ export const KNOWN_PARAMS = {
     pidLow: 0x0046, pidHigh: 0x000c,
     // Session 16: cache says `b=8` seconds → UI max 8000 ms (was 5000).
     unit: 'ms', displayMin: 0, displayMax: 8000,
+  },
+  'delay.channel': {
+    block: 'delay', name: 'channel',
+    pidLow: 0x0046, pidHigh: 0x07d2,
+    unit: 'enum', displayMin: 0, displayMax: 3,
+    enumValues: { 0: 'A', 1: 'B', 2: 'C', 3: 'D' },
   },
   'delay.type': {
     block: 'delay', name: 'type',

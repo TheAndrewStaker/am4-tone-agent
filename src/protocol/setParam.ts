@@ -22,12 +22,15 @@ const FRACTAL_MFR = [0x00, 0x01, 0x74] as const;
 const FUNC_PARAM_RW = 0x01;
 
 const ACTION_WRITE = 0x0001;
-const ACTION_SAVE_TO_SLOT = 0x001b;
+const ACTION_SAVE_TO_LOCATION = 0x001b;
 const ACTION_RENAME = 0x000c;
 
 const PRESET_NAME_BYTES = 32;
 const RENAME_PID_LOW = 0x00ce;
 const RENAME_PRESET_PID_HIGH = 0x000b;
+
+const SCENE_SWITCH_PID_LOW = 0x00ce;
+const SCENE_SWITCH_PID_HIGH = 0x000d;
 
 function encode14(n: number): [number, number] {
   if (n < 0 || n > 0x3fff) throw new Error(`14-bit value out of range: ${n}`);
@@ -152,37 +155,37 @@ export function buildSetBlockType(
 }
 
 /**
- * Build a SAVE-TO-SLOT command that persists the AM4's current working
- * buffer to preset slot `slotIndex` (0..103, A01..Z04). The command uses
- * the PARAM_RW function (0x01) with a fresh action byte — 0x001B — which
- * appears only in save captures. pidLow/pidHigh are both 0x0000 (not a
- * block/param address; the "target" is the slot itself, carried in the
- * payload).
+ * Build a SAVE-TO-LOCATION command that persists the AM4's current working
+ * buffer to preset location `locationIndex` (0..103, A01..Z04). The command
+ * uses the PARAM_RW function (0x01) with a fresh action byte — 0x001B —
+ * which appears only in save captures. pidLow/pidHigh are both 0x0000
+ * (not a block/param address; the "target" is the location itself,
+ * carried in the payload).
  *
- * Payload = 4-byte uint32 LE slot index (Z04 = 103 = 0x67 → `67 00 00 00`
- * raw, `33 40 00 00 00` after the 8-to-7 septet pack).
+ * Payload = 4-byte uint32 LE location index (Z04 = 103 = 0x67 →
+ * `67 00 00 00` raw, `33 40 00 00 00` after the 8-to-7 septet pack).
  *
  * Decoded Session 19 from `session-18-save-preset-z04.pcapng`. Byte-exact
  * golden lives in `verify-msg`.
  *
- * WRITE SAFETY: overwrites the target slot. Only Z04 is designated scratch
- * during RE — callers are responsible for gating this.
+ * WRITE SAFETY: overwrites the target location. Only Z04 is designated
+ * scratch during RE — callers are responsible for gating this.
  */
-export function buildSaveToSlot(slotIndex: number): number[] {
-  if (!Number.isInteger(slotIndex) || slotIndex < 0 || slotIndex > 103) {
-    throw new Error(`Slot index must be integer 0..103, got ${slotIndex}.`);
+export function buildSaveToLocation(locationIndex: number): number[] {
+  if (!Number.isInteger(locationIndex) || locationIndex < 0 || locationIndex > 103) {
+    throw new Error(`Preset location index must be integer 0..103, got ${locationIndex}.`);
   }
   const raw = new Uint8Array(4);
-  new DataView(raw.buffer).setUint32(0, slotIndex, true);
+  new DataView(raw.buffer).setUint32(0, locationIndex, true);
   const packed = Array.from(packValue(raw));
   const body: number[] = [
     AM4_MODEL_ID,
     FUNC_PARAM_RW,
-    ...encode14(0x0000),                // pidLow = 0 (no block/param — save is a global action)
-    ...encode14(0x0000),                // pidHigh = 0
-    ...encode14(ACTION_SAVE_TO_SLOT),   // action = 0x001B
-    ...encode14(0x0000),                // hdr3
-    ...encode14(raw.length),            // hdr4 = 4 (raw byte count, pre-pack)
+    ...encode14(0x0000),                   // pidLow = 0 (no block/param — save is a global action)
+    ...encode14(0x0000),                   // pidHigh = 0
+    ...encode14(ACTION_SAVE_TO_LOCATION),  // action = 0x001B
+    ...encode14(0x0000),                   // hdr3
+    ...encode14(raw.length),               // hdr4 = 4 (raw byte count, pre-pack)
     ...packed,
   ];
   const head = [SYSEX_START, ...FRACTAL_MFR, ...body];
@@ -191,23 +194,26 @@ export function buildSaveToSlot(slotIndex: number): number[] {
 
 /**
  * Build a RENAME-PRESET command that sets the name of the preset stored
- * at `slotIndex`. Shares the block-slot register (pidLow=0x00CE) but
- * with pidHigh=0x000B and a new action byte (0x000C).
+ * at preset location `locationIndex`. Shares the block-slot register
+ * (pidLow=0x00CE) but with pidHigh=0x000B and a new action byte
+ * (0x000C).
  *
  * Payload is 36 raw bytes:
- *   [0..3]   uint32 LE slot index (same encoding as save-to-slot)
- *   [4..35]  32-byte ASCII name, null-padded. Names longer than 32
- *            chars throw; shorter names are zero-padded to 32.
+ *   [0..3]   uint32 LE preset location index (same encoding as
+ *            save-to-location)
+ *   [4..35]  32-byte ASCII name, space-padded. Names longer than 32
+ *            chars throw; shorter names are space-padded to 32.
  *
  * Decoded Session 19 from `session-20-rename-preset.pcapng` — see
  * SYSEX-MAP §6e. Byte-exact golden in `verify-msg`.
  *
- * WRITE SAFETY: like save-to-slot, this writes to a specific slot and
- * can clobber user presets. Callers should gate to Z04 during RE.
+ * WRITE SAFETY: like save-to-location, this writes to a specific preset
+ * location and can clobber user presets. Callers should gate to Z04
+ * during RE.
  */
-export function buildSetPresetName(slotIndex: number, name: string): number[] {
-  if (!Number.isInteger(slotIndex) || slotIndex < 0 || slotIndex > 103) {
-    throw new Error(`Slot index must be integer 0..103, got ${slotIndex}.`);
+export function buildSetPresetName(locationIndex: number, name: string): number[] {
+  if (!Number.isInteger(locationIndex) || locationIndex < 0 || locationIndex > 103) {
+    throw new Error(`Preset location index must be integer 0..103, got ${locationIndex}.`);
   }
   if (name.length > PRESET_NAME_BYTES) {
     throw new Error(`Preset name must be ≤ ${PRESET_NAME_BYTES} ASCII chars, got ${name.length}: "${name}".`);
@@ -222,7 +228,7 @@ export function buildSetPresetName(slotIndex: number, name: string): number[] {
     }
   }
   const raw = new Uint8Array(4 + PRESET_NAME_BYTES);
-  new DataView(raw.buffer).setUint32(0, slotIndex, true);
+  new DataView(raw.buffer).setUint32(0, locationIndex, true);
   // AM4 names are space-padded (0x20), not null-padded. Confirmed by
   // decoding session-20-rename-preset (raw bytes 4+N..35 were all 0x20
   // after the "boston" prefix).
@@ -240,6 +246,42 @@ export function buildSetPresetName(slotIndex: number, name: string): number[] {
     ...encode14(ACTION_RENAME),
     ...encode14(0x0000),                // hdr3
     ...encode14(raw.length),            // hdr4 = 36 (raw byte count, pre-pack)
+    ...packed,
+  ];
+  const head = [SYSEX_START, ...FRACTAL_MFR, ...body];
+  return [...head, fractalChecksum(head), SYSEX_END];
+}
+
+/**
+ * Build a SWITCH-SCENE command that sets the AM4's active scene to
+ * `sceneIndex` (0..3, corresponding to scenes 1..4 in the UI). Same
+ * preset-level register family as block placement and preset rename
+ * (pidLow=0x00CE), with pidHigh=0x000D and a standard WRITE action.
+ * Payload = 4-byte uint32 LE scene index — NOT a float32, to match
+ * the integer semantics of save-to-slot.
+ *
+ * TENTATIVE decoding from `session-18-switch-scene.pcapng`: the capture
+ * contains ONE unique scene-switch write (value=1, i.e. switch to
+ * scene 2 under 0-indexed interpretation). The "pidHigh is fixed,
+ * value is the scene index 0..3" model matches the block-placement
+ * and save-to-slot shape, but is not yet confirmed against switches
+ * to scenes 1/3/4. Capture those to close the loop (BK-011 follow-on).
+ */
+export function buildSwitchScene(sceneIndex: number): number[] {
+  if (!Number.isInteger(sceneIndex) || sceneIndex < 0 || sceneIndex > 3) {
+    throw new Error(`Scene index must be integer 0..3, got ${sceneIndex}.`);
+  }
+  const raw = new Uint8Array(4);
+  new DataView(raw.buffer).setUint32(0, sceneIndex, true);
+  const packed = Array.from(packValue(raw));
+  const body: number[] = [
+    AM4_MODEL_ID,
+    FUNC_PARAM_RW,
+    ...encode14(SCENE_SWITCH_PID_LOW),
+    ...encode14(SCENE_SWITCH_PID_HIGH),
+    ...encode14(ACTION_WRITE),
+    ...encode14(0x0000),
+    ...encode14(raw.length),
     ...packed,
   ];
   const head = [SYSEX_START, ...FRACTAL_MFR, ...body];

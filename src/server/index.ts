@@ -38,7 +38,7 @@ import {
   type ParamKey,
 } from '../protocol/params.js';
 import {
-  buildSaveToSlot,
+  buildSaveToLocation,
   buildSetBlockType,
   buildSetParam,
   buildSetPresetName,
@@ -50,7 +50,7 @@ import {
   resolveBlockType,
   type BlockTypeName,
 } from '../protocol/blockTypes.js';
-import { formatSlotName, parseSlotName } from '../protocol/slots.js';
+import { formatLocationCode, parseLocationCode } from '../protocol/locations.js';
 import { connectAM4, type AM4Connection, toHex } from '../protocol/midi.js';
 
 /**
@@ -63,12 +63,12 @@ import { connectAM4, type AM4Connection, toHex } from '../protocol/midi.js';
 const WRITE_ECHO_TIMEOUT_MS = 300;
 
 /**
- * Scratch slot for reverse-engineering writes. Per CLAUDE.md the save-to-
- * slot command is hard-gated to this slot until we have factory-preset
- * safety classification (backlog P1-008) — writing to any other slot
- * would clobber user presets or factory content.
+ * Scratch preset location for reverse-engineering writes. Per CLAUDE.md
+ * the save-to-location command is hard-gated to this location until we
+ * have factory-preset safety classification (backlog P1-008) — writing
+ * to any other location would clobber user presets or factory content.
  */
-const SCRATCH_SLOT = 'Z04';
+const SCRATCH_LOCATION = 'Z04';
 
 // -- MIDI lazy-init + self-healing reconnect -------------------------------
 
@@ -581,38 +581,39 @@ server.registerTool('apply_preset', {
   };
 });
 
-server.registerTool('save_to_slot', {
+server.registerTool('save_to_location', {
   description: [
     'Persist the AM4\'s current working-buffer preset (everything laid out',
-    'via apply_preset / set_block_type / set_param) into a preset slot so',
-    'it survives power-cycling. Slot naming is the AM4\'s native format:',
-    'bank letter A..Z + sub-slot 01..04 (e.g. "A01", "M03", "Z04"), 104',
-    'total slots.',
+    'via apply_preset / set_block_type / set_param) into a preset location',
+    'so it survives power-cycling. Location naming is the AM4\'s native',
+    'format: bank letter A..Z + sub-index 01..04 (e.g. "A01", "M03", "Z04"),',
+    '104 total preset locations across 26 banks.',
     'WRITE SAFETY (active during reverse-engineering): this tool is hard-',
-    'gated to slot "Z04" (the designated scratch slot). Attempts to save',
-    'elsewhere are rejected with a clear error. The gate will be relaxed',
-    'once factory-preset safety classification is in place (backlog P1-008).',
+    'gated to location "Z04" (the designated scratch location). Attempts to',
+    'save elsewhere are rejected with a clear error. The gate will be',
+    'relaxed once factory-preset safety classification is in place (backlog',
+    'P1-008).',
     'The save-command ack shape is not fully decoded — the tool just sends',
     'the command and reports any inbound SysEx in the 300 ms window for',
-    'diagnostic visibility. Verify the save took effect by loading the slot',
-    'on the AM4 and confirming the expected layout / params.',
+    'diagnostic visibility. Verify the save took effect by loading the',
+    'location on the AM4 and confirming the expected layout / params.',
   ].join(' '),
   inputSchema: {
-    slot: z.string().describe(
-      'AM4 slot name. Currently only "Z04" is accepted (scratch slot). Format: bank letter A..Z + sub-slot 01..04.',
+    location: z.string().describe(
+      'AM4 preset location. Currently only "Z04" is accepted (scratch location). Format: bank letter A..Z + sub-index 01..04.',
     ),
   },
-}, async ({ slot }) => {
-  const normalized = slot.trim().toUpperCase();
-  if (normalized !== SCRATCH_SLOT) {
+}, async ({ location }) => {
+  const normalized = location.trim().toUpperCase();
+  if (normalized !== SCRATCH_LOCATION) {
     throw new Error(
-      `save_to_slot is hard-gated to "${SCRATCH_SLOT}" during reverse-engineering (got "${slot}"). ` +
-      `Writing to any other slot would clobber factory or user presets. ` +
+      `save_to_location is hard-gated to "${SCRATCH_LOCATION}" during reverse-engineering (got "${location}"). ` +
+      `Writing to any other location would clobber factory or user presets. ` +
       `This restriction will be lifted once factory-preset safety classification ships (backlog P1-008).`,
     );
   }
-  const slotIndex = parseSlotName(normalized);
-  const bytes = buildSaveToSlot(slotIndex);
+  const locationIndex = parseLocationCode(normalized);
+  const bytes = buildSaveToLocation(locationIndex);
   const conn = ensureMidi();
   const captured: number[][] = [];
   const unsubscribe = conn.onMessage((msg) => {
@@ -629,9 +630,9 @@ server.registerTool('save_to_slot', {
     content: [{
       type: 'text',
       text:
-        `Sent save command for slot ${formatSlotName(slotIndex)} (index ${slotIndex}). ` +
+        `Sent save command for location ${formatLocationCode(locationIndex)} (index ${locationIndex}). ` +
         `The save-command ack shape isn't fully decoded, so the tool doesn't ` +
-        `assert success — verify by navigating to the slot on the AM4 and ` +
+        `assert success — verify by navigating to the location on the AM4 and ` +
         `confirming the expected layout/params are now there.\n` +
         `Sent (${bytes.length}B): ${toHex(bytes)}\n` +
         `All inbound SysEx during the ${WRITE_ECHO_TIMEOUT_MS} ms window:\n` +
@@ -642,38 +643,38 @@ server.registerTool('save_to_slot', {
 
 server.registerTool('set_preset_name', {
   description: [
-    'Rename the preset stored in a specific slot. Names can be up to 32',
-    'ASCII-printable characters; shorter names are space-padded on the',
+    'Rename the preset stored at a specific location. Names can be up to',
+    '32 ASCII-printable characters; shorter names are space-padded on the',
     'wire (AM4 convention). Unlike set_param/apply_preset, this tool',
-    'targets a stored slot directly — it is the "save a preset with a',
-    'name" complement to save_to_slot.',
-    'WRITE SAFETY: hard-gated to slot "Z04" during reverse-engineering,',
-    'same rules as save_to_slot. The gate lifts once factory-preset',
+    'targets a stored preset location directly — it is the "save a preset',
+    'with a name" complement to save_to_location.',
+    'WRITE SAFETY: hard-gated to location "Z04" during reverse-engineering,',
+    'same rules as save_to_location. The gate lifts once factory-preset',
     'safety classification (P1-008) ships.',
     'It\'s not yet confirmed whether rename persists on its own or needs',
-    'a subsequent save_to_slot call — verify on the AM4 display after',
-    'calling. Scene renames use a separate command and are a',
-    'follow-up session (BK-011).',
+    'a subsequent save_to_location call — verify on the AM4 display after',
+    'calling. Scene renames use a separate command and are a follow-up',
+    'session (BK-011).',
   ].join(' '),
   inputSchema: {
-    slot: z.string().describe(
-      'AM4 slot name. Currently only "Z04" is accepted. Format: bank letter A..Z + sub-slot 01..04.',
+    location: z.string().describe(
+      'AM4 preset location. Currently only "Z04" is accepted. Format: bank letter A..Z + sub-index 01..04.',
     ),
     name: z.string().max(32).describe(
       'New preset name, up to 32 ASCII-printable characters. Shorter names are space-padded to 32 on the wire.',
     ),
   },
-}, async ({ slot, name }) => {
-  const normalized = slot.trim().toUpperCase();
-  if (normalized !== SCRATCH_SLOT) {
+}, async ({ location, name }) => {
+  const normalized = location.trim().toUpperCase();
+  if (normalized !== SCRATCH_LOCATION) {
     throw new Error(
-      `set_preset_name is hard-gated to "${SCRATCH_SLOT}" during reverse-engineering (got "${slot}"). ` +
-      `Renaming any other slot would clobber factory or user preset names. ` +
+      `set_preset_name is hard-gated to "${SCRATCH_LOCATION}" during reverse-engineering (got "${location}"). ` +
+      `Renaming any other location would clobber factory or user preset names. ` +
       `This restriction will be lifted once factory-preset safety classification ships (backlog P1-008).`,
     );
   }
-  const slotIndex = parseSlotName(normalized);
-  const bytes = buildSetPresetName(slotIndex, name);
+  const locationIndex = parseLocationCode(normalized);
+  const bytes = buildSetPresetName(locationIndex, name);
   const conn = ensureMidi();
   const captured: number[][] = [];
   const unsubscribe = conn.onMessage((msg) => {
@@ -690,9 +691,9 @@ server.registerTool('set_preset_name', {
     content: [{
       type: 'text',
       text:
-        `Sent rename: slot ${formatSlotName(slotIndex)} → "${name}". The rename-command ` +
-        `ack shape isn't fully decoded; verify by viewing the slot name on the AM4 ` +
-        `or in AM4-Edit. If the name didn't stick, try calling save_to_slot ` +
+        `Sent rename: location ${formatLocationCode(locationIndex)} → "${name}". The rename-command ` +
+        `ack shape isn't fully decoded; verify by viewing the preset name on the AM4 ` +
+        `or in AM4-Edit. If the name didn't stick, try calling save_to_location ` +
         `afterward — it's not yet confirmed whether rename persists on its own.\n` +
         `Sent (${bytes.length}B): ${toHex(bytes)}\n` +
         `All inbound SysEx during the ${WRITE_ECHO_TIMEOUT_MS} ms window:\n` +

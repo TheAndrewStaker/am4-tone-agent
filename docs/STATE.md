@@ -2,22 +2,26 @@
 
 > Read this file at the start of every session. It's kept up-to-date with
 > current phase, the single next action, and recent findings.
-> Last updated: **2026-04-16** (Session 19 — five protocol wins, one
-> correction, four new tools. (a) Ack triage: AM4 wire-acks all writes
-> regardless of block placement (BK-008). Tool language made honest.
-> (b) Block placement cracked (§6c). (c) Off-by-one corrected after
-> hardware test. Block placement hardware-verified end-to-end. (d)
-> `apply_preset` MCP tool. (e) Save-to-slot decoded (§6d). (f) **Preset
-> rename decoded** (§6e): same register/action as scene rename; 36-byte
-> payload = 4-byte slot + 32-byte ASCII space-padded name. `set_preset_
-> name` MCP tool added, Z04-gated. Scene rename decoded down to pidHigh
-> 0x0037 for ONE captured scene; the 1..4 → pidHigh map needs 3 more
-> captures (BK-011). (g) Packing algorithm clarified: long payloads use
-> chunked 7→8 encoding; `packValueChunked` / `unpackValueChunked`
-> added. (h) **MIDI self-healing** — `ensureMidi()` auto-reconnects
-> after 2 consecutive ack-less writes + new `reconnect_midi` tool for
-> manual override. Closes BK-013. Server now exposes **10 tools**.
-> 21/21 verify-msg, 8/8 verify-echo.)
+> Last updated: **2026-04-17** (Session 20 — four protocol decodes from
+> already-captured pcapngs, no new captures required.
+> (a) Per-block channels confirmed on Drive/Reverb/Delay at the same
+> `pidHigh=0x07D2` as amp.channel — three byte-exact goldens.
+> `drive.channel` / `reverb.channel` / `delay.channel` added to
+> `KNOWN_PARAMS` (now 20 entries across 15 blocks).
+> (b) Scene switch TENTATIVELY decoded: pidLow=0x00CE, pidHigh=0x000D,
+> action=0x0001, value=u32 LE scene index. `buildSwitchScene` +
+> byte-exact golden against the one captured switch (to scene 2).
+> Only one scene transition in the capture — need captures of
+> switches to scenes 1/3/4 to confirm the "value = scene index"
+> interpretation.
+> (c) Preset-switch capture inconclusive: `session-18-switch-preset
+> .pcapng` shows heavy AM4-Edit read-poll traffic around t=14s but
+> no clean outgoing switch command — the switch was likely
+> hardware-initiated. Needs a re-capture of AM4-Edit explicitly
+> switching presets via its UI.
+> (d) Gig-prep workflow spec'd as P4-002 in 04-BACKLOG.md — 16-song
+> setlist → research → W-Z assignment → batch confirm → save.
+> 25/25 verify-msg, 8/8 verify-echo, smoke-server green.)
 
 ---
 
@@ -34,6 +38,24 @@ float32. One open question remains before the IR can cover full presets:
 **bulk parameter discovery** (Ghidra metadata table extraction below).
 
 ## The single next action
+
+### Capture switches to scenes 1/3/4 to confirm scene-switch pidHigh
+
+Session 20 decoded scene switch tentatively from a single-transition
+capture (value=1 → scene 2). To confirm the "value = scene index 0..3"
+model instead of "pidHigh changes per scene", capture AM4-Edit switching
+to each of scenes 1, 3, 4 and compare.
+
+1. Run USBPcap on the AM4 interface.
+2. In AM4-Edit, click scene 1 → 3 → 4 → 1 (or similar).
+3. Save as `samples/captured/session-21-switch-scene-1-3-4.pcapng`.
+4. `parse-capture` → expect three 23-byte writes all at pidLow=0x00CE,
+   pidHigh=0x000D, action=0x0001, varying only in the packed value
+   (u32 LE 0, 2, 3 respectively). If they instead have *different*
+   pidHighs and the same value, that's the "pidHigh-per-scene" model
+   and `buildSwitchScene` needs a different shape.
+
+Hardware-test follow-ups (deferred from last session, still outstanding):
 
 ### Hardware-test `set_preset_name` and confirm whether rename persists
 

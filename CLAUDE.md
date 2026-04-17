@@ -71,8 +71,54 @@ Mode: Amp      — F0 00 01 74 15 12 58 5A F7
 Mode: Tuner    — F0 00 01 74 15 12 18 1A F7
 ```
 
-### Slot Naming
-A01–Z04 (104 slots total, 4 per bank, 26 banks A–Z)
+### Preset-location Naming
+A01–Z04 (104 preset locations total, 4 per bank, 26 banks A–Z). Use
+`parseLocationCode` / `formatLocationCode` from `src/protocol/locations.ts`.
+
+## Fractal terminology (use these exact words)
+
+Fractal's docs use specific words for AM4 concepts. Our code and user-
+facing strings MUST match, because one of the words — "slot" — has
+opposite meanings in casual use:
+
+| Term | What it means |
+|---|---|
+| **Bank** | A letter A–Z grouping 4 preset locations |
+| **Preset** | The stored patch (blocks + params + scenes + name) |
+| **Location** | Where a preset is stored. "A01" through "Z04", 104 total. NOT called a "slot" |
+| **Slot** (or **effect slot**) | A position 1–4 in a preset's signal chain. The slot is the container; the block is what fills it |
+| **Block** | The effect occupying a slot (amp, drive, delay, reverb, chorus, …) |
+| **Scene** | One of 4 performance variations within a preset (bypass + channel state, not a copy of the blocks themselves) |
+| **Channel** | Per-block A/B/C/D variation of that block's settings |
+
+Anti-patterns to avoid:
+- "preset slot" when you mean "preset location" (wrong — preset slots
+  don't exist; presets occupy *locations*, not slots)
+- "save to slot N" in user-facing text (wrong — "save to location N")
+- "effect in slot 3" is correct; "effect in position 3" is also OK but
+  "slot" matches Fractal's wording
+
+## Performance budget
+
+MCP tool calls are part of a conversation. Users tolerate short waits
+during overt batch actions, but individual tool calls should feel
+instantaneous.
+
+- **Ideal:** < 200 ms per tool call (single `set_param`, `set_block_
+  type`, etc.). SysEx round-trips against the AM4 land in 30–60 ms,
+  with a 300 ms ack window.
+- **Acceptable:** < 1 s for tools that make 2–5 wire transactions
+  (`apply_preset` with a handful of blocks and params).
+- **Requires explicit progress:** anything > 1 s must tell the user
+  upfront ("This will probe 16 preset locations, ~1 second"). Never
+  make the user wait silently.
+- **Avoid altogether:** designs that require > 5 s of wire work in a
+  single conversational turn. Either cache, batch into a dedicated
+  command, or design around the probe.
+
+When writing new tool specs, estimate the wire-round-trip count
+up front. SysEx is serial — N reads ≈ N × 50 ms minimum. If the math
+says > 1 s, redesign before implementing.
 
 ## Key Constraints
 - Windows ThinkPad. Use Windows paths where relevant.
@@ -110,14 +156,15 @@ A01–Z04 (104 slots total, 4 per bank, 26 banks A–Z)
 
 ## Do Not
 - Do not use AM4-Edit as a dependency or requirement
-- Do not hardcode preset slot values — always use the A01–Z04 naming
+- Do not hardcode preset-location values — always use the A01–Z04 naming
 - Do not skip the safety read before any write operation
 - Do not guess parameter names — verify against AM4 manual or sniffed data
-- Do not issue any preset-store / write-to-slot SysEx command from
+- Do not issue any preset-store / save-to-location SysEx command from
   `scripts/probe.ts`. Probe is read-only forever.
-- Do not write to any slot other than **Z04** during reverse-engineering.
-  Z04 is the designated scratch slot — back it up before every write,
-  never touch A01–Z03 in dev work. See `docs/DECISIONS.md` (write safety).
+- Do not write to any preset location other than **Z04** during
+  reverse-engineering. Z04 is the designated scratch location — back it
+  up before every write, never touch A01–Z03 in dev work. See
+  `docs/DECISIONS.md` (write safety).
 
 ---
 
@@ -174,8 +221,10 @@ AM4 constraints to always apply:
 - 4 effect slots per preset (linear or simple parallel routing)
 - 4 scenes per preset
 - Up to 4 channels (A/B/C/D) per block
-- 104 preset slots total (A01 through Z04)
-- Slot naming is always Fractal native format (e.g. M01, not "slot 49")
+- 104 preset locations total (A01 through Z04, 26 banks × 4 per bank)
+- Preset-location naming is always Fractal native format (e.g. M01, not
+  "slot 49"). "Slot" refers to a signal-chain position 1–4, not a
+  preset location — do not use the two interchangeably.
 ```
 
 ## Connecting Claude Desktop MCP (when server is ready)
