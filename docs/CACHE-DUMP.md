@@ -13,7 +13,8 @@ npx tsx scripts/gen-cache-enums.ts
 **Wire protocol:** cache record `id` == wire `pidHigh`. The block's
 `pidLow` is in the section header below. Send SET_PARAM with
 `(pidLow, pidHigh=id)` and the value encoded per the unit convention
-in `src/protocol/params.ts`.
+in `src/protocol/params.ts`. Type-dropdown id is 10 for most blocks
+except Compressor (id=19) and GEQ (id=20).
 
 Parameter *names* are not in the cache — only IDs. Entries whose
 name is known via wire capture are tagged in `params.ts`. Everything
@@ -408,3 +409,398 @@ Cache location: S3 block 1. 89 records (27 enums, 62 floats).
 | `0x0057` | float | float — min=0, max=1, display-scale=100, step=0.0010000000474974513 |
 | `0x0058` | float | float — min=0, max=1, display-scale=100, step=0.0010000000474974513 |
 | `0x0059` | enum | enum × 3 — `LOWPASS`, `BANDPASS`, `HIGHPASS` |
+
+## Chorus — pidLow = 0x4e
+
+Cache location: S3 block 2. 31 records (9 enums, 22 floats).
+
+| pidHigh | kind | details |
+|--------:|------|---------|
+| `0x0001` | float | float — min=0, max=1, display-scale=100, step=0.0010000000474974513 |
+| `0x0002` | float | float — min=-1, max=1, display-scale=100, step=0.0020000000949949026 |
+| `0x0003` | float | float — min=0, max=1, display-scale=1, step=0 |
+| `0x0004` | enum | enum × 3 — `Thru`, `Mute FX Out`, `Mute Out` |
+| `0x0005` | float | float — min=0, max=0, display-scale=0, step=0 |
+| `0x0006` | enum | enum × 2 — `OFF`, `ON` |
+| `0x0007` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x0008` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x0009` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x000a` | enum | enum × 20 — `Digital Mono`, `Digital Stereo`, …, `Vibrato 2` *(20 total)* |
+| `0x000b` | float | float — min=1, max=4, display-scale=2, step=0 |
+| `0x000c` | float | float — min=0.10000000149011612, max=10, display-scale=1, step=0 |
+| `0x000d` | enum | enum × 79 — `NONE `, `1/64 TRIP`, …, `63/64` *(79 total)* |
+| `0x000e` | float | float — min=0, max=1, display-scale=100, step=0.0010000000474974513 |
+| `0x000f` | float | float — min=200, max=20000, display-scale=1, step=0 |
+| `0x0010` | float | float — min=0.00009999999747378752, max=0.05000000074505806, display-scale=1000, step=0.000009999999747378752 |
+| `0x0011` | float | float — min=0, max=3.1415927410125732, display-scale=57.295780181884766, step=0.0031415927223861217 |
+| `0x0012` | enum | enum × 10 — `SINE`, `TRIANGLE`, …, `ASTABLE` *(10 total)* |
+| `0x0013` | enum | enum × 3 — `OFF`, `LOW`, `HIGH` |
+| `0x0014` | enum | enum × 4 — `NONE`, `RIGHT`, `LEFT`, `BOTH` |
+| `0x0015` | float | float — min=0, max=1, display-scale=100, step=0.0010000000474974513 |
+| `0x0016` | float | float — min=0.10000000149011612, max=10, display-scale=1, step=0 |
+| `0x0017` | float | float — min=0, max=1, display-scale=100, step=0.0010000000474974513 |
+| `0x0018` | float | float — min=0.05000000074505806, max=50, display-scale=10, step=0.0010000000474974513 |
+| `0x0019` | float | float — min=20, max=2000, display-scale=1, step=0 |
+| `0x001a` | float | float — min=-2, max=2, display-scale=100, step=0.0020000000949949026 |
+| `0x001b` | enum | enum × 4 — `OFF`, `LOW`, `MED`, `HIGH` |
+| `0x001c` | float | float — min=0, max=1, display-scale=100, step=0.0010000000474974513 |
+| `0x001d` | float | float — min=0, max=1, display-scale=100, step=0.0010000000474974513 |
+| `0x001e` | float | float — min=0, max=1, display-scale=100, step=0.0010000000474974513 |
+| `0x001f` | enum | enum × 79 — `NONE `, `1/64 TRIP`, …, `63/64` *(79 total)* |
+
+## Flanger — pidLow = 0x52
+
+Cache location: S3 block 3. 35 records (13 enums, 22 floats).
+
+| pidHigh | kind | details |
+|--------:|------|---------|
+| `0x0001` | float | float — min=0, max=1, display-scale=100, step=0.0010000000474974513 |
+| `0x0002` | float | float — min=-1, max=1, display-scale=100, step=0.0020000000949949026 |
+| `0x0003` | float | float — min=0, max=1, display-scale=1, step=0 |
+| `0x0004` | enum | enum × 3 — `Thru`, `Mute FX Out`, `Mute Out` |
+| `0x0005` | float | float — min=0, max=0, display-scale=0, step=0 |
+| `0x0006` | enum | enum × 2 — `OFF`, `ON` |
+| `0x0007` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x0008` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x0009` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x000a` | enum | enum × 32 — `Digital Mono`, `Digital Stereo`, …, `Manual Cancel Flanger` *(32 total)* |
+| `0x000b` | float | float — min=0.05000000074505806, max=10, display-scale=1, step=0 |
+| `0x000c` | enum | enum × 79 — `NONE `, `1/64 TRIP`, …, `63/64` *(79 total)* |
+| `0x000d` | float | float — min=0, max=1, display-scale=100, step=0.0010000000474974513 |
+| `0x000e` | float | float — min=-0.9950000047683716, max=0.9950000047683716, display-scale=100, step=0.0010000000474974513 |
+| `0x000f` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x0010` | float | float — min=0, max=1, display-scale=100, step=0.0010000000474974513 |
+| `0x0011` | float | float — min=0, max=3.1415927410125732, display-scale=57.295780181884766, step=0.0031415927223861217 |
+| `0x0012` | enum | enum × 10 — `SINE`, `TRIANGLE`, …, `ASTABLE` *(10 total)* |
+| `0x0013` | float | float — min=0.5, max=50, display-scale=1, step=0 |
+| `0x0014` | enum | enum × 4 — `OFF`, `LOW`, `MED`, `HIGH` |
+| `0x0015` | enum | enum × 4 — `NONE`, `RIGHT`, `LEFT`, `BOTH` |
+| `0x0016` | enum | enum × 3 — `OFF`, `AUTO`, `MANUAL (SET DEPTH TO 0)` |
+| `0x0017` | float | float — min=200, max=20000, display-scale=1, step=0 |
+| `0x0018` | float | float — min=0.004999999888241291, max=5, display-scale=10, step=0.0010000000474974513 |
+| `0x0019` | float | float — min=20, max=2000, display-scale=1, step=0 |
+| `0x001a` | float | float — min=-2, max=2, display-scale=100, step=0.0020000000949949026 |
+| `0x001b` | enum | enum × 5 — `OFF`, `0 DEG`, `90 DEG`, `180 DEG`, `270 DEG` |
+| `0x001c` | enum | enum × 6 — `6 dB/OCT`, `12 dB/OCT`, `18 dB/OCT`, `24 dB/OCT`, `30 dB/OCT`, `36 dB/OCT` |
+| `0x001d` | enum | enum × 2 — `6 dB/OCT`, `12 dB/OCT` |
+| `0x001e` | float | float — min=20, max=2000, display-scale=10, step=0.0010000000474974513 |
+| `0x001f` | enum | enum × 3 — `LINEAR`, `EXPONENTIAL`, `SQUARE-LAW` |
+| `0x0020` | float | float — min=0.00033999999868683517, max=0.0020000000949949026, display-scale=1000, step=0.0000019999999949504854 |
+| `0x0021` | float | float — min=0.0020000000949949026, max=0.019999999552965164, display-scale=1000, step=0.000009999999747378752 |
+| `0x0022` | enum | enum × 32 — `OFF`, `2`, …, `32` *(32 total)* |
+| `0x0023` | float | float — min=0.009999999776482582, max=100, display-scale=1, step=0 |
+
+## Phaser — pidLow = 0x5a
+
+Cache location: S3 block 5. 37 records (12 enums, 25 floats).
+
+| pidHigh | kind | details |
+|--------:|------|---------|
+| `0x0001` | float | float — min=0, max=1, display-scale=100, step=0.0010000000474974513 |
+| `0x0002` | float | float — min=-1, max=1, display-scale=100, step=0.0020000000949949026 |
+| `0x0003` | float | float — min=0, max=1, display-scale=1, step=0 |
+| `0x0004` | enum | enum × 3 — `Thru`, `Mute FX Out`, `Mute Out` |
+| `0x0005` | float | float — min=0, max=0, display-scale=0, step=0 |
+| `0x0006` | enum | enum × 2 — `OFF`, `ON` |
+| `0x0007` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x0008` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x0009` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x000a` | enum | enum × 17 — `Digital Mono`, `Digital Stereo`, …, `Modern Vibe` *(17 total)* |
+| `0x000b` | enum | enum × 6 — `2`, `4`, `6`, `8`, `10`, `12` |
+| `0x000c` | float | float — min=0.10000000149011612, max=10, display-scale=1, step=0 |
+| `0x000d` | enum | enum × 10 — `SINE`, `TRIANGLE`, …, `ASTABLE` *(10 total)* |
+| `0x000e` | enum | enum × 79 — `NONE `, `1/64 TRIP`, …, `63/64` *(79 total)* |
+| `0x000f` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x0010` | float | float — min=-0.8999999761581421, max=0.8999999761581421, display-scale=111.0999984741211, step=0.0020000000949949026 |
+| `0x0011` | float | float — min=5, max=500, display-scale=1, step=0 |
+| `0x0012` | float | float — min=200, max=20000, display-scale=1, step=0 |
+| `0x0013` | float | float — min=0, max=3.1415927410125732, display-scale=57.295780181884766, step=0.0031415927223861217 |
+| `0x0014` | float | float — min=-1, max=1, display-scale=1, step=0.0020000000949949026 |
+| `0x0015` | enum | enum × 3 — `NORMAL`, `VIBE`, `BARBERPOLE` |
+| `0x0016` | float | float — min=0, max=11, display-scale=1, step=0 |
+| `0x0017` | float | float — min=-0.31622999906539917, max=0.31622999906539917, display-scale=31.62299919128418, step=0.00031599999056197703 |
+| `0x0018` | enum | enum × 2 — `UP`, `DOWN` |
+| `0x0019` | float | float — min=0.10000000149011612, max=10, display-scale=1, step=0 |
+| `0x001a` | enum | enum × 5 — `OFF`, `0 DEG`, `90 DEG`, `180 DEG`, `270 DEG` |
+| `0x001b` | enum | enum × 32 — `OFF`, `2`, …, `32` *(32 total)* |
+| `0x001c` | enum | enum × 4 — `LINEAR`, `EXPONENTIAL`, `JFET`, `PHOTOCELL` |
+| `0x001d` | float | float — min=0.10000000149011612, max=10, display-scale=1, step=0 |
+| `0x001e` | float | float — min=0.009999999776482582, max=0.9900000095367432, display-scale=1, step=0.0010000000474974513 |
+| `0x001f` | float | float — min=0.5, max=50, display-scale=1, step=0 |
+| `0x0020` | float | float — min=0.009999999776482582, max=1, display-scale=1000, step=0 |
+| `0x0021` | float | float — min=0.0010000000474974513, max=0.10000000149011612, display-scale=1000, step=0 |
+| `0x0022` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x0023` | float | float — min=20, max=200, display-scale=1, step=0 |
+| `0x0024` | float | float — min=2000, max=20000, display-scale=1, step=0 |
+| `0x0025` | enum | enum × 2 — `NORMAL`, `UNIVIBE` |
+
+## Wah — pidLow = 0x5e
+
+Cache location: S3 block 6. 29 records (5 enums, 24 floats).
+
+| pidHigh | kind | details |
+|--------:|------|---------|
+| `0x0001` | float | float — min=0, max=1, display-scale=100, step=0.0010000000474974513 |
+| `0x0002` | float | float — min=-1, max=1, display-scale=100, step=0.0020000000949949026 |
+| `0x0003` | float | float — min=0, max=1, display-scale=1, step=0 |
+| `0x0004` | enum | enum × 2 — `Thru`, `Mute` |
+| `0x0005` | float | float — min=0, max=0, display-scale=0, step=0 |
+| `0x0006` | enum | enum × 2 — `OFF`, `ON` |
+| `0x0007` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x0008` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x0009` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x000a` | enum | enum × 9 — `FAS Wah`, `Clyde`, …, `Paragon` *(9 total)* |
+| `0x000b` | float | float — min=100, max=1000, display-scale=1, step=0 |
+| `0x000c` | float | float — min=500, max=5000, display-scale=1, step=0 |
+| `0x000d` | float | float — min=2, max=20, display-scale=10, step=0 |
+| `0x000e` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x000f` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x0010` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x0011` | float | float — min=0.009999999776482582, max=1, display-scale=10, step=0 |
+| `0x0012` | enum | enum × 6 — `LINEAR`, `LOG 30A`, `LOG 20A`, `LOG 15A`, `LOG 10A`, `LOG 5A` |
+| `0x0013` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x0014` | float | float — min=20, max=2000, display-scale=1, step=0 |
+| `0x0015` | enum | enum × 2 — `OFF`, `ON` |
+| `0x0016` | float | float — min=-12, max=12, display-scale=1, step=0.02500000037252903 |
+| `0x0017` | float | float — min=-12, max=12, display-scale=1, step=0.02500000037252903 |
+| `0x0018` | float | float — min=-12, max=12, display-scale=1, step=0.02500000037252903 |
+| `0x0019` | float | float — min=-12, max=12, display-scale=1, step=0.02500000037252903 |
+| `0x001a` | float | float — min=-12, max=12, display-scale=1, step=0.02500000037252903 |
+| `0x001b` | float | float — min=-12, max=12, display-scale=1, step=0.02500000037252903 |
+| `0x001c` | float | float — min=-12, max=12, display-scale=1, step=0.02500000037252903 |
+| `0x001d` | float | float — min=-12, max=12, display-scale=1, step=0.02500000037252903 |
+
+## Compressor — pidLow = 0x2e
+
+Cache location: S2 block 2. 41 records (10 enums, 31 floats).
+
+| pidHigh | kind | details |
+|--------:|------|---------|
+| `0x0001` | float | float — min=0, max=1, display-scale=100, step=0.0010000000474974513 |
+| `0x0002` | float | float — min=-1, max=1, display-scale=100, step=0.0020000000949949026 |
+| `0x0003` | float | float — min=0, max=1, display-scale=1, step=0 |
+| `0x0004` | enum | enum × 3 — `Thru`, `Mute FX Out`, `Mute Out` |
+| `0x0005` | float | float — min=0, max=0, display-scale=0, step=0 |
+| `0x0006` | enum | enum × 2 — `OFF`, `ON` |
+| `0x0007` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x0008` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x0009` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x000a` | float | float — min=-60, max=20, display-scale=1, step=0.10000000149011612 |
+| `0x000b` | float | float — min=1, max=20, display-scale=1, step=0.009999999776482582 |
+| `0x000c` | float | float — min=0.00009999999747378752, max=0.10000000149011612, display-scale=1000, step=0 |
+| `0x000d` | float | float — min=0.0020000000949949026, max=2, display-scale=1000, step=0 |
+| `0x000e` | enum | enum × 5 — `HARD`, `MED-HARD`, `MEDIUM`, `MED-SOFT`, `SOFT` |
+| `0x000f` | enum | enum × 2 — `OFF`, `ON` |
+| `0x0010` | enum | enum × 4 — `RMS`, `PEAK`, `RMS+PEAK`, `HALF-WAVE` |
+| `0x0011` | float | float — min=20, max=2000, display-scale=1, step=0 |
+| `0x0012` | enum | enum × 4 — `BLOCK L+R`, `INPUT 1`, `BLOCK L`, `BLOCK R` |
+| `0x0013` | enum | enum × 19 — `VCA Modern Compressor`, `Econo-Dyno-Comp`, …, `Citrus Juicer` *(19 total)* |
+| `0x0014` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x0015` | float | float — min=0, max=0.0020000000949949026, display-scale=1000, step=0.000020833333110203966 |
+| `0x0016` | enum | enum × 2 — `OFF`, `ON` |
+| `0x0017` | float | float — min=0, max=1, display-scale=20, step=0.0005000000237487257 |
+| `0x0018` | float | float — min=-1, max=1, display-scale=10, step=0.0020000000949949026 |
+| `0x0019` | enum | enum × 2 — `INSTRUMENT`, `LINE` |
+| `0x001a` | float | float — min=200, max=20000, display-scale=1, step=0 |
+| `0x001b` | float | float — min=-12, max=12, display-scale=1, step=0.05000000074505806 |
+| `0x001c` | float | float — min=100, max=10000, display-scale=1, step=0 |
+| `0x001d` | float | float — min=0.10000000149011612, max=10, display-scale=1, step=0 |
+| `0x001e` | float | float — min=0, max=0, display-scale=0, step=0 |
+| `0x001f` | float | float — min=0, max=0, display-scale=0, step=0 |
+| `0x0020` | enum | enum × 12 — `NULL`, `LOWPASS`, …, `PEAKING 2` *(12 total)* |
+| `0x0021` | float | float — min=-60, max=20, display-scale=1, step=0.10000000149011612 |
+| `0x0022` | float | float — min=0, max=0, display-scale=0, step=0 |
+| `0x0023` | float | float — min=0, max=0, display-scale=0, step=0 |
+| `0x0024` | float | float — min=1, max=10, display-scale=1, step=0.009999999776482582 |
+| `0x0025` | float | float — min=0.0010000000474974513, max=1, display-scale=1000, step=0 |
+| `0x0026` | float | float — min=-1, max=1, display-scale=10, step=0.0020000000949949026 |
+| `0x0027` | float | float — min=100, max=10000, display-scale=1, step=0 |
+| `0x0028` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x0029` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+
+## GEQ — pidLow = 0x32
+
+Cache location: S2 block 3. 22 records (3 enums, 19 floats).
+
+| pidHigh | kind | details |
+|--------:|------|---------|
+| `0x0001` | float | float — min=0, max=1, display-scale=100, step=0.0010000000474974513 |
+| `0x0002` | float | float — min=-1, max=1, display-scale=100, step=0.0020000000949949026 |
+| `0x0003` | float | float — min=0, max=1, display-scale=1, step=0 |
+| `0x0004` | enum | enum × 2 — `Thru`, `Mute` |
+| `0x0005` | float | float — min=0, max=0, display-scale=0, step=0 |
+| `0x0006` | enum | enum × 2 — `OFF`, `ON` |
+| `0x0007` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x0008` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x0009` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x000a` | float | float — min=-12, max=12, display-scale=1, step=0.02500000037252903 |
+| `0x000b` | float | float — min=-12, max=12, display-scale=1, step=0.02500000037252903 |
+| `0x000c` | float | float — min=-12, max=12, display-scale=1, step=0.02500000037252903 |
+| `0x000d` | float | float — min=-12, max=12, display-scale=1, step=0.02500000037252903 |
+| `0x000e` | float | float — min=-12, max=12, display-scale=1, step=0.02500000037252903 |
+| `0x000f` | float | float — min=-12, max=12, display-scale=1, step=0.02500000037252903 |
+| `0x0010` | float | float — min=-12, max=12, display-scale=1, step=0.02500000037252903 |
+| `0x0011` | float | float — min=-12, max=12, display-scale=1, step=0.02500000037252903 |
+| `0x0012` | float | float — min=-12, max=12, display-scale=1, step=0.02500000037252903 |
+| `0x0013` | float | float — min=-12, max=12, display-scale=1, step=0.02500000037252903 |
+| `0x0014` | enum | enum × 18 — `10 Band Constant Q`, `8 Band Constant Q`, …, `7 Band Bass Pedal` *(18 total)* |
+| `0x0015` | float | float — min=0.10000000149011612, max=10, display-scale=1, step=0 |
+| `0x0016` | float | float — min=0, max=0, display-scale=0, step=0 |
+
+## Filter — pidLow = 0x72
+
+Cache location: S3 block 8. 40 records (11 enums, 29 floats).
+
+| pidHigh | kind | details |
+|--------:|------|---------|
+| `0x0001` | float | float — min=0, max=1, display-scale=100, step=0.0010000000474974513 |
+| `0x0002` | float | float — min=-1, max=1, display-scale=100, step=0.0020000000949949026 |
+| `0x0003` | float | float — min=0, max=1, display-scale=1, step=0 |
+| `0x0004` | enum | enum × 2 — `Thru`, `Mute` |
+| `0x0005` | float | float — min=0, max=0, display-scale=0, step=0 |
+| `0x0006` | enum | enum × 2 — `OFF`, `ON` |
+| `0x0007` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x0008` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x0009` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x000a` | enum | enum × 18 — `Null`, `Low-Pass`, …, `Touch-Wah` *(18 total)* |
+| `0x000b` | float | float — min=20, max=20000, display-scale=1, step=0 |
+| `0x000c` | float | float — min=0.10000000149011612, max=10, display-scale=1, step=0 |
+| `0x000d` | float | float — min=-20, max=20, display-scale=1, step=0.05000000074505806 |
+| `0x000e` | enum | enum × 2 — `2nd`, `4th` |
+| `0x000f` | float | float — min=-1, max=1, display-scale=100, step=0.0020000000949949026 |
+| `0x0010` | float | float — min=-1, max=1, display-scale=100, step=0.0020000000949949026 |
+| `0x0011` | enum | enum × 4 — `NONE`, `RIGHT`, `LEFT`, `BOTH` |
+| `0x0012` | float | float — min=20, max=2000, display-scale=1, step=0 |
+| `0x0013` | float | float — min=200, max=20000, display-scale=1, step=0 |
+| `0x0014` | float | float — min=0, max=0.03999999910593033, display-scale=1000, step=0.000009999999747378752 |
+| `0x0015` | float | float — min=-1, max=1, display-scale=100, step=0.0020000000949949026 |
+| `0x0016` | enum | enum × 2 — `OFF`, `ON` |
+| `0x0017` | enum | enum × 10 — `SINE`, `TRIANGLE`, …, `ASTABLE` *(10 total)* |
+| `0x0018` | float | float — min=0.10000000149011612, max=10, display-scale=1, step=0 |
+| `0x0019` | float | float — min=0.009999999776482582, max=0.9900000095367432, display-scale=100, step=0.0010000000474974513 |
+| `0x001a` | float | float — min=20, max=20000, display-scale=1, step=0 |
+| `0x001b` | enum | enum × 32 — `OFF`, `2`, …, `32` *(32 total)* |
+| `0x001c` | float | float — min=1, max=12, display-scale=1, step=0 |
+| `0x001d` | enum | enum × 4 — `LOWPASS`, `BANDPASS`, `HIGHPASS`, `MIX` |
+| `0x001e` | float | float — min=1, max=20, display-scale=10, step=0 |
+| `0x001f` | float | float — min=100, max=10000, display-scale=1, step=0 |
+| `0x0020` | float | float — min=100, max=10000, display-scale=1, step=0 |
+| `0x0021` | float | float — min=0.10000000149011612, max=40, display-scale=10, step=0 |
+| `0x0022` | float | float — min=0.0010000000474974513, max=1, display-scale=1000, step=0 |
+| `0x0023` | float | float — min=0.019999999552965164, max=2, display-scale=1000, step=0 |
+| `0x0024` | float | float — min=0, max=2, display-scale=5, step=0.0020000000949949026 |
+| `0x0025` | enum | enum × 2 — `BLOCK IN`, `MAIN IN` |
+| `0x0026` | float | float — min=0, max=0, display-scale=0, step=0 |
+| `0x0027` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x0028` | enum | enum × 79 — `NONE `, `1/64 TRIP`, …, `63/64` *(79 total)* |
+
+## Tremolo — pidLow = 0x6a
+
+Cache location: S3 block 7. 24 records (6 enums, 18 floats).
+
+| pidHigh | kind | details |
+|--------:|------|---------|
+| `0x0001` | float | float — min=0, max=1, display-scale=100, step=0.0010000000474974513 |
+| `0x0002` | float | float — min=-1, max=1, display-scale=100, step=0.0020000000949949026 |
+| `0x0003` | float | float — min=0, max=1, display-scale=1, step=0 |
+| `0x0004` | enum | enum × 2 — `Thru`, `Mute` |
+| `0x0005` | float | float — min=0, max=0, display-scale=0, step=0 |
+| `0x0006` | enum | enum × 2 — `OFF`, `ON` |
+| `0x0007` | float | float — min=0, max=0, display-scale=10, step=0.0010000000474974513 |
+| `0x0008` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x0009` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x000a` | enum | enum × 7 — `VCA Trem`, `Panner`, …, `Neon Trem` *(7 total)* |
+| `0x000b` | enum | enum × 10 — `SINE`, `TRIANGLE`, …, `ASTABLE` *(10 total)* |
+| `0x000c` | float | float — min=0.20000000298023224, max=20, display-scale=1, step=0 |
+| `0x000d` | float | float — min=0, max=1, display-scale=100, step=0.0010000000474974513 |
+| `0x000e` | float | float — min=0.009999999776482582, max=0.9900000095367432, display-scale=100, step=0.0010000000474974513 |
+| `0x000f` | enum | enum × 79 — `NONE `, `1/64 TRIP`, …, `63/64` *(79 total)* |
+| `0x0010` | float | float — min=0, max=3.1415927410125732, display-scale=57.295780181884766, step=0.0031415927223861217 |
+| `0x0011` | float | float — min=0, max=4, display-scale=100, step=0.004000000189989805 |
+| `0x0012` | float | float — min=-1, max=1, display-scale=100, step=0.0020000000949949026 |
+| `0x0013` | float | float — min=0, max=3.1415927410125732, display-scale=114.59156036376953, step=0.0031415927223861217 |
+| `0x0014` | enum | enum × 3 — `6 dB/oct`, `12 dB/oct`, `24 dB/oct` |
+| `0x0015` | float | float — min=200, max=2000, display-scale=1, step=0 |
+| `0x0016` | float | float — min=-60, max=20, display-scale=1, step=0.10000000149011612 |
+| `0x0017` | float | float — min=0.0010000000474974513, max=0.9990000128746033, display-scale=100, step=0.0010000000474974513 |
+| `0x0018` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+
+## Enhancer — pidLow = 0x7a
+
+Cache location: S3 block 10. 17 records (4 enums, 13 floats).
+
+| pidHigh | kind | details |
+|--------:|------|---------|
+| `0x0001` | float | float — min=0, max=1, display-scale=100, step=0.0010000000474974513 |
+| `0x0002` | float | float — min=-1, max=1, display-scale=100, step=0.0020000000949949026 |
+| `0x0003` | float | float — min=0, max=1, display-scale=1, step=0 |
+| `0x0004` | enum | enum × 2 — `Thru`, `Mute` |
+| `0x0005` | float | float — min=0, max=0, display-scale=0, step=0 |
+| `0x0006` | enum | enum × 2 — `OFF`, `ON` |
+| `0x0007` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x0008` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x0009` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x000a` | float | float — min=0, max=1, display-scale=100, step=0.0010000000474974513 |
+| `0x000b` | float | float — min=0, max=1, display-scale=100, step=0.0010000000474974513 |
+| `0x000c` | float | float — min=20, max=2000, display-scale=1, step=0 |
+| `0x000d` | float | float — min=200, max=20000, display-scale=1, step=0 |
+| `0x000e` | enum | enum × 3 — `Modern`, `Classic`, `Stereoizer` |
+| `0x000f` | enum | enum × 4 — `NONE`, `RIGHT`, `LEFT`, `BOTH` |
+| `0x0010` | float | float — min=-1, max=1, display-scale=100, step=0.0020000000949949026 |
+| `0x0011` | float | float — min=-1, max=1, display-scale=100, step=0.0020000000949949026 |
+
+## Gate/Expander — pidLow = 0x92
+
+Cache location: S3 block 11. 22 records (6 enums, 16 floats).
+
+| pidHigh | kind | details |
+|--------:|------|---------|
+| `0x0001` | float | float — min=0, max=1, display-scale=100, step=0.0010000000474974513 |
+| `0x0002` | float | float — min=-1, max=1, display-scale=100, step=0.0020000000949949026 |
+| `0x0003` | float | float — min=0, max=1, display-scale=1, step=0 |
+| `0x0004` | enum | enum × 2 — `Thru`, `Mute` |
+| `0x0005` | float | float — min=0, max=0, display-scale=0, step=0 |
+| `0x0006` | enum | enum × 2 — `OFF`, `ON` |
+| `0x0007` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x0008` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x0009` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x000a` | float | float — min=-100, max=0, display-scale=1, step=0.10000000149011612 |
+| `0x000b` | float | float — min=0.00009999999747378752, max=1, display-scale=1000, step=0 |
+| `0x000c` | float | float — min=0.0010000000474974513, max=1, display-scale=1000, step=0 |
+| `0x000d` | float | float — min=0.0010000000474974513, max=1, display-scale=1000, step=0 |
+| `0x000e` | float | float — min=1, max=20, display-scale=1, step=0 |
+| `0x000f` | enum | enum × 4 — `BLOCK L+R`, `INPUT 1`, `BLOCK L`, `BLOCK R` |
+| `0x0010` | float | float — min=10, max=1000, display-scale=1, step=0 |
+| `0x0011` | float | float — min=200, max=20000, display-scale=1, step=0 |
+| `0x0012` | float | float — min=0, max=0, display-scale=0, step=0 |
+| `0x0013` | enum | enum × 4 — `Classic Expander`, `Classic Gate`, `Modern Gate`, `Modern Expander` |
+| `0x0014` | float | float — min=-80, max=0, display-scale=1, step=0.10000000149011612 |
+| `0x0015` | enum | enum × 2 — `RMS`, `PEAK` |
+| `0x0016` | enum | enum × 5 — `HARD`, `MED-HARD`, `MEDIUM`, `MED-SOFT`, `SOFT` |
+
+## Volume/Pan — pidLow = 0x66
+
+Cache location: S3 block 12. 20 records (5 enums, 15 floats).
+
+| pidHigh | kind | details |
+|--------:|------|---------|
+| `0x0001` | float | float — min=0, max=1, display-scale=100, step=0.0010000000474974513 |
+| `0x0002` | float | float — min=-1, max=1, display-scale=100, step=0.0020000000949949026 |
+| `0x0003` | float | float — min=0, max=1, display-scale=1, step=0 |
+| `0x0004` | enum | enum × 2 — `Thru`, `Mute` |
+| `0x0005` | float | float — min=0, max=0, display-scale=0, step=0 |
+| `0x0006` | enum | enum × 2 — `OFF`, `ON` |
+| `0x0007` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x0008` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x0009` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x000a` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
+| `0x000b` | enum | enum × 7 — `LINEAR`, `LOG 30A`, …, `S-TAPER` *(7 total)* |
+| `0x000c` | float | float — min=-1, max=1, display-scale=100, step=0.0020000000949949026 |
+| `0x000d` | float | float — min=-1, max=1, display-scale=100, step=0.0020000000949949026 |
+| `0x000e` | enum | enum × 3 — `STEREO`, `LEFT ONLY`, `RIGHT ONLY` |
+| `0x000f` | enum | enum × 2 — `Volume`, `Auto-Swell` |
+| `0x0010` | float | float — min=-80, max=0, display-scale=1, step=0.10000000149011612 |
+| `0x0011` | float | float — min=0.009999999776482582, max=1, display-scale=1000, step=0 |
+| `0x0012` | float | float — min=0.0010000000474974513, max=0.10000000149011612, display-scale=1000, step=0 |
+| `0x0013` | float | float — min=0, max=12, display-scale=1, step=0.009999999776482582 |
+| `0x0014` | float | float — min=0, max=0, display-scale=0, step=0 |

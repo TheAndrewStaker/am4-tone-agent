@@ -35,6 +35,61 @@ const cases: { label: string; built: number[]; expected: string }[] = [
     built: buildSetParam('amp.channel', 1),
     expected: 'f000017415013a00520f010000000400000010037818f7',
   },
+  {
+    label: 'buildSetParam("chorus.type", 1) — matches session-18 chorus-type',
+    built: buildSetParam('chorus.type', 1),
+    expected: 'f000017415014e000a0001000000040000001003783bf7',
+  },
+  {
+    label: 'buildSetParam("flanger.type", 8) — matches session-18 flanger-type',
+    built: buildSetParam('flanger.type', 8),
+    expected: 'f0000174150152000a00010000000400000000040840f7',
+  },
+  {
+    label: 'buildSetParam("phaser.type", 3) — matches session-18 phaser-type',
+    built: buildSetParam('phaser.type', 3),
+    expected: 'f000017415015a000a00010000000400000008040048f7',
+  },
+  {
+    label: 'buildSetParam("wah.type", 2) — matches session-18 wah-type',
+    built: buildSetParam('wah.type', 2),
+    expected: 'f000017415015e000a00010000000400000000040044f7',
+  },
+  {
+    label: 'buildSetParam("compressor.type", 2) — matches session-18 comp-type',
+    built: buildSetParam('compressor.type', 2),
+    expected: 'f000017415012e00130001000000040000000004002df7',
+  },
+  {
+    label: 'buildSetParam("geq.type", 7) — matches session-18 geq-type',
+    built: buildSetParam('geq.type', 7),
+    expected: 'f000017415013200140001000000040000001c04002af7',
+  },
+  {
+    label: 'buildSetParam("filter.type", 16) — matches session-18 filter-type',
+    built: buildSetParam('filter.type', 16),
+    expected: 'f0000174150172000a00010000000400000010040870f7',
+  },
+  {
+    label: 'buildSetParam("tremolo.type", 3) — matches session-18 tremolo-type',
+    built: buildSetParam('tremolo.type', 3),
+    expected: 'f000017415016a000a00010000000400000008040078f7',
+  },
+  {
+    label: 'buildSetParam("enhancer.type", 2) — matches session-18 enhancer-type',
+    built: buildSetParam('enhancer.type', 2),
+    expected: 'f000017415017a000e00010000000400000000040064f7',
+  },
+  {
+    label: 'buildSetParam("gate.type", 3) — matches session-18 gate-type',
+    built: buildSetParam('gate.type', 3),
+    expected: 'f0000174150112011300010000000400000008040018f7',
+  },
+  {
+    label: 'buildSetParam("volpan.mode", 1) — matches session-18 volpan-taper (actually Mode dropdown)',
+    built: buildSetParam('volpan.mode', 1),
+    expected: 'f0000174150166000f00010000000400000010037816f7',
+  },
 ];
 
 let pass = 0;

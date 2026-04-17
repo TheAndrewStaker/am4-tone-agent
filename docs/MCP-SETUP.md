@@ -90,14 +90,27 @@ If Connectors is empty or the tools don't fire:
 - Run `npm run smoke-server` to do a full client-handshake simulation
   without Claude Desktop in the loop.
 
-## Tools exposed (v0.1)
+## Tools exposed (v0.2)
 
 - **`set_param`** — `(block, name, value)` — write any parameter in
   `KNOWN_PARAMS`. Numbers for knobs/dB/ms/%; strings or wire indices
-  for enum dropdowns.
+  for enum dropdowns. Waits for the device's write echo (up to 300 ms)
+  and returns a clear "block not placed" error if no echo arrives —
+  the AM4 silently absorbs writes to absent blocks.
+- **`set_params`** — `(writes[])` — batch version of `set_param`.
+  Validates the whole batch before sending any MIDI, then sends each
+  write in order with per-write echo confirmation. Stops at the first
+  silent-absorb and reports which write failed.
 - **`list_params`** — describe every parameter Claude can write.
 - **`list_enum_values`** — `(block, name)` — for enum params, list the
   valid dropdown names.
+
+`read_param` was removed in this version: the AM4's READ response
+carries param metadata (range, type) rather than the current value
+in any obvious byte position. The write-echo path on `set_param`
+covers the only practical use case (verifying a write took effect).
+A future read implementation requires decoding the 40-byte response
+payload, which is deferred.
 
 ## Example prompts to try
 
@@ -112,9 +125,10 @@ If Connectors is empty or the tools don't fire:
 > "Turn the reverb mix up to 40% and change the reverb type to
 > something roomy."
 
-The v0.1 tools are **write-only**. Reading state back from the device
-is a Phase 3 tool (the `0x0E` READ_PARAM command — decoded but not yet
-exposed). Until then, the AM4's own display is the source of truth.
+The v0.2 tools are **write-with-echo-verify**. Each `set_param` confirms
+the device acknowledged the write before returning success. Reading the
+live device value (without writing first) is deferred — the AM4's own
+display is the secondary source of truth if you need to sanity-check.
 
 ## Troubleshooting
 

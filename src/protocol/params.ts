@@ -15,6 +15,17 @@ import {
   DRIVE_TYPES_VALUES,
   REVERB_TYPES_VALUES,
   DELAY_TYPES_VALUES,
+  CHORUS_TYPES_VALUES,
+  FLANGER_TYPES_VALUES,
+  PHASER_TYPES_VALUES,
+  WAH_TYPES_VALUES,
+  COMPRESSOR_TYPES_VALUES,
+  GEQ_TYPES_VALUES,
+  FILTER_TYPES_VALUES,
+  TREMOLO_TYPES_VALUES,
+  ENHANCER_TYPES_VALUES,
+  GATE_TYPES_VALUES,
+  VOLPAN_MODES_VALUES,
 } from './cacheEnums.js';
 
 /**
@@ -173,6 +184,83 @@ export const KNOWN_PARAMS = {
     // Untested against capture.
     unit: 'enum', displayMin: 0, displayMax: 28,
     enumValues: DELAY_TYPES_VALUES,
+  },
+  // Session 18 — 6 additional block Type selectors, each pinned to wire
+  // pidLow by a Tier-3 AM4-Edit capture of a Type-dropdown change. The
+  // cache record id is the wire pidHigh (10 for the effect blocks, 19/20
+  // for Comp/GEQ because their cache slot reserves ids 0..12 for band
+  // levels / assign slots).
+  'chorus.type': {
+    block: 'chorus', name: 'type',
+    pidLow: 0x004e, pidHigh: 0x000a,
+    unit: 'enum', displayMin: 0, displayMax: 19,
+    enumValues: CHORUS_TYPES_VALUES,
+  },
+  'flanger.type': {
+    block: 'flanger', name: 'type',
+    pidLow: 0x0052, pidHigh: 0x000a,
+    unit: 'enum', displayMin: 0, displayMax: 31,
+    enumValues: FLANGER_TYPES_VALUES,
+  },
+  'phaser.type': {
+    block: 'phaser', name: 'type',
+    pidLow: 0x005a, pidHigh: 0x000a,
+    unit: 'enum', displayMin: 0, displayMax: 16,
+    enumValues: PHASER_TYPES_VALUES,
+  },
+  'wah.type': {
+    block: 'wah', name: 'type',
+    pidLow: 0x005e, pidHigh: 0x000a,
+    unit: 'enum', displayMin: 0, displayMax: 8,
+    enumValues: WAH_TYPES_VALUES,
+  },
+  'compressor.type': {
+    block: 'compressor', name: 'type',
+    pidLow: 0x002e, pidHigh: 0x0013,
+    unit: 'enum', displayMin: 0, displayMax: 18,
+    enumValues: COMPRESSOR_TYPES_VALUES,
+  },
+  'geq.type': {
+    block: 'geq', name: 'type',
+    pidLow: 0x0032, pidHigh: 0x0014,
+    unit: 'enum', displayMin: 0, displayMax: 17,
+    enumValues: GEQ_TYPES_VALUES,
+  },
+  // Session 18 (continued) — 5 more Type/Mode selectors from block-placement
+  // captures. PEQ (pidLow=0x36) and Rotary (pidLow=0x56) are also confirmed
+  // block addresses but have no Type enum — their params will be added when
+  // we start supporting specific knob names.
+  'filter.type': {
+    block: 'filter', name: 'type',
+    pidLow: 0x0072, pidHigh: 0x000a,
+    unit: 'enum', displayMin: 0, displayMax: 17,
+    enumValues: FILTER_TYPES_VALUES,
+  },
+  'tremolo.type': {
+    block: 'tremolo', name: 'type',
+    pidLow: 0x006a, pidHigh: 0x000a,
+    unit: 'enum', displayMin: 0, displayMax: 6,
+    enumValues: TREMOLO_TYPES_VALUES,
+  },
+  'enhancer.type': {
+    // AM4-Edit labels this "Mode", but keep `type` for consistency across blocks.
+    block: 'enhancer', name: 'type',
+    pidLow: 0x007a, pidHigh: 0x000e,
+    unit: 'enum', displayMin: 0, displayMax: 2,
+    enumValues: ENHANCER_TYPES_VALUES,
+  },
+  'gate.type': {
+    block: 'gate', name: 'type',
+    pidLow: 0x0092, pidHigh: 0x0013,
+    unit: 'enum', displayMin: 0, displayMax: 3,
+    enumValues: GATE_TYPES_VALUES,
+  },
+  'volpan.mode': {
+    // Block is "Volume/Pan"; this is the Volume-vs-Auto-Swell selector.
+    block: 'volpan', name: 'mode',
+    pidLow: 0x0066, pidHigh: 0x000f,
+    unit: 'enum', displayMin: 0, displayMax: 1,
+    enumValues: VOLPAN_MODES_VALUES,
   },
 } as const satisfies Record<string, Param>;
 

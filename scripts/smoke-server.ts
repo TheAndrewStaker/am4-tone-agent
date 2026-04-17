@@ -86,7 +86,7 @@ async function main(): Promise<void> {
   const names = tools.map((t) => t.name).sort();
   console.log(`✓ tools/list returned: ${names.join(', ')}`);
 
-  const expected = ['list_enum_values', 'list_params', 'read_param', 'set_param', 'set_params'];
+  const expected = ['list_enum_values', 'list_params', 'set_param', 'set_params'];
   for (const exp of expected) {
     if (!names.includes(exp)) throw new Error(`missing tool: ${exp}`);
   }

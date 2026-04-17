@@ -14,6 +14,15 @@ export interface AM4Connection {
   send: (bytes: number[]) => void;
   /** Resolves with the next inbound SysEx message, or rejects on timeout. */
   receiveSysEx: (timeoutMs?: number) => Promise<number[]>;
+  /**
+   * Wait for the first inbound SysEx that satisfies `predicate`. Non-matching
+   * messages are silently dropped until `timeoutMs` elapses. Register BEFORE
+   * the outgoing write so the response can't race ahead of the listener.
+   */
+  receiveSysExMatching: (
+    predicate: (bytes: number[]) => boolean,
+    timeoutMs?: number,
+  ) => Promise<number[]>;
   /** Subscribe to ALL inbound messages (SysEx + non-SysEx). */
   onMessage: (handler: (bytes: number[]) => void) => () => void;
   close: () => void;
@@ -70,6 +79,21 @@ export function connectAM4(): AM4Connection {
         }, timeoutMs);
         const handler = (bytes: number[]) => {
           if (bytes[0] !== 0xf0) return;
+          clearTimeout(timer);
+          handlers.delete(handler);
+          resolve(bytes);
+        };
+        handlers.add(handler);
+      }),
+    receiveSysExMatching: (predicate, timeoutMs = 1000) =>
+      new Promise<number[]>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          handlers.delete(handler);
+          reject(new Error(`Timeout waiting for matching SysEx after ${timeoutMs}ms`));
+        }, timeoutMs);
+        const handler = (bytes: number[]) => {
+          if (bytes[0] !== 0xf0) return;
+          if (!predicate(bytes)) return;
           clearTimeout(timer);
           handlers.delete(handler);
           resolve(bytes);

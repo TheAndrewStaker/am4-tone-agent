@@ -10,10 +10,23 @@
  * records line up with KNOWN_PARAMS by id, and the main effect-type
  * enum at a canonical low id matches Session 13's findings):
  *
- *   Amp    pidLow=0x3A  ↔  S2 block 5         tag=0x98   151 recs
- *   Drive  pidLow=0x76  ↔  S3 sub-block 9                49 recs
- *   Reverb pidLow=0x42  ↔  S3 sub-block 0                72 recs
- *   Delay  pidLow=0x46  ↔  S3 sub-block 1                89 recs
+ *   Amp        pidLow=0x3A  ↔  S2 block 5   tag=0x98   151 recs
+ *   Drive      pidLow=0x76  ↔  S3 sub-block 9           49 recs
+ *   Reverb     pidLow=0x42  ↔  S3 sub-block 0           72 recs
+ *   Delay      pidLow=0x46  ↔  S3 sub-block 1           89 recs
+ *   Chorus     pidLow=0x4E  ↔  S3 sub-block 2           31 recs  (Session 18)
+ *   Flanger    pidLow=0x52  ↔  S3 sub-block 3           35 recs  (Session 18)
+ *   Phaser     pidLow=0x5A  ↔  S3 sub-block 5           37 recs  (Session 18)
+ *   Wah        pidLow=0x5E  ↔  S3 sub-block 6           29 recs  (Session 18)
+ *   Compressor pidLow=0x2E  ↔  S2 block 2               41 recs  (Session 18)
+ *   GEQ        pidLow=0x32  ↔  S2 block 3               22 recs  (Session 18)
+ *   Tremolo    pidLow=0x6A  ↔  S3 sub-block 7           24 recs  (Session 18)
+ *   Filter     pidLow=0x72  ↔  S3 sub-block 8           40 recs  (Session 18)
+ *   Enhancer   pidLow=0x7A  ↔  S3 sub-block 10          17 recs  (Session 18)
+ *   Gate/Exp   pidLow=0x92  ↔  S3 sub-block 11          22 recs  (Session 18)
+ *   Volume/Pan pidLow=0x66  ↔  S3 sub-block 12          20 recs  (Session 18)
+ *   Rotary     pidLow=0x56  ↔  S3 sub-block 4           23 recs  (Session 18 — replaces tentative "Pitch Shifter")
+ *   PEQ        pidLow=0x36  ↔  S2 block 4               36 recs  (Session 18 — replaces tentative "Utility")
  *
  * Run after `npx tsx scripts/parse-cache.ts`:
  *   npx tsx scripts/map-cache-params.ts
@@ -49,6 +62,19 @@ const CACHE_BLOCK_MAP: Record<number, BlockLoc> = {
   0x76: { section: 'S3', block: 9, recs: s3 },  // Drive
   0x42: { section: 'S3', block: 0, recs: s3 },  // Reverb
   0x46: { section: 'S3', block: 1, recs: s3 },  // Delay
+  0x4e: { section: 'S3', block: 2, recs: s3 },  // Chorus
+  0x52: { section: 'S3', block: 3, recs: s3 },  // Flanger
+  0x5a: { section: 'S3', block: 5, recs: s3 },  // Phaser
+  0x5e: { section: 'S3', block: 6, recs: s3 },  // Wah
+  0x2e: { section: 'S2', block: 2, recs: s2 },  // Compressor
+  0x32: { section: 'S2', block: 3, recs: s2 },  // GEQ
+  0x6a: { section: 'S3', block: 7, recs: s3 },  // Tremolo/Panner
+  0x72: { section: 'S3', block: 8, recs: s3 },  // Filter
+  0x7a: { section: 'S3', block: 10, recs: s3 }, // Enhancer
+  0x92: { section: 'S3', block: 11, recs: s3 }, // Gate/Expander
+  0x66: { section: 'S3', block: 12, recs: s3 }, // Volume/Pan
+  0x56: { section: 'S3', block: 4, recs: s3 },  // Rotary (pidLow fills the 0x56 gap in the S3 series)
+  0x36: { section: 'S2', block: 4, recs: s2 },  // Parametric EQ (previously tentative "Utility")
 };
 
 function paramRecsFor(recs: CacheRec[], block: number): CacheRec[] {

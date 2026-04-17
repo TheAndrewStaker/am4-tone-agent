@@ -5,7 +5,9 @@
  * Exposes Claude Desktop tools that talk to a local Fractal AM4 over
  * USB/MIDI. MVP tools:
  *
- *   - set_param          write one parameter (numeric or enum-by-name)
+ *   - set_param          write one parameter (numeric or enum-by-name),
+ *                        verified by waiting for the device's write echo
+ *   - set_params         batch-apply many writes, each echo-verified
  *   - list_params        describe the parameter catalog Claude can use
  *   - list_enum_values   list valid dropdown entries for an enum param
  *
@@ -31,14 +33,21 @@ import * as z from 'zod/v4';
 
 import {
   KNOWN_PARAMS,
-  decode,
   resolveEnumValue,
   type Param,
   type ParamKey,
 } from '../protocol/params.js';
-import { buildSetParam, buildReadParam } from '../protocol/setParam.js';
-import { unpackFloat32LE } from '../protocol/packValue.js';
+import { buildSetParam, isWriteEcho } from '../protocol/setParam.js';
 import { connectAM4, type AM4Connection, toHex } from '../protocol/midi.js';
+
+/**
+ * Max time we wait for the device to echo a WRITE after we send it. The
+ * AM4 typically responds in well under 50 ms when the target block is
+ * placed; if 300 ms passes we treat it as silent-absorb (block not in
+ * the active preset) and surface a clear error instead of pretending
+ * the write succeeded.
+ */
+const WRITE_ECHO_TIMEOUT_MS = 300;
 
 // -- MIDI lazy-init ---------------------------------------------------------
 
@@ -97,11 +106,15 @@ const server = new McpServer({
 
 server.registerTool('set_param', {
   description: [
-    'Write a single parameter on the connected Fractal AM4.',
-    'The parameter is addressed by (block, name) — e.g. block="amp", name="gain".',
-    'For numeric params, pass the user-facing display value (0–10 knob, dB, ms, %).',
-    'For enum params, pass the dropdown name ("1959SLP Normal") or wire index (0).',
-    'Call list_params first if unsure what is available.',
+    'Write a single parameter on the connected Fractal AM4 and verify the',
+    'write took effect. The parameter is addressed by (block, name) — e.g.',
+    'block="amp", name="gain". For numeric params, pass the user-facing',
+    'display value (0–10 knob, dB, ms, %). For enum params, pass the',
+    'dropdown name ("1959SLP Normal") or wire index (0).',
+    'The AM4 silently absorbs writes targeting blocks that aren\'t present',
+    'in the active preset; this tool detects that via the device echo and',
+    'returns an explicit error instead of a false success. Call list_params',
+    'first if unsure what is available.',
   ].join(' '),
   inputSchema: {
     block: z.string().describe('Block name, e.g. "amp", "drive", "reverb", "delay"'),
@@ -115,7 +128,14 @@ server.registerTool('set_param', {
   const param: Param = KNOWN_PARAMS[key];
   const resolved = resolveValue(param, value);
   const bytes = buildSetParam(key, resolved);
-  ensureMidi().send(bytes);
+  const conn = ensureMidi();
+  // Register the echo listener BEFORE sending so a fast device response
+  // can't race ahead of us.
+  const echoPromise = conn.receiveSysExMatching(
+    (resp) => isWriteEcho(bytes, resp),
+    WRITE_ECHO_TIMEOUT_MS,
+  );
+  conn.send(bytes);
   const enumNameFor = (idx: number): string | undefined => {
     const vals = param.enumValues as Record<number, string> | undefined;
     return vals?.[idx];
@@ -123,10 +143,26 @@ server.registerTool('set_param', {
   const display = param.unit === 'enum'
     ? `${resolved} (${enumNameFor(resolved) ?? '?'})`
     : String(resolved);
+  try {
+    await echoPromise;
+  } catch {
+    return {
+      content: [{
+        type: 'text',
+        text:
+          `Wrote ${key} = ${display} but the device did not echo the write ` +
+          `within ${WRITE_ECHO_TIMEOUT_MS} ms. This almost always means the ` +
+          `${param.block} block is NOT placed in the active preset — the AM4 ` +
+          `silently absorbs writes to absent blocks. Switch to a preset that ` +
+          `has ${param.block} placed (most factory presets do) and retry.\n` +
+          `Wire bytes sent: ${toHex(bytes)}`,
+      }],
+    };
+  }
   return {
     content: [{
       type: 'text',
-      text: `Sent ${key} = ${display}. Wire bytes: ${toHex(bytes)}`,
+      text: `Sent ${key} = ${display}. Device confirmed. Wire bytes: ${toHex(bytes)}`,
     }],
   };
 });
@@ -184,89 +220,43 @@ server.registerTool('set_params', {
       const display = param.unit === 'enum'
         ? `${resolved} (${enumNameFor(resolved) ?? '?'})`
         : String(resolved);
-      return { key, bytes, display };
+      return { key, param, bytes, display };
     } catch (err) {
       throw new Error(`writes[${i}] (${w.block}.${w.name} = ${w.value}): ${err instanceof Error ? err.message : String(err)}`);
     }
   });
   const conn = ensureMidi();
-  const lines: string[] = [];
-  for (const { key, bytes, display } of prepared) {
+  const confirmed: string[] = [];
+  for (let i = 0; i < prepared.length; i++) {
+    const { key, param, bytes, display } = prepared[i];
+    const echoPromise = conn.receiveSysExMatching(
+      (resp) => isWriteEcho(bytes, resp),
+      WRITE_ECHO_TIMEOUT_MS,
+    );
     conn.send(bytes);
-    lines.push(`  ${key} = ${display}`);
+    try {
+      await echoPromise;
+    } catch {
+      return {
+        content: [{
+          type: 'text',
+          text:
+            `Applied ${confirmed.length}/${prepared.length} writes, then write #${i + 1} was silently absorbed:\n` +
+            confirmed.map((l) => `  ${l}`).join('\n') +
+            (confirmed.length ? '\n' : '') +
+            `  ✗ ${key} = ${display} — ${param.block} block is NOT placed in the active preset.\n` +
+            `Switch to a preset that has ${param.block} placed and retry this batch.`,
+        }],
+      };
+    }
+    confirmed.push(`${key} = ${display}`);
   }
-  return {
-    content: [{
-      type: 'text',
-      text: `Applied ${prepared.length} writes:\n${lines.join('\n')}`,
-    }],
-  };
-});
-
-server.registerTool('read_param', {
-  description: [
-    'Read a parameter from the connected AM4 to confirm the current value.',
-    'Use after set_param when you need to verify a write actually applied —',
-    'a silent absorb usually means the target block is not present in the',
-    'active preset. The AM4 will not apply writes to blocks that aren\'t',
-    'placed. Returns the decoded display value plus raw response bytes.',
-  ].join(' '),
-  inputSchema: {
-    block: z.string().describe('Block name, e.g. "amp", "drive", "reverb", "delay"'),
-    name: z.string().describe('Parameter name within the block, e.g. "gain", "type", "mix"'),
-  },
-}, async ({ block, name }) => {
-  const key = paramKey(block, name);
-  const param: Param = KNOWN_PARAMS[key];
-  const req = buildReadParam(param, 0x0e);
-  const conn = ensureMidi();
-  conn.send(req);
-  let reply: number[];
-  try {
-    reply = await conn.receiveSysEx(1500);
-  } catch (err) {
-    return {
-      content: [{
-        type: 'text',
-        text: `No response reading ${key} within 1500 ms. Wire sent: ${toHex(req)}. ` +
-              `This usually means the target block is not present in the active preset — ` +
-              `try a factory preset that already has ${block} placed.`,
-      }],
-    };
-  }
-  const hex = toHex(reply);
-  if (reply.length < 9 || reply[0] !== 0xf0 || reply[reply.length - 1] !== 0xf7) {
-    return { content: [{ type: 'text', text: `Unparsable reply for ${key}. Raw: ${hex}` }] };
-  }
-  // Response payload format is NOT fully decoded yet (see docs/SYSEX-MAP.md §6a
-  // "Read response — format open"). The 5-byte payload at bytes[len-7..len-2]
-  // does not unpack via the write-side 8-to-7 scheme — responses for known
-  // non-zero values yield denormalized floats. Until a capture of AM4-Edit
-  // reading a known value pins down the format, we return raw bytes and a
-  // clearly-labeled experimental decode. Treat the decoded number as a hint,
-  // not ground truth.
-  const payloadStart = reply.length - 7;
-  const payloadEnd = reply.length - 2;
-  let experimental: string;
-  try {
-    const packed = new Uint8Array(reply.slice(payloadStart, payloadEnd));
-    const f = unpackFloat32LE(packed);
-    const displayValue = decode(param, f);
-    experimental = String(displayValue);
-  } catch (err) {
-    experimental = `(decode failed: ${err instanceof Error ? err.message : String(err)})`;
-  }
-  const payloadHex = toHex(reply.slice(payloadStart, payloadEnd));
   return {
     content: [{
       type: 'text',
       text:
-        `Read ${key}. Response format is NOT yet decoded — treat the value below as unreliable.\n` +
-        `  raw payload (5 bytes): ${payloadHex}\n` +
-        `  experimental decode (write-side unpack): ${experimental}\n` +
-        `  full reply: ${hex}\n` +
-        `To verify whether a write actually applied, watch the AM4's display. ` +
-        `Decode will be fixed after Session 18 capture of an AM4-Edit read.`,
+        `Applied ${prepared.length} writes (all confirmed by device echo):\n` +
+        confirmed.map((l) => `  ${l}`).join('\n'),
     }],
   };
 });

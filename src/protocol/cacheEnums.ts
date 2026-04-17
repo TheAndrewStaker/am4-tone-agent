@@ -456,7 +456,200 @@ export const DELAY_TYPES: readonly string[] = [
   "Surround Delay",
 ] as const;
 
+export const CHORUS_TYPES: readonly string[] = [
+  "Digital Mono",
+  "Digital Stereo",
+  "Analog Mono",
+  "Analog Stereo",
+  "Japan CE-2",
+  "Warm Stereo",
+  "80s Style",
+  "Triangle Chorus",
+  "8-Voice Stereo",
+  "Tape Chorus",
+  "Dimension 1",
+  "Dimension 2",
+  "Dimension 3",
+  "4-Voice Analog",
+  "8-Voice Analog",
+  "Stereo Tri-Chorus",
+  "Dual Chorus",
+  "Tape Flanger",
+  "Vibrato 1",
+  "Vibrato 2",
+] as const;
+
+export const FLANGER_TYPES: readonly string[] = [
+  "Digital Mono",
+  "Digital Stereo",
+  "Analog Mono",
+  "Analog Stereo",
+  "Thru-Zero",
+  "Stereo Jet",
+  "Zero Flanger",
+  "Pop Flanger",
+  "MXF-117",
+  "BBF-2",
+  "Electric Mystery",
+  "Deluxe Mystery",
+  "D/AD 185",
+  "Manual Thru-Zero Flanger",
+  "Step Flanger",
+  "FAS Flanger",
+  "Binary Flange",
+  "Cancel Flange",
+  "Count of Flanging",
+  "Cuda Flange",
+  "Harmonoflange",
+  "Hemisflange",
+  "Lofty Flange",
+  "Melodic Flange",
+  "80's Rack Flanger",
+  "Scion Stereo Flange",
+  "Spirit Flange",
+  "Starship Flanger",
+  "Trippy Flanger",
+  "Tubular",
+  "Vowel Flanger",
+  "Manual Cancel Flanger",
+] as const;
+
+export const PHASER_TYPES: readonly string[] = [
+  "Digital Mono",
+  "Digital Stereo",
+  "Script 45",
+  "Script 90",
+  "Block 90",
+  "Classic Vibe",
+  "Stereo 8-Stage",
+  "Barber Pole",
+  "Stripe 90",
+  "Naughty Rock",
+  "FAS Vibe",
+  "Treadle Phaser",
+  "Virtuoso Phaser",
+  "Borg Phaser",
+  "Ultra-Super-Mega Phaser",
+  "Mutated Twin-Phaser",
+  "Modern Vibe",
+] as const;
+
+export const WAH_TYPES: readonly string[] = [
+  "FAS Wah",
+  "Clyde",
+  "Cry Babe",
+  "VX846",
+  "Color-Tone",
+  "Funk Wah",
+  "Mortal",
+  "VX845",
+  "Paragon",
+] as const;
+
+export const COMPRESSOR_TYPES: readonly string[] = [
+  "VCA Modern Compressor",
+  "Econo-Dyno-Comp",
+  "Dynami-Comp Modern",
+  "Dynamics Processor",
+  "Optical Compressor",
+  "Vari-Mu Tube Compressor",
+  "Analog Compressor",
+  "Dynami-Comp Classic",
+  "JFET Studio Compressor",
+  "VCA FF Sustainer",
+  "VCA Bus Compressor",
+  "VCA FB Sustainer",
+  "Compander",
+  "VCA Classic Compressor",
+  "Analog Sustainer",
+  "JFET Pedal Compressor",
+  "Rockguy Compressor",
+  "Dynami-Comp Soft",
+  "Citrus Juicer",
+] as const;
+
+export const GEQ_TYPES: readonly string[] = [
+  "10 Band Constant Q",
+  "8 Band Constant Q",
+  "7 Band Constant Q",
+  "5 Band Constant Q",
+  "10 Band Variable Q",
+  "8 Band Variable Q",
+  "7 Band Variable Q",
+  "5 Band Variable Q",
+  "5 Band Passive",
+  "4 Band Passive",
+  "3 Band Passive",
+  "3 Band Console",
+  "10 Band 2/3 Oct Const Q",
+  "10 Band 2/3 Oct Var Q",
+  "5 Band Mark",
+  "4 Band JMPRE-1",
+  "7 Band Pedal",
+  "7 Band Bass Pedal",
+] as const;
+
+export const FILTER_TYPES: readonly string[] = [
+  "Null",
+  "Low-Pass",
+  "Band-Pass",
+  "High-Pass",
+  "Low-Shelf",
+  "High-Shelf",
+  "Peaking",
+  "Notch",
+  "Tilt EQ",
+  "Low-Shelf 2",
+  "High-Shelf 2",
+  "Peaking 2",
+  "Feedforward Comb",
+  "Feedback Comb",
+  "All-Pass",
+  "Envelope Filter",
+  "Auto-Wah",
+  "Touch-Wah",
+] as const;
+
+export const TREMOLO_TYPES: readonly string[] = [
+  "VCA Trem",
+  "Panner",
+  "Bias Trem",
+  "Harmonic Trem",
+  "Optical Trem 1",
+  "Optical Trem 2",
+  "Neon Trem",
+] as const;
+
+export const ENHANCER_TYPES: readonly string[] = [
+  "Modern",
+  "Classic",
+  "Stereoizer",
+] as const;
+
+export const GATE_TYPES: readonly string[] = [
+  "Classic Expander",
+  "Classic Gate",
+  "Modern Gate",
+  "Modern Expander",
+] as const;
+
+export const VOLPAN_MODES: readonly string[] = [
+  "Volume",
+  "Auto-Swell",
+] as const;
+
 export const AMP_TYPES_VALUES: Record<number, string> = Object.fromEntries(AMP_TYPES.map((s, i) => [i, s] as const));
 export const DRIVE_TYPES_VALUES: Record<number, string> = Object.fromEntries(DRIVE_TYPES.map((s, i) => [i, s] as const));
 export const REVERB_TYPES_VALUES: Record<number, string> = Object.fromEntries(REVERB_TYPES.map((s, i) => [i, s] as const));
 export const DELAY_TYPES_VALUES: Record<number, string> = Object.fromEntries(DELAY_TYPES.map((s, i) => [i, s] as const));
+export const CHORUS_TYPES_VALUES: Record<number, string> = Object.fromEntries(CHORUS_TYPES.map((s, i) => [i, s] as const));
+export const FLANGER_TYPES_VALUES: Record<number, string> = Object.fromEntries(FLANGER_TYPES.map((s, i) => [i, s] as const));
+export const PHASER_TYPES_VALUES: Record<number, string> = Object.fromEntries(PHASER_TYPES.map((s, i) => [i, s] as const));
+export const WAH_TYPES_VALUES: Record<number, string> = Object.fromEntries(WAH_TYPES.map((s, i) => [i, s] as const));
+export const COMPRESSOR_TYPES_VALUES: Record<number, string> = Object.fromEntries(COMPRESSOR_TYPES.map((s, i) => [i, s] as const));
+export const GEQ_TYPES_VALUES: Record<number, string> = Object.fromEntries(GEQ_TYPES.map((s, i) => [i, s] as const));
+export const FILTER_TYPES_VALUES: Record<number, string> = Object.fromEntries(FILTER_TYPES.map((s, i) => [i, s] as const));
+export const TREMOLO_TYPES_VALUES: Record<number, string> = Object.fromEntries(TREMOLO_TYPES.map((s, i) => [i, s] as const));
+export const ENHANCER_TYPES_VALUES: Record<number, string> = Object.fromEntries(ENHANCER_TYPES.map((s, i) => [i, s] as const));
+export const GATE_TYPES_VALUES: Record<number, string> = Object.fromEntries(GATE_TYPES.map((s, i) => [i, s] as const));
+export const VOLPAN_MODES_VALUES: Record<number, string> = Object.fromEntries(VOLPAN_MODES.map((s, i) => [i, s] as const));

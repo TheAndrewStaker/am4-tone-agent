@@ -1,14 +1,15 @@
 /**
- * Emit `src/protocol/cacheEnums.ts` — the 4 top-level effect type
+ * Emit `src/protocol/cacheEnums.ts` — the top-level effect-type
  * dictionaries pulled from the parsed cache. These are the dropdown
- * lists AM4-Edit shows under Amp Type / Drive Type / Reverb Type /
- * Delay Type, in the exact order the firmware enumerates them.
+ * lists AM4-Edit shows for each block's Type selector, in the exact
+ * order the firmware enumerates them.
  *
  * Wire index == array index. Pass the index (as float32) to SET_PARAM
- * at the block's Type pidHigh (all id=10 == pidHigh=0x000A).
+ * at the block's Type `pidHigh` — most blocks use id=10 (pidHigh=0x000A),
+ * except Compressor (id=19) and GEQ (id=20).
  *
  * Also emit `docs/CACHE-DUMP.md` — human-readable listing of every
- * param record for the 4 mapped blocks, so the catalog is visible
+ * param record for each mapped block, so the catalog is visible
  * without loading JSON.
  *
  * Run after `npx tsx scripts/parse-cache.ts`:
@@ -39,24 +40,35 @@ interface BlockLoc {
   block: number;
   recs: CacheRec[];
   pidLow: number;
+  /** Type-dropdown record id. Defaults to 10 but Comp/GEQ use 19/20. */
+  typeId: number;
 }
 
 const BLOCKS: BlockLoc[] = [
-  { label: 'Amp',    constName: 'AMP_TYPES',    section: 'S2', block: 5, recs: s2, pidLow: 0x3a },
-  { label: 'Drive',  constName: 'DRIVE_TYPES',  section: 'S3', block: 9, recs: s3, pidLow: 0x76 },
-  { label: 'Reverb', constName: 'REVERB_TYPES', section: 'S3', block: 0, recs: s3, pidLow: 0x42 },
-  { label: 'Delay',  constName: 'DELAY_TYPES',  section: 'S3', block: 1, recs: s3, pidLow: 0x46 },
+  { label: 'Amp',          constName: 'AMP_TYPES',        section: 'S2', block: 5,  recs: s2, pidLow: 0x3a, typeId: 10 },
+  { label: 'Drive',        constName: 'DRIVE_TYPES',      section: 'S3', block: 9,  recs: s3, pidLow: 0x76, typeId: 10 },
+  { label: 'Reverb',       constName: 'REVERB_TYPES',     section: 'S3', block: 0,  recs: s3, pidLow: 0x42, typeId: 10 },
+  { label: 'Delay',        constName: 'DELAY_TYPES',      section: 'S3', block: 1,  recs: s3, pidLow: 0x46, typeId: 10 },
+  { label: 'Chorus',       constName: 'CHORUS_TYPES',     section: 'S3', block: 2,  recs: s3, pidLow: 0x4e, typeId: 10 },
+  { label: 'Flanger',      constName: 'FLANGER_TYPES',    section: 'S3', block: 3,  recs: s3, pidLow: 0x52, typeId: 10 },
+  { label: 'Phaser',       constName: 'PHASER_TYPES',     section: 'S3', block: 5,  recs: s3, pidLow: 0x5a, typeId: 10 },
+  { label: 'Wah',          constName: 'WAH_TYPES',        section: 'S3', block: 6,  recs: s3, pidLow: 0x5e, typeId: 10 },
+  { label: 'Compressor',   constName: 'COMPRESSOR_TYPES', section: 'S2', block: 2,  recs: s2, pidLow: 0x2e, typeId: 19 },
+  { label: 'GEQ',          constName: 'GEQ_TYPES',        section: 'S2', block: 3,  recs: s2, pidLow: 0x32, typeId: 20 },
+  { label: 'Filter',       constName: 'FILTER_TYPES',     section: 'S3', block: 8,  recs: s3, pidLow: 0x72, typeId: 10 },
+  { label: 'Tremolo',      constName: 'TREMOLO_TYPES',    section: 'S3', block: 7,  recs: s3, pidLow: 0x6a, typeId: 10 },
+  { label: 'Enhancer',     constName: 'ENHANCER_TYPES',   section: 'S3', block: 10, recs: s3, pidLow: 0x7a, typeId: 14 },
+  { label: 'Gate/Expander',constName: 'GATE_TYPES',       section: 'S3', block: 11, recs: s3, pidLow: 0x92, typeId: 19 },
+  { label: 'Volume/Pan',   constName: 'VOLPAN_MODES',     section: 'S3', block: 12, recs: s3, pidLow: 0x66, typeId: 15 },
 ];
-
-const TYPE_PID_HIGH = 10; // id=10 → pidHigh=0x000A for all 4 main blocks
 
 function paramsOf(loc: BlockLoc): CacheRec[] {
   return loc.recs.filter((r) => r.block === loc.block && r.kind !== 'blockHeader').sort((a, b) => a.id - b.id);
 }
 
 function typeEnum(loc: BlockLoc): string[] {
-  const rec = paramsOf(loc).find((r) => r.id === TYPE_PID_HIGH && r.kind === 'enum');
-  if (!rec) throw new Error(`${loc.label}: no enum at id=${TYPE_PID_HIGH}`);
+  const rec = paramsOf(loc).find((r) => r.id === loc.typeId && r.kind === 'enum');
+  if (!rec) throw new Error(`${loc.label}: no enum at id=${loc.typeId}`);
   return rec.values!;
 }
 
@@ -125,7 +137,8 @@ md.push('');
 md.push('**Wire protocol:** cache record `id` == wire `pidHigh`. The block\'s');
 md.push('`pidLow` is in the section header below. Send SET_PARAM with');
 md.push('`(pidLow, pidHigh=id)` and the value encoded per the unit convention');
-md.push('in `src/protocol/params.ts`.');
+md.push('in `src/protocol/params.ts`. Type-dropdown id is 10 for most blocks');
+md.push('except Compressor (id=19) and GEQ (id=20).');
 md.push('');
 md.push('Parameter *names* are not in the cache — only IDs. Entries whose');
 md.push('name is known via wire capture are tagged in `params.ts`. Everything');

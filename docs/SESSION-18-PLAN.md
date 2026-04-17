@@ -61,18 +61,50 @@ a no-op baseline (AM4-Edit open but idle) to isolate the action.
 6. `npx tsx scripts/parse-capture.ts samples/captured/session-18-<name>.pcapng`
    → append output to `docs/SESSIONS.md` under a new Session 18 heading.
 
+**Write-safety reminder:** any capture that writes to flash writes to
+Z04 only. Back up Z04 before the session. Never touch A01–Z03 inside
+AM4-Edit during any capture — every click emits traffic we have to
+untangle afterwards.
+
+**AM4-Edit auto-poll noise:** AM4-Edit auto-polls visible fields at
+~200 Hz. Every capture therefore has baseline READ_PARAM traffic we
+need to diff away. The baseline capture (Capture B) is the reference
+for that diff.
+
+### Capture B — idle baseline (do this FIRST)
+
+**Why first:** the diff reference that lets every subsequent capture
+isolate its one action from AM4-Edit's ambient polling.
+
+**Setup:** AM4-Edit open, connected to the device, displaying Z04
+working buffer. Mouse parked outside any editable field. Idle 2 s.
+
+**Action:** start capture, sit still 10 s, stop. Do not click, scroll,
+or move the mouse over any field.
+
+**Filename:** `session-18-baseline-idle.pcapng`
+
 ### Capture 0 — read response Rosetta (FIX READ_PARAM)
 
 **Why first:** one capture unblocks the `read_param` decoder that every
 other MCP-level verification depends on.
 
-**Setup:** on Z04 working buffer, set Amp Gain to exactly **6.0** via
-physical knob (or via our own `set_param amp gain 6`, confirmed on the
-device display).
+**Setup (port-handoff required on Windows):**
 
-**Action:** in AM4-Edit, *manually poll* the Gain field. The 200 Hz
-auto-poll will emit a READ request + response pair every ~5 ms. Ten
-seconds of capture is fine — we only need one clean pair.
+1. Make sure AM4-Edit is closed (it holds the USB port exclusively).
+2. From a terminal, with the MCP server not running in Claude Desktop:
+   `npx tsx -e "import('./src/protocol/midi.js').then(async m => { const c = m.connectAM4(); const s = await import('./src/protocol/setParam.js'); c.send(s.buildSetParam('amp.gain', 6)); c.close(); })"`
+   (Or call `set_param amp gain 6` via Claude Desktop and then fully
+   quit Claude Desktop — same effect but slower. The terminal one-liner
+   exits cleanly and releases the port.)
+3. Open AM4-Edit. Connect. Confirm Amp Gain reads 6.0 on both the
+   AM4-Edit UI and the AM4 display. Internal float32 = 0.6 exactly
+   (guaranteed by the `knob_0_10` encode: `0.6 = display/10`).
+4. Move mouse off the Gain field so auto-poll settles.
+
+**Action:** start USBPcap, click back into the Gain field, idle 10 s.
+AM4-Edit's 200 Hz auto-poll will emit a READ request + response pair
+every ~5 ms — we only need one clean pair.
 
 **Deliverable:**
 
@@ -135,13 +167,141 @@ do — do NOT save), press the Scene 1 → Scene 2 button in AM4-Edit.
 Add `save_preset(slot: "Z04")` tool. This is the last building block for
 a `save_preset(slot, presetIR)` convenience tool later.
 
-### Capture 6 — `save-scene` (optional, confirm only)
+### Capture 6 — `save-scene` (SKIPPED)
 
-**Action:** tweak params in working buffer scene 2; press AM4-Edit's
-"save scene" button (if it exists separately).
+**Skipped** per founder confirmation: on AM4, a preset save includes
+all four scenes in a single operation. There is no separate scene-save
+command to decode. Capture 5 (`save-preset-to-slot`) is sufficient.
 
-**Deliverable:** either a dedicated scene-save command, or confirmation
-that scene data is committed only as part of a full preset save.
+## Tier 2 — bundle in the same session
+
+These aren't blockers for v0.2 `apply_preset` but are cheap additions
+while the hardware is patched in — each is a 10 s capture and each
+retires an open question in `STATE.md` or `CACHE-BLOCKS.md`.
+
+### Capture 7 — clear block (set to NONE)
+
+**Why:** confirms "clear a slot" is the same command as Capture 2 with
+target type = NONE, or its own command. Needed so `apply_preset` can
+overwrite an existing block layout cleanly.
+
+**Setup:** on Z04 working buffer, make sure slot 2 holds something
+(any non-NONE block). Confirm on the AM4 display.
+
+**Action:** in AM4-Edit, change slot 2 from its current block → **NONE**.
+
+**Filename:** `session-18-block-clear-to-none.pcapng`
+
+### Capture 8 — read response on Reverb Mix
+
+**Why:** validates that Capture 0's read-response decoder is
+block-generic. If the response format keys on `pidLow`, we need to
+know before shipping `read_param` for anything beyond Amp.
+
+**Setup:** pick a factory preset with Reverb placed. Use our
+`set_param reverb mix 25` to set Reverb Mix to a known value (internal
+float32 = 0.25). Confirm on the AM4 display.
+
+**Action:** in AM4-Edit, click into the Reverb Mix field. Idle 10 s.
+
+**Filename:** `session-18-read-response-reverb-mix.pcapng`
+
+### Capture 9 — Drive channel A → B
+
+**Why:** confirms `pidHigh=0x07D2` (channel selector) is block-generic.
+Currently proven only for Amp. Unlocks per-block channel writes.
+
+**Setup:** preset with a Drive block present on channel A. Confirm
+channel shown as A on the display.
+
+**Action:** in AM4-Edit, change Drive channel **A → B**.
+
+**Filename:** `session-18-drive-channel-a-b.pcapng`
+
+### Capture 10 — Reverb channel A → B
+
+**Setup:** preset with a Reverb block on channel A.
+
+**Action:** change Reverb channel **A → B** in AM4-Edit.
+
+**Filename:** `session-18-reverb-channel-a-b.pcapng`
+
+### Capture 11 — Delay channel A → B
+
+**Setup:** preset with a Delay block on channel A.
+
+**Action:** change Delay channel **A → B** in AM4-Edit.
+
+**Filename:** `session-18-delay-channel-a-b.pcapng`
+
+### Capture 12 — save-as to an empty slot
+
+**Why:** confirms slot-address payload in the preset-save command
+handles empty target slots the same as occupied ones. If they differ,
+we need two code paths in `save_preset`.
+
+**Setup:** identify an empty slot in bank Y (check AM4-Edit's preset
+list). Y01 is typical if untouched. Back up that slot's current state
+(even if empty) before the capture. On Z04 working buffer, tweak Amp
+Gain trivially so there's something to save.
+
+**Action:** in AM4-Edit, **Save As → <empty slot>**. NOT Z04.
+
+**Filename:** `session-18-save-preset-empty-slot.pcapng`
+
+**Warning:** this capture writes a preset to the chosen slot. Confirm
+it's empty first. The write is reversible via AM4-Edit's preset
+library, but only if the slot was genuinely empty.
+
+### Capture 13 — read on non-placed block
+
+**Why:** shows how the device responds to a read whose block isn't in
+the active preset. If it times out, we can detect "silent absorb" at
+tool-call time and return a useful error from `read_param` instead of
+pretending the read succeeded.
+
+**Setup:** find (or make on Z04) a preset state with Delay slot empty
+(type = NONE).
+
+**Action:** in AM4-Edit, click the Delay Time field. Let it idle 10 s
+while AM4-Edit tries to auto-poll the missing block.
+
+**Filename:** `session-18-read-non-placed-delay.pcapng`
+
+### Capture 14 — block type sweep (nice-to-have)
+
+**Why:** gives wire-confirmed block-type IDs for all 4 main types in
+a single file, catching any numbering inconsistency between the cache
+tag, wire pidLow, and the block-type-assignment command's payload.
+
+**Setup:** on Z04 working buffer, slot 1 currently holds Amp.
+
+**Action:** in AM4-Edit, change slot 1 through **AMP → DRV → REV → DLY
+→ AMP**. Pause ~1 second between clicks so each command is visibly
+separate in the capture.
+
+**Filename:** `session-18-block-type-sweep.pcapng`
+
+## Tier 3 — tentative block-role confirmations (optional, bonus)
+
+From `docs/CACHE-BLOCKS.md` Capture TODO: every non-Amp/Drive/Reverb/
+Delay cache block is TENTATIVE. One Type-dropdown change per block
+promotes it to CONFIRMED and unlocks that effect in the MCP server.
+Cheap to batch now while hardware is patched in. Pick any factory
+preset that exposes the block; swap the Type dropdown once; save
+nothing. Each capture is ~10 seconds.
+
+| # | Block (tentative cache role) | Action | Filename |
+|---|------------------------------|--------|----------|
+| 15 | Chorus (S3 sub-block 2) | change Chorus Type to any other | `session-18-chorus-type.pcapng` |
+| 16 | Flanger (S3 sub-block 3) | change Flanger Type | `session-18-flanger-type.pcapng` |
+| 17 | Phaser (S3 sub-block 5) | change Phaser Type | `session-18-phaser-type.pcapng` |
+| 18 | Wah (S3 sub-block 6) | change Wah Type | `session-18-wah-type.pcapng` |
+| 19 | Compressor (S2 block 2) | change Compressor Type | `session-18-comp-type.pcapng` |
+| 20 | Graphic EQ (S2 block 3) | change GEQ Type | `session-18-geq-type.pcapng` |
+
+Skip any whose block doesn't appear in any preset you can navigate to
+— they can be captured another day.
 
 ## Protocol tasks after captures
 

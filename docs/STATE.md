@@ -2,17 +2,13 @@
 
 > Read this file at the start of every session. It's kept up-to-date with
 > current phase, the single next action, and recent findings.
-> Last updated: **2026-04-16** (Session 17.1 — MCP server tested live
-> against Claude Desktop on hardware. `set_param` confirmed writing
-> correctly (amp.gain tweak moved the knob). `read_param` and `set_params`
-> (batched write) both shipped. **Open finding:** `read_param` returns raw
-> response bytes fine but mis-decodes the value — read responses are
-> 23-byte frames, and the 5-byte payload does NOT match the write-side
-> 8-to-7 pack. Needs one Rosetta capture of AM4-Edit reading a known-value
-> param (Session 18 Capture 0). Second open finding: v0.1 writes are
-> silently absorbed when the target block isn't present in the active
-> preset — block-placement and block-type-assignment commands are not yet
-> decoded. Session 18 plan (`docs/SESSION-18-PLAN.md`) covers both.)
+> Last updated: **2026-04-16** (Session 18 — v0.2 shipped. Write-echo
+> confirmation detects silent-absorb; `read_param` removed; 17 params
+> across 15 confirmed blocks; Tier-3 captures promoted 11 tentative
+> cache-block roles to CONFIRMED. READ-response format is NOT decoded
+> (bytes 0-7 are a rotating descriptor/counter, value not at fixed
+> offset) — deferred to a future session that will need Ghidra work on
+> AM4-Edit's response parser rather than pure capture diffing.)
 
 ---
 
@@ -30,46 +26,56 @@ float32. One open question remains before the IR can cover full presets:
 
 ## The single next action
 
-### Live end-to-end test via Claude Desktop
+### Test v0.2 write-echo behavior live against hardware
 
-The MCP server is up. Procedure:
+Session 18 shipped echo-verified writes. Before building further, sanity
+-check the new failure mode against a real device:
 
-1. Confirm `node-midi` built on this machine: `npm run write-test`
-   should move Amp Gain on the device. If it fails, fix the native
-   build before anything else.
-2. Add the `am4-tone-agent` stanza to
-   `%APPDATA%\Claude\claude_desktop_config.json` — full JSON block
-   is in `docs/MCP-SETUP.md`.
-3. Restart Claude Desktop. Open a new chat. Verify the 3 tools
-   appear in the tool panel.
-4. Ask *"Set the amp gain to 7"*. Expected: Claude calls `set_param`
-   with `(block="amp", name="gain", value=7)`, the tool response
-   contains the wire bytes, the AM4's knob moves.
-5. Ask *"What amp types are available?"* → `list_enum_values` with
-   `(block="amp", name="type")` returns 248 rows.
-6. Ask *"Switch the amp to a plexi."* → Claude picks an entry from
-   `AMP_TYPES` (fuzzy match "plexi" against 1959SLP/1987X/etc. is
-   Claude's call — the server accepts whatever exact name it sends
-   via `resolveEnumValue`).
+1. Confirm `npm run preflight` still green (it is at commit time —
+   16/16 verify-msg goldens, 7/7 verify-echo goldens, smoke-server
+   reports 4 tools).
+2. Reconnect hardware. Run `npm run write-test` — sanity-check the
+   native build.
+3. Update `%APPDATA%\Claude\claude_desktop_config.json` (no change
+   to stanza; the server path is stable).
+4. Restart Claude Desktop. Verify **4** tools now register
+   (`set_param`, `set_params`, `list_params`, `list_enum_values`).
+   `read_param` is intentionally removed.
+5. Load factory preset **A01** (has Amp). Ask *"Set amp gain to 6"*.
+   Expected: tool returns "Device confirmed", AM4's display shows 6.0.
+6. Load a preset **without Drive placed** (or Z04 scratch). Ask
+   *"Set drive.drive to 7"*. Expected: tool returns the silent-absorb
+   error — "drive block is NOT placed in the active preset". This is
+   the key new behavior vs v0.1.
+7. Ask *"Change the reverb type to a spring and the delay to 400 ms
+   and compressor type to VCA Modern"* — triggers `set_params` batch.
+   Expect per-write echo confirmation and, if any block is missing,
+   "Applied N/3 writes, then write #X was silently absorbed".
 
-### Deferred (needs captures)
+### Deferred
 
-- **Promote the 3 untested enum entries to capture-verified.**
-  `amp.type`, `reverb.type`, `delay.type` are structurally correct by
-  Session 15's `pidHigh == cache record id` proof but not yet proven
-  on the wire. Capture one Type-dropdown change per block in AM4-Edit
-  and add cases to `verify-msg.ts`. See the dedicated capture section
-  below.
-- **Role-map the 20 remaining cache blocks** per `docs/CACHE-BLOCKS.md`.
-  Tentative assignments are in place; each needs one capture of an
-  AM4-Edit action in that block to confirm the wire `pidLow` and then
-  expose it via `KNOWN_PARAMS`.
-- **`amp.level` pidHigh=0x0000** is not in the cache record table.
-  One capture each of Drive/Reverb/Delay *level* will reveal whether
-  pidHigh=0 is block-generic.
+- **Decode the READ response format.** The 0x0D READ action returns a
+  64-byte response with a 40-byte payload. Bytes 0-7 vary per response
+  even at stable values (rotating descriptor/counter), bytes 8/11 are
+  constant structural markers, bytes 14-39 are zero, and the actual
+  current value is NOT at any fixed offset as a packed float32
+  (scanned all 5-byte windows against known values 0.2/0.5/0.8/0.25 —
+  zero matches). AM4-Edit probably decodes this via a non-trivial
+  scheme; cracking it likely needs Ghidra on AM4-Edit's response
+  parser. Not a blocker — v0.2 uses WRITE echoes for confirmation.
+- **Block-command captures for preset-save / scene-switch / block-type
+  assignment.** Captures exist (`session-18-save-preset-z04.pcapng`,
+  `session-18-switch-scene.pcapng`, `session-18-block-type-gte-to-rev
+  .pcapng`, etc.) but NOT yet decoded into protocol builders. That's
+  the next session's work — decoding these unlocks the real MVP
+  (`apply_preset` in one call).
+- **PEQ and Rotary have pidLow but no Type enum.** KNOWN_PARAMS needs
+  specific knob entries (PEQ band freqs/gains, Rotary rate/depth)
+  once we decide the naming scheme. Cache records are already in
+  `docs/CACHE-DUMP.md`.
 - **P3-007 Model Lineage Dictionary** (see `04-BACKLOG.md`) —
   `cacheEnums.ts` is the authoritative input for the wiki-scrape
-  pipeline.
+  pipeline. 15 block dictionaries ready (498 total enum entries).
 
 **Layouts (parser is source of truth — see `scripts/parse-cache.ts`):**
 
@@ -124,21 +130,39 @@ index table (only index 8 has been wire-verified).
 
 ## Recent breakthroughs
 
-Older breakthroughs (sessions 04–08, 10–12) are archived in `SESSIONS.md`.
-Sessions 13–17 (current) are kept here for fast orientation.
+Older breakthroughs (sessions 04–08, 10–14) are archived in `SESSIONS.md`.
+Sessions 15–18 (current) are kept here for fast orientation.
 
-0000. **MCP server scaffold shipped** (Session 17). `src/server/index.ts`
-      is a stdio MCP server exposing `set_param`, `list_params`, and
-      `list_enum_values`. It lazily opens the MIDI port on the first
-      tool call so the server can still register with Claude Desktop
-      if the AM4 is unplugged. `scripts/smoke-server.ts` does the full
-      MCP handshake + tools/list + a tool call in preflight. Setup
-      instructions for the Claude Desktop side live in
-      `docs/MCP-SETUP.md`. Hand-curated `resolveEnumValue()` in
-      `params.ts` gives case-insensitive fuzzy lookup of enum values
-      (`"Marshall 1959SLP"` → wire index 0) with 16/16 goldens.
-      `docs/CACHE-BLOCKS.md` maps all 24 cache blocks to tentative
-      effect roles (4 confirmed, 20 tentative).
+00000. **Session 18 — write-echo confirmation + 11 blocks confirmed.**
+       Three sub-phases:
+       
+       **18a (echo protocol):** After `set_param`, listen for a 64-byte
+       response with matching pidLow/pidHigh and `action=0x0001`
+       within 300 ms. Presence = write took; timeout = silent-absorb
+       (block not placed in active preset). Implemented via
+       `receiveSysExMatching` in `midi.ts` and `isWriteEcho`
+       predicate in `setParam.ts`. Covers `set_param` and
+       `set_params` (per-write echo, stops on first silent-absorb).
+       `read_param` removed — the AM4's READ response carries
+       metadata, not current value, at any fixed offset.
+       
+       **18b (6 Tier-3 block Type captures):** Chorus (0x4E),
+       Flanger (0x52), Phaser (0x5A), Wah (0x5E), Compressor (0x2E),
+       GEQ (0x32) — each Type-dropdown change confirmed the wire
+       pidLow matches the cache sub-block's position. Added 6
+       KNOWN_PARAMS entries + 6 byte-exact verify-msg goldens.
+       
+       **18c (5 more blocks + 2 address-only):** Filter (0x72),
+       Tremolo (0x6A), Enhancer (0x7A), Gate (0x92), Volume/Pan
+       (0x66) — 5 more Type/Mode selectors, all with goldens.
+       Parametric EQ (0x36) and Rotary (0x56) captures pinned
+       their pidLows but they have no Type enum; KNOWN_PARAMS
+       entries deferred until we pick specific knobs. Cache block
+       roles: all 4 main S2 effect blocks + all 11 S3 effect
+       sub-blocks now CONFIRMED. See `CACHE-BLOCKS.md`.
+       
+       Final: 17 KNOWN_PARAMS across 15 confirmed blocks; 16/16
+       verify-msg goldens + 7/7 verify-echo goldens green.
 
 000. **Type-enum dictionaries wired into params.ts** (Session 16).
      `scripts/gen-cache-enums.ts` emits `src/protocol/cacheEnums.ts`
