@@ -430,31 +430,12 @@ without installing Node, a C++ toolchain, or editing JSON by hand. See
   room for it (keep the MCP server transport pluggable, don't
   hardcode stdio-only assumptions).
 
-### BK-013 MIDI connection resilience — detect + recover stale port handles
-- **Context:** `src/server/index.ts` caches the `AM4Connection` on first
-  use and reuses it for the server process lifetime. If node-midi's
-  port handle dies mid-session (AM4-Edit briefly grabs exclusive
-  access, USB replug, AM4 power cycle, driver hiccup), every
-  subsequent write goes to the stale handle and returns 0 acks. The
-  only current workaround is quitting + reopening Claude Desktop,
-  which kills the server process. Session-19 hardware test hit this
-  after the user opened AM4-Edit; replugging USB didn't help.
-- **Scope:**
-  1. On each tool call, probe the connection cheaply before dispatching
-     (send a known-idempotent SysEx like the firmware-version read, or
-     test the port by checking `output.isPortOpen()` if node-midi
-     exposes it). On failure, close the cached connection and retry
-     once with a fresh `connectAM4()`.
-  2. Surface a clear error if the port genuinely can't be opened
-     (AM4 unplugged / off / driver absent) vs. a stale-handle recovery
-     (transparent, log only).
-  3. Alternative if probing is expensive: listen for node-midi `error`
-     events and invalidate the cache reactively. Needs testing against
-     node-midi's actual error surface — docs are thin.
-- **UX win:** user never has to restart Claude Desktop after briefly
-  using AM4-Edit or after a USB replug. Server self-heals.
-- **Related:** P5-009 (pre-release ergonomics) — the "AM4 not connected"
-  error path should use the same recovery logic.
+### ~~BK-013~~ MIDI connection resilience — ✅ shipped Session 19
+Landed as: consecutive-timeout auto-reconnect (threshold 2) in
+`ensureMidi()` plus an explicit `reconnect_midi` MCP tool. Ack-less
+writes across multiple tool calls now self-heal without requiring a
+Claude Desktop restart. Every ack-less tool response mentions
+reconnect_midi as a manual escape hatch.
 
 ### BK-012 Abstract protocol into a standalone npm package
 - **Context:** `src/protocol/` is already IO-free and MCP-free — it's a

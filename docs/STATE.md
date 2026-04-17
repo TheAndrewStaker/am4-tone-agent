@@ -14,8 +14,10 @@
 > 0x0037 for ONE captured scene; the 1..4 → pidHigh map needs 3 more
 > captures (BK-011). (g) Packing algorithm clarified: long payloads use
 > chunked 7→8 encoding; `packValueChunked` / `unpackValueChunked`
-> added. Server now exposes **9 tools**. 21/21 verify-msg, 8/8
-> verify-echo.)
+> added. (h) **MIDI self-healing** — `ensureMidi()` auto-reconnects
+> after 2 consecutive ack-less writes + new `reconnect_midi` tool for
+> manual override. Closes BK-013. Server now exposes **10 tools**.
+> 21/21 verify-msg, 8/8 verify-echo.)
 
 ---
 
@@ -285,6 +287,18 @@ Sessions 15–19 (current) are kept here for fast orientation.
         `packValueChunked` / `unpackValueChunked`; existing code paths
         are unaffected (all use ≤ 7 raw bytes per value). Updated
         SYSEX-MAP §6b (and new §6e) with the correct chunking rule.
+
+        **19i (MIDI self-healing + reconnect tool):** Session 19 hardware
+        test hit a stale-handle scenario after the user opened AM4-Edit
+        — our cached MIDI connection still "looked open" but writes
+        produced zero acks. Fixed two ways: (1) `ensureMidi()` now
+        tracks consecutive ack-less writes; after 2 in a row, the next
+        call closes the cached handle and opens a fresh one
+        automatically. (2) New `reconnect_midi` MCP tool lets the user
+        force a fresh handle on demand — surfaced in every ack-less
+        tool response as a manual escape hatch. No more Claude Desktop
+        restarts needed after brief AM4-Edit excursions or USB
+        replugs. BK-013 closed. Server now exposes **10 tools**.
 
 00000. **Session 18 — write-echo confirmation + 11 blocks confirmed.**
        Three sub-phases:

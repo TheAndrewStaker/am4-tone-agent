@@ -70,12 +70,48 @@ const WRITE_ECHO_TIMEOUT_MS = 300;
  */
 const SCRATCH_SLOT = 'Z04';
 
-// -- MIDI lazy-init ---------------------------------------------------------
+// -- MIDI lazy-init + self-healing reconnect -------------------------------
 
 let midi: AM4Connection | undefined;
 let midiError: Error | undefined;
 
-function ensureMidi(): AM4Connection {
+/**
+ * How many ack-less writes we tolerate before assuming the MIDI handle is
+ * stale and forcing a reconnect on the next use. Two is chosen so a single
+ * "block not placed" silent-absorb doesn't trigger a reconnect (that's a
+ * legitimate no-ack and should keep the handle), but two in a row across
+ * any tool calls looks like the handle is actually dead.
+ */
+const STALE_HANDLE_TIMEOUT_THRESHOLD = 2;
+let consecutiveTimeouts = 0;
+
+/**
+ * Call after a write/ack pair completes. Resets the stale-handle counter on
+ * success; increments it on timeout. The counter is process-global, not
+ * per-tool, so patterns like "apply_preset 3 writes all time out" count as
+ * 3 consecutive and trip the reconnect threshold.
+ */
+function recordAckOutcome(acked: boolean): void {
+  if (acked) consecutiveTimeouts = 0;
+  else consecutiveTimeouts++;
+}
+
+function closeMidiSafely(conn: AM4Connection | undefined): void {
+  if (!conn) return;
+  try {
+    conn.close();
+  } catch {
+    // Closing a stale handle can throw; ignore — we're discarding it anyway.
+  }
+}
+
+function ensureMidi(forceReconnect = false): AM4Connection {
+  if (forceReconnect || consecutiveTimeouts >= STALE_HANDLE_TIMEOUT_THRESHOLD) {
+    closeMidiSafely(midi);
+    midi = undefined;
+    midiError = undefined;
+    consecutiveTimeouts = 0;
+  }
   if (midi) return midi;
   if (midiError) throw midiError;
   try {
@@ -87,7 +123,7 @@ function ensureMidi(): AM4Connection {
   }
 }
 
-process.on('exit', () => { try { midi?.close(); } catch { /* ignore */ } });
+process.on('exit', () => closeMidiSafely(midi));
 
 // -- Helpers ----------------------------------------------------------------
 
@@ -185,6 +221,7 @@ server.registerTool('set_param', {
   try {
     const ack = await echoPromise;
     unsubscribe();
+    recordAckOutcome(true);
     return {
       content: [{
         type: 'text',
@@ -202,14 +239,17 @@ server.registerTool('set_param', {
     };
   } catch {
     unsubscribe();
+    recordAckOutcome(false);
     return {
       content: [{
         type: 'text',
         text:
           `Sent ${key} = ${display}. No ack within ${WRITE_ECHO_TIMEOUT_MS} ms — ` +
-          `this is unusual (the AM4 normally acks every write). Check the USB ` +
-          `connection, the AM4 power state, and that Claude Desktop still has ` +
-          `the MIDI port open.\n` +
+          `this is unusual (the AM4 normally acks every write). If this persists ` +
+          `across several writes, the MIDI handle may be stale (e.g. AM4-Edit ` +
+          `was briefly open) — the server auto-reconnects after ` +
+          `${STALE_HANDLE_TIMEOUT_THRESHOLD} consecutive ack-less writes, or ` +
+          `you can call reconnect_midi to force it now.\n` +
           `Sent (${bytes.length}B): ${toHex(bytes)}\n` +
           `All inbound SysEx during the ${WRITE_ECHO_TIMEOUT_MS} ms window:\n` +
           formatCaptured(),
@@ -296,16 +336,18 @@ server.registerTool('set_params', {
     try {
       await echoPromise;
       acked++;
+      recordAckOutcome(true);
       lines.push(`  ✓ ${key} = ${display} — wire-acked`);
     } catch {
       unacked++;
+      recordAckOutcome(false);
       lines.push(`  ? ${key} = ${display} — no ack within ${WRITE_ECHO_TIMEOUT_MS} ms (USB/driver issue?)`);
     }
   }
   const summary =
     unacked === 0
       ? `Sent all ${prepared.length} writes; AM4 wire-acked each one. Acks do NOT confirm audible change — if the user reports no change on the device, the target blocks are probably not placed in the active preset.`
-      : `Sent ${prepared.length} writes; ${acked} acked, ${unacked} un-acked (un-acked is unusual — check USB/driver).`;
+      : `Sent ${prepared.length} writes; ${acked} acked, ${unacked} un-acked (un-acked across multiple writes suggests a stale MIDI handle — server auto-reconnects after ${STALE_HANDLE_TIMEOUT_THRESHOLD} consecutive ack-less writes, or call reconnect_midi to force).`;
   return {
     content: [{ type: 'text', text: `${summary}\n${lines.join('\n')}` }],
   };
@@ -360,6 +402,7 @@ server.registerTool('set_block_type', {
   try {
     const ack = await echoPromise;
     unsubscribe();
+    recordAckOutcome(true);
     return {
       content: [{
         type: 'text',
@@ -375,13 +418,16 @@ server.registerTool('set_block_type', {
     };
   } catch {
     unsubscribe();
+    recordAckOutcome(false);
     return {
       content: [{
         type: 'text',
         text:
           `Sent block placement (slot ${pos} → ${displayName}). No ack within ` +
-          `${WRITE_ECHO_TIMEOUT_MS} ms — this is unusual. Check the USB ` +
-          `connection and that the AM4 is on.\n` +
+          `${WRITE_ECHO_TIMEOUT_MS} ms — this is unusual. If this keeps happening, ` +
+          `the MIDI handle may be stale; server auto-reconnects after ` +
+          `${STALE_HANDLE_TIMEOUT_THRESHOLD} consecutive ack-less writes, or ` +
+          `call reconnect_midi to force.\n` +
           `Sent (${bytes.length}B): ${toHex(bytes)}\n` +
           `All inbound SysEx during the ${WRITE_ECHO_TIMEOUT_MS} ms window:\n` +
           formatCaptured(),
@@ -519,15 +565,17 @@ server.registerTool('apply_preset', {
     try {
       await echoPromise;
       acked++;
+      recordAckOutcome(true);
       lines.push(`  ✓ ${label}`);
     } catch {
       unacked++;
+      recordAckOutcome(false);
       lines.push(`  ? ${label} — no ack within ${WRITE_ECHO_TIMEOUT_MS} ms`);
     }
   }
   const header = unacked === 0
     ? `Applied preset: ${prepared.length} writes, all wire-acked. Acks don't confirm audible change — cross-check on the AM4 if it matters.`
-    : `Applied preset: ${prepared.length} writes, ${acked} acked, ${unacked} un-acked (unusual — check USB).`;
+    : `Applied preset: ${prepared.length} writes, ${acked} acked, ${unacked} un-acked (server auto-reconnects after ${STALE_HANDLE_TIMEOUT_THRESHOLD} consecutive ack-less writes; or call reconnect_midi).`;
   return {
     content: [{ type: 'text', text: `${header}\n${lines.join('\n')}` }],
   };
@@ -651,6 +699,47 @@ server.registerTool('set_preset_name', {
         formatCaptured(),
     }],
   };
+});
+
+server.registerTool('reconnect_midi', {
+  description: [
+    'Force the server to close its cached MIDI connection and open a fresh',
+    'one. Use this if writes stop getting ack\'d — typically after AM4-Edit',
+    'was briefly opened and grabbed the USB port exclusively, or after a',
+    'USB replug, or any other event that leaves the cached handle in a',
+    'dead state. The server also auto-reconnects after',
+    `${STALE_HANDLE_TIMEOUT_THRESHOLD} consecutive ack-less writes, so`,
+    'manual use is only needed when you want to force it sooner without',
+    'waiting for writes to accumulate.',
+  ].join(' '),
+  inputSchema: {},
+}, async () => {
+  try {
+    ensureMidi(true);
+    return {
+      content: [{
+        type: 'text',
+        text:
+          'MIDI connection reset. Next tool call will use a fresh port handle. ' +
+          'If writes still don\'t ack after this, the issue is below the server ' +
+          '(AM4 powered off, USB unplugged, driver wedged, or another app holding ' +
+          'the port exclusively).',
+      }],
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return {
+      content: [{
+        type: 'text',
+        text:
+          `Reconnect failed: ${msg}\n\n` +
+          'Most common causes:\n' +
+          '  - AM4 is off or not connected by USB\n' +
+          '  - Driver not installed (fractalaudio.com/am4-downloads/)\n' +
+          '  - Another app holds the MIDI port exclusively (close AM4-Edit)',
+      }],
+    };
+  }
 });
 
 server.registerTool('list_enum_values', {
