@@ -7,6 +7,7 @@ import {
   buildSetBlockType,
   buildSetFloatParam,
   buildSetParam,
+  buildSetPresetName,
 } from '../src/protocol/setParam.js';
 import { KNOWN_PARAMS } from '../src/protocol/params.js';
 import { BLOCK_TYPE_VALUES } from '../src/protocol/blockTypes.js';
@@ -121,6 +122,11 @@ const cases: { label: string; built: number[]; expected: string }[] = [
     label: 'buildSaveToSlot(Z04) — matches session-18 save-preset-z04',
     built: buildSaveToSlot(parseSlotName('Z04')),
     expected: 'f00001741501000000001b000000040033400000007df7',
+  },
+  {
+    label: 'buildSetPresetName(Z04, "boston") — matches session-20-rename-preset',
+    built: buildSetPresetName(parseSlotName('Z04'), 'boston'),
+    expected: 'f000017415014e010b000c00000024003340000003095e733a1b6d6201004020100804020100402010080402010040201008040201004020100009f7',
   },
 ];
 

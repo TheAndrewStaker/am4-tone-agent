@@ -443,6 +443,66 @@ slot until factory-preset safety classification lands (P1-008).
 
 ---
 
+## 6e. Rename (preset and scene) 🟢 preset / 🟡 scene
+
+**Cracked Session 19** from `session-20-rename-preset.pcapng` and
+`session-20-rename-scene.pcapng`. Renaming a preset or a scene uses a
+shared command shape with a new action byte (`0x000C`) on the same
+block-slot register family (`pidLow=0x00CE`).
+
+### Preset rename (fully decoded)
+
+- **function** `0x01` (PARAM_RW)
+- **pidLow** `0x00CE`, **pidHigh** `0x000B`
+- **action** `0x000C`
+- **hdr4** `0x0024` = 36 raw payload bytes
+- **Payload (36 raw):**
+  - bytes 0..3: uint32 LE slot index (same encoding as save-to-slot)
+  - bytes 4..35: 32-byte ASCII name, **space-padded** (0x20), not
+    null-padded — the AM4 stores names fixed-width with trailing
+    spaces. Non-printable / non-ASCII characters are rejected by
+    the builder.
+
+#### Captured golden (byte-exact in `verify-msg`)
+
+| Capture | Built by | Wire (with checksum) |
+|---------|----------|----------------------|
+| Rename Z04 → "boston" | `buildSetPresetName(103, "boston")` | `F0 00 01 74 15 01 4E 01 0B 00 0C 00 00 00 24 00 33 40 00 00 03 09 5E 73 3A 1B 6D 62 01 00 40 20 10 08 04 02 01 00 40 20 10 08 04 02 01 00 40 20 10 08 04 02 01 00 40 20 10 00 09 F7` |
+
+### Scene rename (partially decoded, 🟡)
+
+The captured scene rename has the same envelope, same action (0x000C),
+same 36-byte payload shape (bytes 0..3 = zeros, bytes 4..35 = 32-byte
+space-padded ASCII name), but a different **pidHigh** — `0x0037` in
+the one capture we have. Open question: which scene (1..4) maps to
+which pidHigh? Only one scene was renamed in the capture, so we know
+0x0037 ↔ some specific scene but not the full table.
+
+**To finish decoding:** capture three more scene renames (one for each
+of scenes 2, 3, 4). Likely pattern: four consecutive pidHighs
+0x0037..0x003A. Once confirmed, `buildSetSceneName(sceneIndex, name)`
+is a trivial variant of `buildSetPresetName`. Tracked in BK-011.
+
+### Payload packing — chunked (7 raw → 8 wire)
+
+The 36-byte payload exposed the chunked packing rule the sliding-window
+algorithm (§6b) actually follows for long payloads: **every 7 raw
+bytes restart the sliding window**, producing 8 packed bytes per full
+chunk + (R+1) packed bytes for a trailing R-byte partial chunk. A 36-
+byte payload packs as 5 full chunks (40 packed bytes) + 1 partial
+chunk (2 packed bytes) = 42 total. Small payloads (≤ 7 raw) are
+unaffected — the 4-byte float in SET_PARAM and the 4-byte slot in
+SAVE_TO_SLOT still pack as N+1 bytes. `packValueChunked` /
+`unpackValueChunked` in `src/protocol/packValue.ts` implement the
+correct chunking.
+
+### WRITE SAFETY
+
+Same as save-to-slot — `set_preset_name` is hard-gated to Z04 until
+P1-008 relaxes the restriction.
+
+---
+
 ## 6. Byte-Level Templates for Phase 1 Commands 🟡
 
 All payloads below are **Axe-Fx II/AX8-derived guesses** for AM4. Expected

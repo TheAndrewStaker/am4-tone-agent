@@ -41,6 +41,7 @@ import {
   buildSaveToSlot,
   buildSetBlockType,
   buildSetParam,
+  buildSetPresetName,
   isWriteEcho,
 } from '../protocol/setParam.js';
 import {
@@ -584,6 +585,67 @@ server.registerTool('save_to_slot', {
         `The save-command ack shape isn't fully decoded, so the tool doesn't ` +
         `assert success — verify by navigating to the slot on the AM4 and ` +
         `confirming the expected layout/params are now there.\n` +
+        `Sent (${bytes.length}B): ${toHex(bytes)}\n` +
+        `All inbound SysEx during the ${WRITE_ECHO_TIMEOUT_MS} ms window:\n` +
+        formatCaptured(),
+    }],
+  };
+});
+
+server.registerTool('set_preset_name', {
+  description: [
+    'Rename the preset stored in a specific slot. Names can be up to 32',
+    'ASCII-printable characters; shorter names are space-padded on the',
+    'wire (AM4 convention). Unlike set_param/apply_preset, this tool',
+    'targets a stored slot directly — it is the "save a preset with a',
+    'name" complement to save_to_slot.',
+    'WRITE SAFETY: hard-gated to slot "Z04" during reverse-engineering,',
+    'same rules as save_to_slot. The gate lifts once factory-preset',
+    'safety classification (P1-008) ships.',
+    'It\'s not yet confirmed whether rename persists on its own or needs',
+    'a subsequent save_to_slot call — verify on the AM4 display after',
+    'calling. Scene renames use a separate command and are a',
+    'follow-up session (BK-011).',
+  ].join(' '),
+  inputSchema: {
+    slot: z.string().describe(
+      'AM4 slot name. Currently only "Z04" is accepted. Format: bank letter A..Z + sub-slot 01..04.',
+    ),
+    name: z.string().max(32).describe(
+      'New preset name, up to 32 ASCII-printable characters. Shorter names are space-padded to 32 on the wire.',
+    ),
+  },
+}, async ({ slot, name }) => {
+  const normalized = slot.trim().toUpperCase();
+  if (normalized !== SCRATCH_SLOT) {
+    throw new Error(
+      `set_preset_name is hard-gated to "${SCRATCH_SLOT}" during reverse-engineering (got "${slot}"). ` +
+      `Renaming any other slot would clobber factory or user preset names. ` +
+      `This restriction will be lifted once factory-preset safety classification ships (backlog P1-008).`,
+    );
+  }
+  const slotIndex = parseSlotName(normalized);
+  const bytes = buildSetPresetName(slotIndex, name);
+  const conn = ensureMidi();
+  const captured: number[][] = [];
+  const unsubscribe = conn.onMessage((msg) => {
+    if (msg[0] === 0xf0) captured.push([...msg]);
+  });
+  conn.send(bytes);
+  await new Promise<void>((resolve) => setTimeout(resolve, WRITE_ECHO_TIMEOUT_MS));
+  unsubscribe();
+  const formatCaptured = (): string => {
+    if (captured.length === 0) return '  (none)';
+    return captured.map((m, i) => `  [${i}] (${m.length}B) ${toHex(m)}`).join('\n');
+  };
+  return {
+    content: [{
+      type: 'text',
+      text:
+        `Sent rename: slot ${formatSlotName(slotIndex)} → "${name}". The rename-command ` +
+        `ack shape isn't fully decoded; verify by viewing the slot name on the AM4 ` +
+        `or in AM4-Edit. If the name didn't stick, try calling save_to_slot ` +
+        `afterward — it's not yet confirmed whether rename persists on its own.\n` +
         `Sent (${bytes.length}B): ${toHex(bytes)}\n` +
         `All inbound SysEx during the ${WRITE_ECHO_TIMEOUT_MS} ms window:\n` +
         formatCaptured(),

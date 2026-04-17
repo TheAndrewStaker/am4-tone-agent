@@ -12,7 +12,7 @@
  */
 
 import { fractalChecksum } from './checksum.js';
-import { packFloat32LE, packValue } from './packValue.js';
+import { packFloat32LE, packValue, packValueChunked } from './packValue.js';
 import { KNOWN_PARAMS, encode, type ParamKey } from './params.js';
 
 export const AM4_MODEL_ID = 0x15;
@@ -23,6 +23,11 @@ const FUNC_PARAM_RW = 0x01;
 
 const ACTION_WRITE = 0x0001;
 const ACTION_SAVE_TO_SLOT = 0x001b;
+const ACTION_RENAME = 0x000c;
+
+const PRESET_NAME_BYTES = 32;
+const RENAME_PID_LOW = 0x00ce;
+const RENAME_PRESET_PID_HIGH = 0x000b;
 
 function encode14(n: number): [number, number] {
   if (n < 0 || n > 0x3fff) throw new Error(`14-bit value out of range: ${n}`);
@@ -178,6 +183,63 @@ export function buildSaveToSlot(slotIndex: number): number[] {
     ...encode14(ACTION_SAVE_TO_SLOT),   // action = 0x001B
     ...encode14(0x0000),                // hdr3
     ...encode14(raw.length),            // hdr4 = 4 (raw byte count, pre-pack)
+    ...packed,
+  ];
+  const head = [SYSEX_START, ...FRACTAL_MFR, ...body];
+  return [...head, fractalChecksum(head), SYSEX_END];
+}
+
+/**
+ * Build a RENAME-PRESET command that sets the name of the preset stored
+ * at `slotIndex`. Shares the block-slot register (pidLow=0x00CE) but
+ * with pidHigh=0x000B and a new action byte (0x000C).
+ *
+ * Payload is 36 raw bytes:
+ *   [0..3]   uint32 LE slot index (same encoding as save-to-slot)
+ *   [4..35]  32-byte ASCII name, null-padded. Names longer than 32
+ *            chars throw; shorter names are zero-padded to 32.
+ *
+ * Decoded Session 19 from `session-20-rename-preset.pcapng` — see
+ * SYSEX-MAP §6e. Byte-exact golden in `verify-msg`.
+ *
+ * WRITE SAFETY: like save-to-slot, this writes to a specific slot and
+ * can clobber user presets. Callers should gate to Z04 during RE.
+ */
+export function buildSetPresetName(slotIndex: number, name: string): number[] {
+  if (!Number.isInteger(slotIndex) || slotIndex < 0 || slotIndex > 103) {
+    throw new Error(`Slot index must be integer 0..103, got ${slotIndex}.`);
+  }
+  if (name.length > PRESET_NAME_BYTES) {
+    throw new Error(`Preset name must be ≤ ${PRESET_NAME_BYTES} ASCII chars, got ${name.length}: "${name}".`);
+  }
+  // ASCII-only guard — the AM4 displays a limited character set; being
+  // strict here surfaces problems early instead of writing unrenderable
+  // codepoints to the device.
+  for (let i = 0; i < name.length; i++) {
+    const c = name.charCodeAt(i);
+    if (c < 0x20 || c > 0x7e) {
+      throw new Error(`Preset name contains non-ASCII-printable char 0x${c.toString(16)} at position ${i}: "${name}".`);
+    }
+  }
+  const raw = new Uint8Array(4 + PRESET_NAME_BYTES);
+  new DataView(raw.buffer).setUint32(0, slotIndex, true);
+  // AM4 names are space-padded (0x20), not null-padded. Confirmed by
+  // decoding session-20-rename-preset (raw bytes 4+N..35 were all 0x20
+  // after the "boston" prefix).
+  for (let i = 0; i < PRESET_NAME_BYTES; i++) {
+    raw[4 + i] = i < name.length ? name.charCodeAt(i) : 0x20;
+  }
+  // 36-byte payloads need chunked (7-at-a-time) packing — see packValue.ts
+  // comment. Single-chunk packing only works up to 7 raw bytes.
+  const packed = Array.from(packValueChunked(raw));
+  const body: number[] = [
+    AM4_MODEL_ID,
+    FUNC_PARAM_RW,
+    ...encode14(RENAME_PID_LOW),
+    ...encode14(RENAME_PRESET_PID_HIGH),
+    ...encode14(ACTION_RENAME),
+    ...encode14(0x0000),                // hdr3
+    ...encode14(raw.length),            // hdr4 = 36 (raw byte count, pre-pack)
     ...packed,
   ];
   const head = [SYSEX_START, ...FRACTAL_MFR, ...body];

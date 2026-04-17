@@ -2,19 +2,20 @@
 
 > Read this file at the start of every session. It's kept up-to-date with
 > current phase, the single next action, and recent findings.
-> Last updated: **2026-04-16** (Session 19 — four protocol wins, one
-> correction, three new tools. (a) False-confirm bug triaged: AM4 wire-
-> acks every write regardless of block placement, so ack-based apply/
-> absorb detection can't work with what we currently decode (BK-008).
-> Tool language made honest. (b) Block placement cracked: pidLow=0x00CE,
-> pidHigh=0x000F..0x0012 (slots 1–4), value=block pidLow as float32.
-> (c) Off-by-one corrected after hardware test (BLOCK_SLOT_PID_HIGH_BASE
-> 0x0010 → 0x000F). Block placement hardware-verified end-to-end.
-> (d) `apply_preset` MCP tool collapses placement + params into a single
-> call. (e) **Save-to-slot decoded** (§6d): function=0x01, pidLow=pidHigh=0,
-> action=0x001B, payload=uint32 LE slot index. `save_to_slot` MCP tool
-> added, hard-gated to Z04 during RE (P1-008 will relax). Server now
-> exposes **8 tools**. 20/20 verify-msg, 8/8 verify-echo.)
+> Last updated: **2026-04-16** (Session 19 — five protocol wins, one
+> correction, four new tools. (a) Ack triage: AM4 wire-acks all writes
+> regardless of block placement (BK-008). Tool language made honest.
+> (b) Block placement cracked (§6c). (c) Off-by-one corrected after
+> hardware test. Block placement hardware-verified end-to-end. (d)
+> `apply_preset` MCP tool. (e) Save-to-slot decoded (§6d). (f) **Preset
+> rename decoded** (§6e): same register/action as scene rename; 36-byte
+> payload = 4-byte slot + 32-byte ASCII space-padded name. `set_preset_
+> name` MCP tool added, Z04-gated. Scene rename decoded down to pidHigh
+> 0x0037 for ONE captured scene; the 1..4 → pidHigh map needs 3 more
+> captures (BK-011). (g) Packing algorithm clarified: long payloads use
+> chunked 7→8 encoding; `packValueChunked` / `unpackValueChunked`
+> added. Server now exposes **9 tools**. 21/21 verify-msg, 8/8
+> verify-echo.)
 
 ---
 
@@ -32,7 +33,37 @@ float32. One open question remains before the IR can cover full presets:
 
 ## The single next action
 
-### Test `save_to_slot` live — round-trip a built preset via Z04
+### Hardware-test `set_preset_name` and confirm whether rename persists
+
+Session 19 (cont.) decoded preset rename: same register as block
+placement (pidLow=0x00CE), new pidHigh=0x000B, new action=0x000C,
+36-byte payload = 4-byte slot + 32-byte space-padded ASCII name.
+Byte-exact golden match against the captured rename of Z04 to "boston".
+
+What needs hardware verification:
+
+1. Restart Claude Desktop (picks up `set_preset_name`; 9 tools now).
+2. Build a preset on Z04 via `apply_preset`.
+3. Ask Claude to *"rename Z04 to <something distinctive>"*. Tool sends
+   the rename; no audible change.
+4. On the AM4, navigate away from Z04 and back. Check the slot name.
+   Did the new name stick? Options:
+   - **Name changed on display immediately and persists through
+     navigation:** rename is atomic — persists on its own.
+   - **Name changed on display but reverts after navigation:** rename
+     only writes the working buffer; need to call `save_to_slot`
+     afterward to persist.
+   - **Name didn't change at all:** rename command requires a
+     different pidHigh or payload convention we missed.
+5. If rename alone doesn't persist, the natural UX is to add a combined
+   `save_preset` tool that does `save_to_slot` + `set_preset_name` in
+   one call. Straightforward once we know the ordering.
+
+Scene rename decoding is the follow-up: capture renames for scenes 2,
+3, 4 (we have scene 1's capture), then add `set_scene_name(sceneIndex,
+name)` with the pidHigh-per-scene map. Tracked in BK-011.
+
+### Earlier follow-up — round-trip a built preset via Z04
 
 Session 19 shipped `save_to_slot` (Z04-gated) after decoding the save
 command from `session-18-save-preset-z04.pcapng`. The save-ack shape
@@ -231,6 +262,29 @@ Sessions 15–19 (current) are kept here for fast orientation.
         P1-008 (factory preset safety classification) arrives.
         Save-command ack shape still unresolved — the tool dumps all
         inbound SysEx in the 300 ms window instead of asserting.
+
+        **19g (preset rename decoded + tool; scene rename partial):**
+        `session-20-rename-preset.pcapng` produced a 60-byte unique
+        command: function=0x01, pidLow=0x00CE (same block-slot
+        register), pidHigh=0x000B, **action=0x000C**, hdr4=0x0024
+        (36-byte raw payload). Payload = 4-byte slot index + 32-byte
+        ASCII name, **space-padded** (0x20) not null-padded. Session
+        `session-20-rename-scene.pcapng` shares the envelope / action
+        / payload structure with a different pidHigh (0x0037) and the
+        slot-index field zeroed — scenes are scoped to the working
+        buffer. Only one scene captured, so scene-index → pidHigh
+        mapping needs three more captures (BK-011). `buildSetPreset-
+        Name` + golden in `verify-msg` (21/21). `set_preset_name` MCP
+        tool is the 9th, hard-gated to Z04.
+
+        **19h (packing bug surfaced):** The 36-byte name payload didn't
+        match a single-pass `packValue` call because the sliding-window
+        algorithm actually **restarts every 7 raw bytes** — chunked
+        7→8 encoding. Small payloads (≤ 7 raw) were already one chunk,
+        so every earlier test passed by coincidence. Added
+        `packValueChunked` / `unpackValueChunked`; existing code paths
+        are unaffected (all use ≤ 7 raw bytes per value). Updated
+        SYSEX-MAP §6b (and new §6e) with the correct chunking rule.
 
 00000. **Session 18 — write-echo confirmation + 11 blocks confirmed.**
        Three sub-phases:

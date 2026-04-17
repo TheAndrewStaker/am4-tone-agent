@@ -95,6 +95,7 @@ async function main(): Promise<void> {
     'set_block_type',
     'set_param',
     'set_params',
+    'set_preset_name',
   ];
   for (const exp of expected) {
     if (!names.includes(exp)) throw new Error(`missing tool: ${exp}`);

@@ -47,6 +47,59 @@ export function packFloat32LE(value: number): Uint8Array {
   return packValue(new Uint8Array(buf));
 }
 
+/**
+ * Chunked variant of `packValue` for payloads > 7 raw bytes. The sliding
+ * window in `packValue` restarts every 7 raw bytes — i.e. 7 raw → 8 packed,
+ * repeated. A trailing partial chunk of N<7 bytes produces N+1 packed
+ * bytes the same way a full standalone `packValue` call would.
+ *
+ * For ≤ 7 raw bytes this is identical to `packValue`, so small payloads
+ * (the 4-byte float used by SET_PARAM, the 4-byte slot uint used by
+ * SAVE_TO_SLOT) are unaffected. Needed for 36-byte preset-name payloads
+ * decoded Session 19; confirmed byte-exact against the captured rename.
+ */
+export function packValueChunked(raw: Uint8Array): Uint8Array {
+  const CHUNK = 7;
+  // Full 7-byte chunks → 8 packed bytes each; trailing partial chunk of
+  // length R → R+1 packed bytes.
+  const fullChunks = Math.floor(raw.length / CHUNK);
+  const remainder = raw.length % CHUNK;
+  const outLen = fullChunks * 8 + (remainder > 0 ? remainder + 1 : 0);
+  const out = new Uint8Array(outLen);
+  let outPos = 0;
+  for (let offset = 0; offset < raw.length; offset += CHUNK) {
+    const end = Math.min(offset + CHUNK, raw.length);
+    const chunkPacked = packValue(raw.subarray(offset, end));
+    out.set(chunkPacked, outPos);
+    outPos += chunkPacked.length;
+  }
+  return out;
+}
+
+/**
+ * Inverse of `packValueChunked`: decode a chunked-packed wire buffer
+ * back into raw bytes. `rawLen` is the known total raw byte count
+ * (typically carried in hdr4 of the command the wire payload came from).
+ */
+export function unpackValueChunked(wire: Uint8Array, rawLen: number): Uint8Array {
+  const CHUNK_RAW = 7;
+  const CHUNK_WIRE = 8;
+  const out = new Uint8Array(rawLen);
+  let rawPos = 0;
+  let wirePos = 0;
+  while (rawPos < rawLen) {
+    const remainingRaw = rawLen - rawPos;
+    const thisChunkRaw = Math.min(CHUNK_RAW, remainingRaw);
+    const thisChunkWire = thisChunkRaw === CHUNK_RAW ? CHUNK_WIRE : thisChunkRaw + 1;
+    const chunk = wire.subarray(wirePos, wirePos + thisChunkWire);
+    const unpacked = unpackValue(chunk, thisChunkRaw);
+    out.set(unpacked, rawPos);
+    rawPos += thisChunkRaw;
+    wirePos += thisChunkWire;
+  }
+  return out;
+}
+
 /** Inverse of packFloat32LE — decode 5 wire septets back to a float. */
 export function unpackFloat32LE(wire: Uint8Array): number {
   if (wire.length !== 5) {
