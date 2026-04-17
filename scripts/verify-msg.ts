@@ -2,9 +2,15 @@
  * Verify built SET_PARAM messages match captured wire bytes byte-for-byte.
  * Run:  npx tsx scripts/verify-msg.ts
  */
-import { buildSetBlockType, buildSetFloatParam, buildSetParam } from '../src/protocol/setParam.js';
+import {
+  buildSaveToSlot,
+  buildSetBlockType,
+  buildSetFloatParam,
+  buildSetParam,
+} from '../src/protocol/setParam.js';
 import { KNOWN_PARAMS } from '../src/protocol/params.js';
 import { BLOCK_TYPE_VALUES } from '../src/protocol/blockTypes.js';
+import { parseSlotName } from '../src/protocol/slots.js';
 
 function hex(arr: number[]): string {
   return arr.map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -110,6 +116,11 @@ const cases: { label: string; built: number[]; expected: string }[] = [
     label: 'buildSetBlockType(4, amp) — matches session-18 block-add-none-to-amp',
     built: buildSetBlockType(4, BLOCK_TYPE_VALUES.amp),
     expected: 'f000017415014e01120001000000040000000d041050f7',
+  },
+  {
+    label: 'buildSaveToSlot(Z04) — matches session-18 save-preset-z04',
+    built: buildSaveToSlot(parseSlotName('Z04')),
+    expected: 'f00001741501000000001b000000040033400000007df7',
   },
 ];
 

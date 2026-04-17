@@ -12,7 +12,7 @@
  */
 
 import { fractalChecksum } from './checksum.js';
-import { packFloat32LE } from './packValue.js';
+import { packFloat32LE, packValue } from './packValue.js';
 import { KNOWN_PARAMS, encode, type ParamKey } from './params.js';
 
 export const AM4_MODEL_ID = 0x15;
@@ -22,6 +22,7 @@ const FRACTAL_MFR = [0x00, 0x01, 0x74] as const;
 const FUNC_PARAM_RW = 0x01;
 
 const ACTION_WRITE = 0x0001;
+const ACTION_SAVE_TO_SLOT = 0x001b;
 
 function encode14(n: number): [number, number] {
   if (n < 0 || n > 0x3fff) throw new Error(`14-bit value out of range: ${n}`);
@@ -143,6 +144,44 @@ export function buildSetBlockType(
     },
     blockTypeValue,
   );
+}
+
+/**
+ * Build a SAVE-TO-SLOT command that persists the AM4's current working
+ * buffer to preset slot `slotIndex` (0..103, A01..Z04). The command uses
+ * the PARAM_RW function (0x01) with a fresh action byte — 0x001B — which
+ * appears only in save captures. pidLow/pidHigh are both 0x0000 (not a
+ * block/param address; the "target" is the slot itself, carried in the
+ * payload).
+ *
+ * Payload = 4-byte uint32 LE slot index (Z04 = 103 = 0x67 → `67 00 00 00`
+ * raw, `33 40 00 00 00` after the 8-to-7 septet pack).
+ *
+ * Decoded Session 19 from `session-18-save-preset-z04.pcapng`. Byte-exact
+ * golden lives in `verify-msg`.
+ *
+ * WRITE SAFETY: overwrites the target slot. Only Z04 is designated scratch
+ * during RE — callers are responsible for gating this.
+ */
+export function buildSaveToSlot(slotIndex: number): number[] {
+  if (!Number.isInteger(slotIndex) || slotIndex < 0 || slotIndex > 103) {
+    throw new Error(`Slot index must be integer 0..103, got ${slotIndex}.`);
+  }
+  const raw = new Uint8Array(4);
+  new DataView(raw.buffer).setUint32(0, slotIndex, true);
+  const packed = Array.from(packValue(raw));
+  const body: number[] = [
+    AM4_MODEL_ID,
+    FUNC_PARAM_RW,
+    ...encode14(0x0000),                // pidLow = 0 (no block/param — save is a global action)
+    ...encode14(0x0000),                // pidHigh = 0
+    ...encode14(ACTION_SAVE_TO_SLOT),   // action = 0x001B
+    ...encode14(0x0000),                // hdr3
+    ...encode14(raw.length),            // hdr4 = 4 (raw byte count, pre-pack)
+    ...packed,
+  ];
+  const head = [SYSEX_START, ...FRACTAL_MFR, ...body];
+  return [...head, fractalChecksum(head), SYSEX_END];
 }
 
 /**

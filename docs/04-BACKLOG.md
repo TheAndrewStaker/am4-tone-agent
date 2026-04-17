@@ -309,6 +309,64 @@ without installing Node, a C++ toolchain, or editing JSON by hand. See
 - Keep implementation minimal — a GitHub Releases poll is enough for v1
 - ACCEPTANCE: a v0.1.1 build can prompt v0.1.0 users to upgrade
 
+### P5-008 MCPB bundle — one-click install manifest
+- **Context:** Anthropic's MCPB (MCP Bundle) format bundles an MCP server
+  + node_modules + a manifest.json so users install by double-clicking a
+  `.mcpb` file in Claude Desktop. Supersedes the ad-hoc `.exe` + manual
+  JSON-edit path for end users. See spec:
+  https://github.com/modelcontextprotocol/mcpb/blob/main/MANIFEST.md
+- **Scope:**
+  1. Write `manifest.json` describing server name, version, entry point
+     (Node + `src/server/index.ts` → compiled JS), required tools, and
+     user-facing config fields.
+  2. Keep current auto-detection (name-substring match in
+     `src/protocol/midi.ts`) as the default path — no user config needed
+     for the typical case. Expose `midi_port_name` as an **optional**
+     manifest config field only as an override for users with multiple
+     Fractal devices, a port the auto-detect can't match (rare rename),
+     or users running the server against a virtual MIDI bridge. The UI
+     should be empty/"(auto-detect)" by default, not a required pick.
+  3. Pin all dependencies to exact versions (`package.json` `"dependencies"`
+     with `x.y.z` not `^x.y.z`). `.mcpb` ships `node_modules` and a
+     transitive bump can brick installs.
+  4. GitHub Actions workflow: on tag, run `mcpb pack`, attach the
+     resulting `.mcpb` to a GitHub Release.
+- **Relation to P5-001..P5-006:** MCPB is one realization of the packaging
+  goal. May replace P5-002 (`.exe`) for Claude-Desktop-first distribution;
+  the signed `.exe` is still useful for users running the agent outside
+  Claude Desktop.
+
+### P5-009 Pre-release ergonomics
+- **Context:** small polish items that block feeling "released-quality"
+  even if all protocol/packaging work is done. Drawn from Claude Desktop's
+  session-19 feedback.
+- **Items:**
+  1. `list_midi_ports` MCP tool — list every MIDI port the server sees,
+     directional, with names, so users can pick one by name and we can
+     diagnose "AM4 not found" reports remotely.
+  2. Graceful "AM4 not connected" error — first tool call should return
+     a clear message (USB? driver? port auto-detect missed the device?)
+     instead of a stack trace. List the ports actually seen and point at
+     the `midi_port_name` override (P5-008) as the escape hatch. Extend
+     the honesty already present in wire-ack language.
+  3. Startup-banner log of detected ports to stderr (already present,
+     just confirm it matches what `list_midi_ports` would return).
+  4. README with install paths per client (Claude Desktop double-click,
+     Claude Code `claude mcp add`, raw JSON config) and a "confirm it
+     works" smoke flow ("ask Claude to place a compressor, watch AM4
+     display update").
+  5. Guardrail on `save_to_slot` — the Z04-only gate is P1-008's job to
+     relax; confirm the error message points users at the right escape
+     hatch once that ships.
+
+### P5-010 License and trademark hygiene
+- MIT or Apache-2.0 LICENSE file at the repo root.
+- README disclaimer: unaffiliated community tool; "Fractal Audio" and
+  "AM4" are Fractal's trademarks; this project controls a device the
+  user owns via documented SysEx. Explicit non-endorsement language.
+- Review any branding (logo, tool names, package name) for implicit
+  endorsement cues before pushing to npm / a public release.
+
 ---
 
 ## BACKLOG (Future / Unscheduled)
@@ -371,6 +429,33 @@ without installing Node, a C++ toolchain, or editing JSON by hand. See
 - Out of scope for MVP — parked here so the architecture can leave
   room for it (keep the MCP server transport pluggable, don't
   hardcode stdio-only assumptions).
+
+### BK-009 `get_block_layout` — read current working-buffer chain
+- **Context:** Claude Desktop suggested (Session 19) that additive tweaks
+  are painful without a way to see what's currently on the unit. `apply_preset`
+  currently overwrites, but a user asking *"add a delay before the reverb"*
+  needs to know what's already there.
+- **Feasibility:** cheap. The block-slot register family (pidLow=0x00CE,
+  pidHigh=0x000F..0x0012) is decoded for writes. Reading back the same
+  addresses should return the current block's pidLow as a float32 — no
+  READ-response decoding needed if the read echo shape is the same.
+- **Scope:** MCP tool `get_block_layout()` returning `[{position, block_type}]`
+  for slots 1..4. Probe on hardware first to confirm the 0x0D READ action
+  on pidLow=0xCE returns a parseable value at a fixed offset (unlike
+  parameter reads — see BK-008).
+- **Unlock:** additive edits, "what's in slot 2?" queries, apply_preset
+  can diff before writing instead of clobbering.
+
+### BK-010 Scene support in `apply_preset`
+- **Context:** AM4 has 4 scenes per preset for per-scene bypass +
+  channel assignment. "Make this louder for the solo" is natural.
+- **Captures:** `session-18-switch-scene.pcapng` exists, not decoded.
+- **Scope:** decode the scene-switch protocol; extend `apply_preset`
+  shape to take `scenes: [{ index: 1..4, bypass?: [...], channels?: {...} }]`;
+  add `set_scene(index)` MCP tool for live scene changes.
+- **Prereqs:** per-block channel pidHighs need one capture each to
+  confirm (we extrapolated from amp.channel in Session 08 but only
+  amp is verified).
 
 ### BK-008 Decode the 40-byte write-ack payload (apply vs absorb discriminator)
 - **Context:** every AM4 write produces a 64-byte ack with a 40-byte param

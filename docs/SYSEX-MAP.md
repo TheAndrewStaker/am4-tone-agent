@@ -398,6 +398,51 @@ if block placement without the 0x0017 burst misbehaves on hardware.
 
 ---
 
+## 6d. Save-to-Slot Command 🟢
+
+**Cracked Session 19** from `session-18-save-preset-z04.pcapng`. Persists
+the AM4's current working buffer to one of the 104 preset slots. Uses
+the same PARAM_RW function (0x01) as regular param writes, but with a
+new action byte and pidLow/pidHigh of zero.
+
+### Address
+
+- **function** `0x01` (PARAM_RW).
+- **pidLow** `0x0000`, **pidHigh** `0x0000` — save is a global action,
+  not addressed to any block or parameter.
+- **action** `0x001B` — dedicated save-to-slot action. Not observed in
+  any other capture on disk.
+
+### Payload
+
+4-byte uint32 little-endian **slot index**, 0..103, packed with the same
+8-to-7 septet encoder used for float payloads (§6b). Slot naming maps:
+A01 → 0, A02 → 1, …, Z04 → 103. See `src/protocol/slots.ts` for the
+parser/formatter.
+
+### Captured golden (byte-exact in `verify-msg`)
+
+| Capture | Built by | Wire (with checksum) |
+|---------|----------|----------------------|
+| Save to Z04 (slot 103) | `buildSaveToSlot(103)` | `F0 00 01 74 15 01 00 00 00 00 1B 00 00 00 04 00 33 40 00 00 00 7D F7` |
+
+### Unresolved — save-ack shape
+
+The save command produces a flurry of inbound SysEx in the 300 ms after
+the send, but we haven't separated the save-specific ack from the
+ambient polling/status traffic AM4-Edit is already running. The
+`save_to_slot` MCP tool captures all inbound SysEx during the window
+for future RE rather than asserting success on any particular shape.
+
+### WRITE SAFETY
+
+Saving overwrites the target slot. Only **Z04** (the designated scratch
+slot) is safe to write during RE — every other slot holds factory
+content or user work. The `save_to_slot` MCP tool hard-rejects any other
+slot until factory-preset safety classification lands (P1-008).
+
+---
+
 ## 6. Byte-Level Templates for Phase 1 Commands 🟡
 
 All payloads below are **Axe-Fx II/AX8-derived guesses** for AM4. Expected

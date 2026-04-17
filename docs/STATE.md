@@ -2,20 +2,19 @@
 
 > Read this file at the start of every session. It's kept up-to-date with
 > current phase, the single next action, and recent findings.
-> Last updated: **2026-04-16** (Session 19 — three protocol wins, one
-> correction, one new tool. (a) False-confirm bug triaged: AM4 wire-acks
-> every write regardless of block placement, so ack-based apply/absorb
-> detection can't work with what we currently decode (BK-008). Tool
-> language made honest. (b) Block placement cracked: pidLow=0x00CE,
-> pidHigh=0x000F..0x0012 (slots 1–4), value=block pidLow as float32 —
-> see SYSEX-MAP §6c. (c) Off-by-one corrected after hardware test
-> (`BLOCK_SLOT_PID_HIGH_BASE` 0x0010 → 0x000F), pidHigh 0x0013 flagged
-> invalid (observed to clobber an unrelated slot). Block placement then
-> hardware-verified end-to-end: one-shot preset build (compressor/amp/
-> delay/reverb in slots 1–4 + amp.gain + reverb.mix) landed audibly.
-> (d) New MCP tool `apply_preset` collapses placement + params into a
-> single call. Server now exposes **7 tools**. 19/19 verify-msg, 8/8
-> verify-echo.)
+> Last updated: **2026-04-16** (Session 19 — four protocol wins, one
+> correction, three new tools. (a) False-confirm bug triaged: AM4 wire-
+> acks every write regardless of block placement, so ack-based apply/
+> absorb detection can't work with what we currently decode (BK-008).
+> Tool language made honest. (b) Block placement cracked: pidLow=0x00CE,
+> pidHigh=0x000F..0x0012 (slots 1–4), value=block pidLow as float32.
+> (c) Off-by-one corrected after hardware test (BLOCK_SLOT_PID_HIGH_BASE
+> 0x0010 → 0x000F). Block placement hardware-verified end-to-end.
+> (d) `apply_preset` MCP tool collapses placement + params into a single
+> call. (e) **Save-to-slot decoded** (§6d): function=0x01, pidLow=pidHigh=0,
+> action=0x001B, payload=uint32 LE slot index. `save_to_slot` MCP tool
+> added, hard-gated to Z04 during RE (P1-008 will relax). Server now
+> exposes **8 tools**. 20/20 verify-msg, 8/8 verify-echo.)
 
 ---
 
@@ -33,13 +32,29 @@ float32. One open question remains before the IR can cover full presets:
 
 ## The single next action
 
-### Test `apply_preset` live — one-call full-preset build
+### Test `save_to_slot` live — round-trip a built preset via Z04
 
-Block placement now hardware-verified end-to-end (Session 19: compressor
-→ slot 1, amp/delay/reverb → slots 2/3/4, then `set_params` for gain and
-mix all landed audibly). Session 19 also shipped the `apply_preset` MCP
-tool that collapses placement + params into a single call. 7 tools now
-register on the server.
+Session 19 shipped `save_to_slot` (Z04-gated) after decoding the save
+command from `session-18-save-preset-z04.pcapng`. The save-ack shape
+isn't decoded, so success is confirmed by reloading the slot on the
+hardware.
+
+1. Restart Claude Desktop (picks up `save_to_slot`; 8 tools now).
+2. Build a preset with `apply_preset` (e.g. *"build a clean preset with
+   compressor, amp, delay, reverb"*).
+3. Ask *"save this to Z04"*. Tool should wire-ack; no audible change.
+4. On the AM4, navigate away from Z04 (e.g. load A01) then back to Z04.
+   The saved layout + params should reappear. If they don't, the save
+   didn't persist — grab the inbound-SysEx log from the tool response
+   and we'll compare against AM4-Edit's save traffic.
+5. Try *"save this to A05"* or similar → expect a clear rejection
+   error ("hard-gated to Z04").
+
+### Earlier follow-up (still valid) — `apply_preset` build
+
+The initial `apply_preset` hardware test already passed (Session 19:
+compressor → slot 1, amp/delay/reverb → 2/3/4, amp.gain + reverb.mix
+both audibly landed). No action needed.
 
 1. Restart Claude Desktop to pick up `apply_preset`.
 2. Load **Z04**, clear blocks on the device.
@@ -205,6 +220,17 @@ Sessions 15–19 (current) are kept here for fast orientation.
         name typo, duplicate position) before sending any MIDI. Returns
         a per-write ack summary same shape as `set_params`. 7th MCP
         tool registered.
+
+        **19f (save-to-slot decoded + tool):** `session-18-save-preset-
+        z04.pcapng` produced one unique command: function=0x01,
+        pidLow=pidHigh=0x0000, **action=0x001B**, payload = 4-byte
+        uint32 LE slot index (Z04 → 103 → `67 00 00 00` raw →
+        `33 40 00 00 00` packed). `buildSaveToSlot` + captured golden
+        land in `verify-msg` (20/20). `save_to_slot` MCP tool is the
+        8th, hard-gated to Z04 per CLAUDE.md write-safety rules until
+        P1-008 (factory preset safety classification) arrives.
+        Save-command ack shape still unresolved — the tool dumps all
+        inbound SysEx in the 300 ms window instead of asserting.
 
 00000. **Session 18 — write-echo confirmation + 11 blocks confirmed.**
        Three sub-phases:

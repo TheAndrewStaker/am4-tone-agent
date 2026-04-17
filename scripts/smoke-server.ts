@@ -91,6 +91,7 @@ async function main(): Promise<void> {
     'list_block_types',
     'list_enum_values',
     'list_params',
+    'save_to_slot',
     'set_block_type',
     'set_param',
     'set_params',

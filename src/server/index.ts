@@ -37,13 +37,19 @@ import {
   type Param,
   type ParamKey,
 } from '../protocol/params.js';
-import { buildSetBlockType, buildSetParam, isWriteEcho } from '../protocol/setParam.js';
+import {
+  buildSaveToSlot,
+  buildSetBlockType,
+  buildSetParam,
+  isWriteEcho,
+} from '../protocol/setParam.js';
 import {
   BLOCK_NAMES_BY_VALUE,
   BLOCK_TYPE_VALUES,
   resolveBlockType,
   type BlockTypeName,
 } from '../protocol/blockTypes.js';
+import { formatSlotName, parseSlotName } from '../protocol/slots.js';
 import { connectAM4, type AM4Connection, toHex } from '../protocol/midi.js';
 
 /**
@@ -54,6 +60,14 @@ import { connectAM4, type AM4Connection, toHex } from '../protocol/midi.js';
  * the write succeeded.
  */
 const WRITE_ECHO_TIMEOUT_MS = 300;
+
+/**
+ * Scratch slot for reverse-engineering writes. Per CLAUDE.md the save-to-
+ * slot command is hard-gated to this slot until we have factory-preset
+ * safety classification (backlog P1-008) — writing to any other slot
+ * would clobber user presets or factory content.
+ */
+const SCRATCH_SLOT = 'Z04';
 
 // -- MIDI lazy-init ---------------------------------------------------------
 
@@ -515,6 +529,65 @@ server.registerTool('apply_preset', {
     : `Applied preset: ${prepared.length} writes, ${acked} acked, ${unacked} un-acked (unusual — check USB).`;
   return {
     content: [{ type: 'text', text: `${header}\n${lines.join('\n')}` }],
+  };
+});
+
+server.registerTool('save_to_slot', {
+  description: [
+    'Persist the AM4\'s current working-buffer preset (everything laid out',
+    'via apply_preset / set_block_type / set_param) into a preset slot so',
+    'it survives power-cycling. Slot naming is the AM4\'s native format:',
+    'bank letter A..Z + sub-slot 01..04 (e.g. "A01", "M03", "Z04"), 104',
+    'total slots.',
+    'WRITE SAFETY (active during reverse-engineering): this tool is hard-',
+    'gated to slot "Z04" (the designated scratch slot). Attempts to save',
+    'elsewhere are rejected with a clear error. The gate will be relaxed',
+    'once factory-preset safety classification is in place (backlog P1-008).',
+    'The save-command ack shape is not fully decoded — the tool just sends',
+    'the command and reports any inbound SysEx in the 300 ms window for',
+    'diagnostic visibility. Verify the save took effect by loading the slot',
+    'on the AM4 and confirming the expected layout / params.',
+  ].join(' '),
+  inputSchema: {
+    slot: z.string().describe(
+      'AM4 slot name. Currently only "Z04" is accepted (scratch slot). Format: bank letter A..Z + sub-slot 01..04.',
+    ),
+  },
+}, async ({ slot }) => {
+  const normalized = slot.trim().toUpperCase();
+  if (normalized !== SCRATCH_SLOT) {
+    throw new Error(
+      `save_to_slot is hard-gated to "${SCRATCH_SLOT}" during reverse-engineering (got "${slot}"). ` +
+      `Writing to any other slot would clobber factory or user presets. ` +
+      `This restriction will be lifted once factory-preset safety classification ships (backlog P1-008).`,
+    );
+  }
+  const slotIndex = parseSlotName(normalized);
+  const bytes = buildSaveToSlot(slotIndex);
+  const conn = ensureMidi();
+  const captured: number[][] = [];
+  const unsubscribe = conn.onMessage((msg) => {
+    if (msg[0] === 0xf0) captured.push([...msg]);
+  });
+  conn.send(bytes);
+  await new Promise<void>((resolve) => setTimeout(resolve, WRITE_ECHO_TIMEOUT_MS));
+  unsubscribe();
+  const formatCaptured = (): string => {
+    if (captured.length === 0) return '  (none)';
+    return captured.map((m, i) => `  [${i}] (${m.length}B) ${toHex(m)}`).join('\n');
+  };
+  return {
+    content: [{
+      type: 'text',
+      text:
+        `Sent save command for slot ${formatSlotName(slotIndex)} (index ${slotIndex}). ` +
+        `The save-command ack shape isn't fully decoded, so the tool doesn't ` +
+        `assert success — verify by navigating to the slot on the AM4 and ` +
+        `confirming the expected layout/params are now there.\n` +
+        `Sent (${bytes.length}B): ${toHex(bytes)}\n` +
+        `All inbound SysEx during the ${WRITE_ECHO_TIMEOUT_MS} ms window:\n` +
+        formatCaptured(),
+    }],
   };
 });
 
