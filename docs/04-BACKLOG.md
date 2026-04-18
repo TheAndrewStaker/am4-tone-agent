@@ -101,11 +101,113 @@ the device's own store command to persist. See `docs/DECISIONS.md`.
 - Store in `src/knowledge/<block>.ts` as structured TypeScript constants.
 - Incremental — we only need the parameters a given preset actually uses.
 
-### P1-008 Factory preset safety-classification table
-- Compute a "factory fingerprint" for each of the 104 factory preset
-  slots using the factory bank file.
-- Store as `src/safety/factory-fingerprints.ts`.
-- Used by the MCP layer's read-classify-backup-confirm-write flow.
+### P1-008 Factory preset safety-classification + release-time write gate
+- **Baseline classification work:**
+  - Compute a "factory fingerprint" for each of the 104 factory preset
+    locations using the factory bank file
+    (`samples/factory/AM4-Factory-Presets-1p01.syx`). Hash of the
+    preset's block-layout + parameter tuple should suffice — doesn't
+    need to be cryptographic, just distinguishing.
+  - Store as `src/safety/factory-fingerprints.ts` (committed, generated
+    once from the factory bank).
+  - User-preset detection: a single metadata read per location tells
+    us whether a slot is empty or populated with a user preset. Cache
+    the result in memory per server session; expire on any write to
+    that location. Cost: ~50 ms first-hit per location, ~0 ms after.
+
+- **Release-time write gate (this is the user-facing UX at public
+  launch; see LAUNCH-POST-OUTLINE.md release gate).** Drop Z04-only
+  hard-gating — Z04 is a dev-RE convention, not a public-release
+  feature. Replace with a three-tier model applied by `save_to_location`
+  and `set_preset_name`:
+
+  | Location status | Default (force=false) | force=true |
+  |---|---|---|
+  | Empty | Apply silently. No friction. | (same) |
+  | User preset | **Refuse.** Return the current preset name in the error so Claude can prompt the user. | Apply + **auto-backup first**. |
+  | Factory preset | **Refuse** with "hard warning" framing. | Apply + auto-backup first + verbose "overwrote factory B02 'Marshall JCM800'". |
+
+  Safety net: auto-backup is OUR recovery path, not a Fractal-Bot
+  redirect. Store timestamped snapshots locally (`backups/` dir,
+  gitignored); expose `restore_location(location, backup_id?)` that
+  picks the most recent by default. Factory restore is also ours —
+  read from `samples/factory/AM4-Factory-Presets-1p01.syx` when the
+  user asks to revert to factory.
+
+- **Claude-agent UX layer on top of the gate** (client-side, not
+  server-side — MCP tool stays stateless on force):
+  - Conversational recognition: *"just apply it"* / *"overwrite"* /
+    *"yes, go"* → pass `force=true` on the next call.
+  - Session-mode: *"force writes for this session"* → Claude tracks
+    `sessionForce=true` in conversation memory and passes it on every
+    subsequent call until *"stop forcing"* or a new session.
+  - Combined summary + confirmation prompt pattern (Claude formats;
+    tool supplies the data):
+
+    **Multi-location batch (P4-002 setlist, etc):**
+    ```
+    I'm about to write to 4 locations:
+      W01  [empty]      → AmbCln: Compressor → Amp → Delay → Reverb
+      W02  [ARCTIC]     → MetalLead: OD → Amp → EQ → Reverb   ⚠ overwrites user preset
+      W03  [empty]      → Funk1: Comp → Amp → Wah → Delay
+      W04  [empty]      → LeadLayer: Comp → OD → Amp → Chorus+Delay
+    Backup of W02's current state will be taken first. Apply?
+    ```
+
+    **Single-location detail (narrow edit):**
+    ```
+    W01 currently: AmbCln (Compressor → Amp → Delay → Reverb)
+    Change: set amp.gain 5.0 → 7.5 (other params unchanged)
+    Backup taken automatically. Apply?
+    ```
+
+    Block-level summary for multi-location. Parameter-level detail
+    only when the ask is a targeted single-block change. Keeps the
+    prompt scannable.
+
+- **Performance budget:**
+  - Empty-slot write: ~100 ms (cache-hit classification + write + ack).
+    No perceptible friction.
+  - Non-empty write with auto-backup: ~400 ms (classification +
+    preset dump ~300 ms + write + ack).
+  - Batch of 16 locations with backups: ~6 s. Fits the "overt batch
+    action" tolerance in CLAUDE.md's performance budget; Claude tells
+    user upfront.
+  - `force=true` skips the classification read → straight to write.
+    Power-user fast path.
+
+- **Tool surface changes** (implementation checklist):
+  - `save_to_location(location, force: boolean = false)` — drop Z04
+    hard-gate; enforce tier model.
+  - `set_preset_name(location, name, force: boolean = false)` — same.
+  - `apply_preset` unchanged — it writes to working buffer only, no
+    destructive consequence until a subsequent `save_to_location`.
+  - New `backup_location(location)` MCP tool (explicit backup; also
+    called internally during force overrides).
+  - New `restore_location(location, backup_id?)` MCP tool (replay a
+    backup onto the target).
+  - New `restore_factory(location)` MCP tool (reads from the embedded
+    factory bank; only valid for locations with factory fingerprints).
+
+- **Relation to other backlog items:**
+  - **P4-002 (setlist)** already references P1-008 as a hard prereq;
+    the summary + confirmation prompt above IS that prereq's UX.
+  - **BK-011** (naming) — `set_preset_name` currently hard-gated to
+    Z04; P1-008 relaxes it with the same tier model.
+  - **Session 21 tools** (`switch_preset`, `set_scene_name`,
+    `switch_scene`) — `switch_preset` is not destructive to stored
+    presets (loads into working buffer), so no gate. `set_scene_name`
+    is working-buffer-scoped, also no gate. `switch_scene` is
+    read-only. No changes needed for Session 21 tools at release.
+
+- **What NOT to build into P1-008:**
+  - Irreversible-action warnings for factory writes beyond the tier
+    gate — the gate itself is sufficient; don't add extra confirmation
+    modals.
+  - A GUI for backup management — CLI/chat commands are enough for
+    v1.
+  - A backup retention policy — keep all backups; revisit if disk
+    use becomes a concern.
 
 ### P1-009 Binary preset encoding — **parked**
 - Reverse-engineering the scrambled chunk bodies is off the MVP critical
