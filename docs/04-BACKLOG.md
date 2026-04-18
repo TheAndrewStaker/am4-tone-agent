@@ -841,28 +841,107 @@ reconnect_midi as a manual escape hatch.
   Harmony / FX1 / FX2 / Reverb / Delay / Looper). Closer to AM4's
   signal chain than RC-505's track model — the existing AM4 block-slot
   concept maps reasonably well, just with a different block catalog.
-- **Source of truth:** Boss VE-500 MIDI Implementation PDF.
-- **Likely easiest of the four** to get to first-useful state — the
-  signal-chain-of-effects mental model is the same as AM4's and the
-  patch count is small.
+- **Documented MIDI surface (from `VE-500_MIDI_ImpleChart_eng01_W.pdf`,
+  researched 2026-04-18):**
+  - ✅ Program Change (1–128) — patch select
+  - ✅ CC 1–31 and 64–95 — **only for parameters the user has
+    pre-assigned to a CC slot on the device itself**; typically
+    continuous params (Harmony Level, Key, Reverb Mix)
+  - ✅ Bank Select MSB (CC 0), Clock
+  - ❌ SysEx address map — **explicitly closed**: the chart says
+    *"Specifications of System Exclusive message is not opened for
+    users."* Every Boss 500-series pedal (MD-500, RV-500, DD-500,
+    DD-200, VE-500, SY-300, GT-1000) follows the same closed pattern.
+- **What this means for scope:**
+  - **Agent-useful without RE:** patch selection + tweaking whichever
+    parameters the user has manually mapped to CC on the pedal. This
+    is real value ("switch to my harmony patch, pull harmony level
+    down 20%"), but it's not deep editing.
+  - **Deep editing (effect-type swaps, routing, patch creation):**
+    requires capture-based RE of Boss Tone Studio's USB traffic —
+    same methodology as AM4, same class of effort.
+- **Strategic re-frame:** VE-500 is NOT the "easy documented win" the
+  original backlog assumed. It's a capture-based RE project. The
+  consolation is cross-device leverage — if we crack VE-500, the same
+  SysEx conventions likely apply to the rest of the 500 series and
+  the GT-1000, unlocking the entire Boss flagship line in roughly
+  one RE project's worth of effort.
 - **Unique opportunity:** harmony / pitch features are highly
   expressive from an agent interface ("set harmony to close thirds in
-  G major above the lead"). Good demo content.
+  G major above the lead"). Good demo content once deep editing
+  lands; until then, patch-change + CC is what's on the menu.
 
 ### BK-019 Roland SPD-SX support
-- **Device:** sample pad.
-- **MIDI surface:** USB-MIDI.
-- **Preset concept:** "kit". 100 user kits.
-- **Sub-element concept:** 9 pads per kit, each with assigned sample +
-  per-pad effects + pad-groups for choke behavior.
-- **Source of truth:** Roland SPD-SX MIDI Implementation PDF.
-- **Scope note:** sample management (uploading WAVs, managing the
-  internal sample bank) is explicitly OUT of scope per BK-016
-  non-goals. This device's agent value is mostly kit selection,
-  pad-level adjustments, and pad routing — not sample library work.
-- **Biggest unknown:** how much of a pad-trigger's effect chain is
-  MIDI-addressable vs only settable via Wave Manager. Need to read
-  the impl doc before committing scope.
+- **Device:** sample pad (9 onboard pads + external trigger inputs).
+- **Preset concept:** "kit" (100 kits). Each pad holds a WAVE + optional
+  SUB WAVE, per-pad mode (one-shot / loop / alternate), mute group.
+  Per-kit master FX + 2 kit FX slots.
+- **MIDI surface (documented in OM; no separate MIDI Implementation
+  Chart exists — updated 2026-04-18):**
+  - ✅ Program Change → kit selection
+  - ✅ Control Change (CC #1–#95) → master FX, CONTROL 1/2 knobs, kit FX
+    switches — user-assignable on the device
+  - ✅ Note on/off → pad triggers (velocity-sensitive)
+  - ❌ **No SysEx address map.** Roland's SPD-SX downloads are: Owner's
+    Manual, Effect Guide, Using SPD-SX Wave Manager, Sound List. There
+    is no MIDI Implementation Chart PDF — unlike every other device in
+    BK-016 (JD-Xi, VE-500, RC-505 MKII all publish one). Kit editing
+    over MIDI/SysEx is therefore not possible; the MIDI surface is thin
+    (kit select + perf control + trigger).
+- **The WAV-management problem (founder's actual ask):** "give Claude
+  some WAVs and tell it where to put them" + "reorganize kits." Neither
+  is reachable via MIDI. Two remaining paths evaluated:
+  1. **Wave Manager USB protocol RE** — `USB MODE = WAVE MGR` runs a
+     proprietary, undocumented USB link with the Wave Manager desktop
+     app. libusb capture + RE. Hard, no published spec, no reference
+     implementation.
+  2. **USB flash drive file-format RE (chosen compromise,
+     2026-04-18)** — the OM documents `UTILITY → SAVE (USB MEM)` and
+     `LOAD (USB MEM)` at either KIT+SETTINGS or ALL granularity.
+     Device writes a structured folder to the flash drive; we RE the
+     file format, modify it, user loads it back via the device's own
+     UI. No USB protocol, no drivers, no WAVE MGR mode — pure
+     file-format work, tractable with `hexdump` + the Wave Manager user
+     guide as feature spec.
+- **Scope (flash-drive approach):**
+  - User runs `SAVE (USB MEM) → ALL` to a blank drive — reference dump.
+  - MCP server parses the folder layout (kit definitions + WAV pool).
+  - Agent operations: assign WAVs to specific kits/pads, rename kits,
+    reorder / swap kit positions, bulk import WAVs into the wave pool,
+    back up and restore kit banks.
+  - User plugs drive back in → `LOAD (USB MEM)`. Done.
+- **Architectural placement:** does **NOT** sit under
+  `packages/roland-protocol-core` — that package is for the Roland
+  MIDI SysEx (RQ1/DT1) family, which this feature does not use.
+  Likely a standalone `packages/roland-spd-sx-flash` (or similar) built
+  on Node's `fs`, not on `node-midi`. BK-016's "no sample management"
+  non-goal is **explicitly overridden** here because file-format RE is
+  a different technical category from the MIDI/SysEx umbrella that
+  non-goal was written against.
+- **Local manuals** (`docs/manuals/other-gear/`, added 2026-04-18):
+  - `SPD-SX_OM.pdf` / `.txt` — owner's manual. Save/load flash-drive
+    operations on pp. 65–66; full MIDI settings pp. 67–68.
+  - `SPD-SX_Wave_Manager_e02.pdf` — Wave Manager user guide. Does not
+    contain the USB protocol, but documents every operation Wave
+    Manager performs on kit/wave data — functions as the **feature
+    spec** for what our flash-drive MCP server needs to replicate.
+  - `SPD-SX_EffectGuide.pdf` — per-effect parameter reference for the
+    master FX / kit FX catalog. Needed if we extend scope from
+    kit-structure editing to per-effect parameter editing.
+  - `SPD-SX_PA.pdf`, `SPD-SX_eng04_W.pdf` — to be catalogued when this
+    BK is picked up.
+- **Feasibility probe (first session when BK-019 activates):** `SAVE
+  (USB MEM) → ALL` a known kit configuration, hex-dump the output.
+  If kit metadata is plaintext or lightly structured: the approach is
+  viable, proceed to full file-format decode. If the format is
+  encrypted or heavily obfuscated: the flash-drive path fails, fall
+  back to Wave Manager USB RE or drop the feature.
+- **Prereqs:** BK-012 (protocol-as-package split) lands first so there's
+  a clean home for a non-protocol-core package.
+- **Unlock:** first MCP device that manages *sample libraries* rather
+  than *parameter state* — proves the agent-driven UX for bulk asset
+  workflows (organize, rename, rearrange), applicable to other
+  samplers if the pattern works.
 
 ### BK-020 Roland JD-Xi support — **likely first Roland target**
 - **Device:** crossover synth (analog + digital + drums).
@@ -1104,3 +1183,94 @@ Skip until explicit user demand materializes.
   received, ack is not a confirmation of audible change"; with this
   work it could say "write landed" or "write absorbed — block not
   placed" with confidence.
+
+### BK-023 MIDI Implementation PDF → MCP registry parser
+- **Context:** post-AM4, the natural platform play is supporting more
+  gear. For any vendor that publishes a MIDI Implementation PDF with a
+  full Parameter Address Map (Roland across its synth line, Korg,
+  Yamaha, documented Boss entry-level like GT-1, Access, Novation),
+  almost all of the reverse-engineering work AM4 required is already
+  done — the doc *is* the registry. A parser that ingests the PDF and
+  emits a `KNOWN_PARAMS`-shaped registry + minimal transpiler config
+  would collapse weeks of per-device RE into a single ingest step.
+- **Target output per device:** the same artifacts AM4 has today —
+  a `params.ts`-style registry with `pidLow/pidHigh/unit/range/enum`
+  per param, a block/section list, and device metadata (manufacturer
+  byte, model byte, SysEx envelope shape). Paired with a thin
+  protocol-core module for that vendor family (Roland envelope,
+  Yamaha envelope, etc.).
+- **Why this is worth doing:** the multi-device roadmap (BK-014
+  Fractal family + BK-016 Roland/Boss family) gets materially cheaper
+  if we build this once and reuse it. JD-Xi (BK-020) is the natural
+  first consumer — fully-documented Roland device, big address space,
+  tests the parser and the tool-surface generator end-to-end.
+- **Scope sketch:**
+  1. PDF-to-structured-ingest: most vendor docs have the Parameter
+     Address Map in consistent tabular form (Address | Name | Value
+     Range | Description). Layout-aware `pdftotext` + regex gets most
+     of the way; fuzzier tables need manual review.
+  2. Vendor protocol-core modules: one per SysEx envelope family
+     (`fractal-core` exists; add `roland-core`, later `korg-core`,
+     `yamaha-core`).
+  3. Registry format that's shared across vendors — the current AM4
+     `KNOWN_PARAMS` shape is close; extract into `@mcp-midi/registry`
+     (or similar) once BK-012 package split lands.
+  4. Optional: a `generate-tools-from-registry` step that emits
+     MCP tool definitions (`set_param`, `set_params`, `list_params`,
+     `list_enum_values`) automatically given a registry + vendor-core.
+- **Prerequisite:** BK-012 (protocol-as-package split). Without that,
+  every new device is a copy-paste fork instead of a package consumer.
+- **Non-goals:** pattern / sequence data (not in published docs for
+  most vendors), preset-catalog / factory-bank metadata, audio-rate
+  MIDI (SysEx-over-audio, etc.). Firmware-closed devices (Boss
+  500-series, Line 6 Helix) are out of scope for this item and
+  handled by BK-024.
+- **Dependency on BK-024:** once this ships, the long tail of gear
+  without MIDI Impl docs becomes the interesting frontier — that's
+  what the capture wizard is for.
+
+### BK-024 Capture wizard for undocumented-SysEx devices
+- **Context:** vendors like Boss (500-series, GT-1000), Line 6
+  (Helix), Fractal, and most boutique pedal builders ship gear whose
+  protocol is controlled entirely through a closed editor app. BK-023
+  doesn't help for these devices — there's no PDF to parse. The only
+  path is the AM4 path: capture the editor's USB traffic, decode the
+  protocol, and build a registry by hand.
+- **Opportunity:** the AM4 RE process, now proven across 20+ sessions,
+  is a repeatable methodology — not a one-time investigation. If we
+  package the tooling and the workflow, we can offer it to users as
+  a guided BYOD ("bring your own device") path: the user runs our
+  wizard, it walks them through capture + parse + verify, and at the
+  end they have a registry that plugs into the same MCP shell every
+  other device uses.
+- **What the wizard would include:**
+  - Capture: scripted USBPcap setup for Windows + equivalents on mac
+    / Linux, with a "record this specific action in your editor"
+    prompt model ("change the amp type now", "select a different
+    reverb", etc.).
+  - Parse: a generalized `parse-capture.ts` that handles the major
+    SysEx envelope families (Universal, Roland, Yamaha, Fractal-style
+    proprietary) and surfaces the deltas between captures.
+  - Decode assist: the wizard proposes pidLow / pidHigh / encoding
+    hypotheses based on the deltas and asks the user to confirm. The
+    human still needs to recognize "oh, that's a float32 LE" or "that's
+    a septet-packed nibble" — those deductions can't be automated.
+  - Verify: `verify-msg` goldens built automatically from the captures,
+    plus `verify-pack` for round-tripping the proposed encoding.
+- **Honest limits:** a wizard cannot replace human deduction for
+  checksum schemes, value encodings, or proprietary packing (Fractal's
+  septet chunking, Roland's checksum, etc.). Realistic productivity
+  gain is roughly 50% vs AM4-from-scratch — enough to make a weekend
+  project feasible instead of a month-long one, but still not
+  push-button.
+- **Why this is the long-tail unlock:** documented devices (BK-023)
+  are maybe 40% of what a working musician owns. Closed-SysEx devices
+  are the other 60%. A credible capture wizard is how this project
+  becomes *the* local MIDI-gear-agent platform instead of a
+  Fractal-specific curiosity.
+- **Sequencing:** Phase-6+, after BK-014/015/020 have validated the
+  multi-device architecture. Premature to build before we've actually
+  lived through 3–4 device onboardings and learned which parts of the
+  workflow are stable enough to package.
+- **Dependency:** BK-012 (package split) and BK-023 (registry format
+  shared across devices).

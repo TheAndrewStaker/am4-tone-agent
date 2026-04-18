@@ -19,6 +19,12 @@ docs/wiki/
 docs/manuals/*.pdf
 docs/manuals/*.txt
 
+# Other-manufacturer manuals (Roland/Boss, etc.) — copyright-owned PDFs
+# stay local. The .txt extractions alongside them ARE committed, so
+# future Claude Code sessions can grep them without requiring the founder
+# to re-supply the source PDFs.
+docs/manuals/other-gear/*.pdf
+
 # Fractal-distributed factory preset banks and any preset .syx files
 # derived from Fractal's firmware (which includes all exports via
 # AM4-Edit). The raw preset binary is Fractal's; we don't redistribute.

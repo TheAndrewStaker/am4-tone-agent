@@ -14,6 +14,13 @@ action, and recent findings — start every session there. `STATE.md` is kept
 current; the numbered plan docs (`01-` through `04-`) are longer-lived
 reference.
 
+Hardware tasks the founder owes (USB captures, round-trip tests on the
+device, reference dumps) are queued in **`docs/HARDWARE-TASKS.md`**.
+Check it at session start — if anything sits at 🔜 Pending, flag it before
+proceeding with work that depends on it. Append a new `HW-NNN` entry any
+time you identify a hardware action you can't perform yourself, with
+detailed steps the founder can follow without re-reading the backlog.
+
 > Phase 0 (feasibility) completed 2026-04-14. Phase 1 (protocol RE) is in
 > progress — USB capture of AM4-Edit's outgoing traffic is the current
 > blocker. See `STATE.md` for exact next steps.

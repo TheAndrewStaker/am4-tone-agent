@@ -1,7 +1,10 @@
 # Project State — Read This First
 
 > Read this file at the start of every session. It's kept up-to-date with
-> current phase, the single next action, and recent findings.
+> current phase, the single next action, and recent findings. Physical
+> hardware tasks (USB captures, round-trip tests, reference dumps) live
+> in **`docs/HARDWARE-TASKS.md`** — check that file alongside this one at
+> session start.
 > Last updated: **2026-04-17** (Session 20 (cont) — P3-007 lineage
 > dictionaries shipped. `scripts/extract-lineage.ts` parses the wiki scrape
 > + Blocks Guide PDF into `src/knowledge/{amp,drive,reverb,delay,

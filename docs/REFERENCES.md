@@ -49,6 +49,57 @@ by the number of presets.
 
 ---
 
+## Other-manufacturer manuals (local)
+
+Docs for devices on the multi-device expansion roadmap (BK-014..BK-020).
+All files live in `docs/manuals/other-gear/`. **PDFs are gitignored** for
+copyright and size reasons; only the plain-text extractions are committed.
+If you need the source PDF, obtain it from the manufacturer's downloads
+page. Extract with `pdftotext -layout <file>.pdf <file>.txt` (ships with
+Git for Windows).
+
+### Fractal Audio — Axe-Fx II XL+ (BK-014)
+*No manuals local yet.* Add Axe-Edit III docs and the Axe-Fx II MIDI
+reference here when BK-014 activates.
+
+### Roland SPD-SX (BK-019)
+- `SPD-SX_OM.txt` — Owner's Manual. Primary reference. **Key sections for
+  BK-019:** USB save/load (pp. 65–66), USB MODE switch (p. 63),
+  documented MIDI surface (pp. 67–68).
+- `SPD-SX_Wave_Manager_e02.txt` — "Using SPD-SX Wave Manager" guide.
+  Doesn't contain the USB protocol, but documents every operation Wave
+  Manager performs on kit/wave data — serves as the **feature spec** for
+  the flash-drive-based MCP approach chosen in BK-019.
+- `SPD-SX_EffectGuide.txt` — Master + Kit effect parameter reference.
+  Needed when BK-019 extends from kit-structure editing to per-effect
+  parameter editing.
+- `SPD-SX_PA.txt` — Sound List (Factory Data v1.01). 210 factory wave
+  names. Useful when the agent references waves by name while assigning
+  them to kits.
+- **No MIDI Implementation Chart exists.** Roland publishes only four
+  SPD-SX docs (OM, Wave Manager, Effect Guide, Sound List) — no separate
+  MIDI Impl PDF, unlike JD-Xi / VE-500. Documented MIDI surface is thin
+  (Program Change, Control Change, Note on/off only). This is why
+  BK-019's feature scope goes through the USB flash drive path.
+
+### Roland JD-Xi (BK-020)
+- `JD-Xi_MIDI_Implementation.txt` — full MIDI Implementation Chart.
+  Primary reference for BK-020; complete address table + parameter
+  ranges + tone-category enums.
+
+### Boss VE-500 (BK-018)
+- `VE-500_MIDI_ImpleChart.txt` — MIDI Implementation Chart. Confirms the
+  SysEx address map is **closed** ("Specifications of System Exclusive
+  message is not opened for users") — so deep editing requires
+  capture-based RE of Boss Tone Studio; the CC + Program Change surface
+  is what's available out of the box. See BK-018 for scope implications.
+
+### Boss RC-505 MKII (BK-017)
+*No manuals local yet.* Add the RC-505 MKII MIDI Implementation PDF
+from boss.info when BK-017 activates.
+
+---
+
 ## Community sources (online, not local)
 
 ### Fractal Audio Wiki — `https://wiki.fractalaudio.com/wiki/index.php`
