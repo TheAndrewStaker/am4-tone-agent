@@ -2,7 +2,26 @@
 
 > Read this file at the start of every session. It's kept up-to-date with
 > current phase, the single next action, and recent findings.
-> Last updated: **2026-04-17** (Session 20 — four protocol decodes from
+> Last updated: **2026-04-17** (Session 20 (cont) — P3-007 lineage
+> dictionaries shipped. `scripts/extract-lineage.ts` parses the wiki scrape
+> + Blocks Guide PDF into `src/knowledge/{amp,drive,reverb,delay,
+> compressor,cab}-lineage.json`. Coverage: amp 219/248 matched (88%)
+> with 135 inspired-by parentheticals + 112 Fractal-quoted; drive 69/78
+> matched (88%) with 47 Blocks Guide one-liners + full category/clip-type
+> taxonomy; reverb 52/79 family-level descriptions + 41 block-level
+> Fractal quotes + 4 specific real-gear callouts (London/Sun Plate,
+> North/South Church); delay 23/29 Blocks Guide descriptions; compressor
+> 19/19 wiki entries matched + 8 with distinct forum-quote lineage (LA-2A,
+> 1176, SSL Bus, Fairchild, Dynacomp, Rockman, Orange Squeezer); cab 2048
+> entries + 12-creator attribution legend. 107 amp + 14 drive wiki-only
+> variants (channel/revision sub-entries not in the enums) kept as
+> flagged records so their data is preserved for the agent.
+> Schema invariant: `description` and `inspiredBy.primary` never carry
+> identical content — `description` is the Fractal-authored prose,
+> `inspiredBy` only populates when we have a *distinct* real-gear
+> reference (e.g. an amp parenthetical or a forum quote that adds info
+> beyond the description).
+> Prior context (Session 20): four protocol decodes from
 > already-captured pcapngs, no new captures required.
 > (a) Per-block channels confirmed on Drive/Reverb/Delay at the same
 > `pidHigh=0x07D2` as amp.channel — three byte-exact goldens.
@@ -228,6 +247,21 @@ index table (only index 8 has been wire-verified).
 Older breakthroughs (sessions 04–08, 10–14) are archived in `SESSIONS.md`.
 Sessions 15–19 (current) are kept here for fast orientation.
 
+0000000. **Session 20 (cont) — P3-007 Model Lineage Dictionary shipped.**
+         `scripts/extract-lineage.ts` parses `docs/wiki/*.md` + `docs/
+         manuals/Fractal-Audio-Blocks-Guide.txt` into five JSON files
+         under `src/knowledge/`, cross-referenced against the canonical
+         `cacheEnums.ts` catalog. Source-tagged: every qualitative field
+         carries `source: 'fractal-blocks-guide' | 'fractal-wiki'` so
+         the agent knows provenance. Only Fractal-authored content is
+         captured; brand-authored quotes (Xotic, JHS, Macari's, etc.)
+         and community-inferred genre/era tags are deliberately omitted
+         per user preference for accuracy over coverage. Entries that
+         don't match any canonical AM4 enum name (channel-variant
+         sub-entries like "BRIT JVM OD1 ORANGE/RED/GREEN") are kept as
+         flagged records rather than dropped. `npm run extract-lineage`
+         regenerates the JSONs from sources.
+
 000000. **Session 19 — three wins: ack triage, block-placement decode, new
         MCP tools.**
 
@@ -443,6 +477,24 @@ authoritative in `CLAUDE.md` and `DECISIONS.md` — not duplicated here.
 
 ## Roadmap landmarks
 
+- **Strategic direction:** multi-device expansion is scoped in the
+  backlog in two waves.
+  - **Wave 1 — Fractal family:** BK-014 (Axe-Fx II XL+, founder-owned,
+    capture-based RE like AM4) then BK-015 (Axe-Fx III / FM9 / FM3 /
+    VP4 community beta). This is where the addressable market jumps
+    from dozens to 6-figure guitarist populations.
+  - **Wave 2 — Roland / Boss family:** BK-016 umbrella + BK-017/018/019/
+    020 (RC-505 MKII, VE-500, SPD-SX, JD-Xi — all founder-owned).
+    Different SysEx family from Fractal (`0x41` manufacturer vs
+    Fractal's `0x00 0x01 0x74`) but structurally simpler because
+    **Roland publicly publishes full MIDI Implementation PDFs** — zero
+    capture-based RE per device vs the 20+ sessions we paid on AM4.
+    Opens the home-studio / synth / loop segment, broadens the project
+    from "Fractal tone agent" to "local MIDI gear agent."
+  - Both waves require landing BK-012 (protocol package split) first,
+    which becomes much more load-bearing with a second protocol family
+    in scope: it becomes `fractal-protocol-core` + `roland-protocol-
+    core` + per-device packages.
 - **Now:** finish decoding cache Section 2 across all blocks — Session 11 cracked block 0, Session 12 needs the block-1 layout shift.
 - **Then:** expand `WorkingBufferIR` → full `PresetIR` (block placement,
   4 scenes, per-block channel assignment) — the transpiler will need to
@@ -504,6 +556,50 @@ authoritative in `CLAUDE.md` and `DECISIONS.md` — not duplicated here.
 - `samples/captured/decoded/cache-section2.json` — parsed Section 2 (465 records across 7 blocks: routing + Amp tag=0x98 + Utility blocks).
 - `samples/captured/decoded/cache-section3.json` — parsed Section 3 (695 records across 17 sub-blocks + 256 user-cab names/ids).
 - `scripts/scrape-wiki.ts` — Fractal wiki scraper.
+- `scripts/extract-lineage.ts` — parses wiki + Blocks Guide into the
+  lineage JSONs. Re-run via `npm run extract-lineage`.
+- `src/knowledge/amp-lineage.json` — 326 amp records (219 canonical +
+  107 variant), with family/powerTubes/matchingDynaCab/originalCab +
+  inspired-by + Fractal Audio quotes where available.
+- `src/knowledge/drive-lineage.json` — 83 drive records (69 canonical +
+  14 variant), each with categories + clipTypes + Blocks Guide
+  description + wiki inspired-by.
+- `src/knowledge/reverb-lineage.json` — 79 reverb type records (family-
+  level descriptions) + a `__block_level__` record holding 41 Fractal
+  Audio forum quotes about the reverb algorithm.
+- `src/knowledge/delay-lineage.json` — 29 delay type records with
+  Blocks Guide descriptions + per-type Fractal Audio quotes.
+- `src/knowledge/compressor-lineage.json` — 19 compressor type records
+  matched to `COMPRESSOR_TYPES`. Wiki + Fractal forum quotes; 8 carry
+  distinct `inspiredBy` extracted from forum quotes that add gear info
+  beyond the wiki description (LA-2A, Urei 1176, SSL Bus, Fairchild,
+  Dynacomp, Rockman, Orange Squeezer, MXR Dyna Comp variants).
+- `src/knowledge/phaser-lineage.json` — 17 phaser records (9 with
+  basedOn: MXR Phase 90, Fulltone Deja-Vibe, EHX Bad Stone, Maestro
+  MP-1, Morley Pro PFA, Korg PHS-1, Boss Super Phaser, Mutron Bi-Phase).
+- `src/knowledge/chorus-lineage.json` — 20 chorus records (1 with
+  basedOn via am4Name heuristic — Japan CE-2 → Boss CE-2; wiki has
+  no per-type descriptions for this block).
+- `src/knowledge/flanger-lineage.json` — 32 flanger records (10 with
+  basedOn: MXR 117, Boss BF-2, EHX Electric Mistress, A/DA; many
+  entries are FAS-original types named after songs).
+- `src/knowledge/wah-lineage.json` — 9 wah records (6 with basedOn:
+  Vox Clyde McCoy / V845 / V846, Dunlop Cry Baby, Colorsound, Morley,
+  Tycobrahe Parapedal).
+- `scripts/audit-lineage.ts` — data-quality checker for the lineage
+  JSONs. Flags description/inspiredBy duplication, quote/field overlap,
+  and markdown artifacts. Run ad-hoc via `npx tsx scripts/audit-lineage.ts`.
+- **MCP tool** `lookup_lineage({ block_type, name? | real_gear? |
+  manufacturer?/model? })` — forward lookup by canonical AM4 name,
+  fuzzy reverse search by real-gear term (also catches artist queries
+  via description-prose substring match), or exact structured filter
+  against `basedOn.{manufacturer, model}` (BK-021). Answers queries
+  like "classic MXR phaser" (manufacturer="MXR"), "LA-2A"
+  (model="LA-2A"), or "Cantrell tone" via real_gear="Cantrell". Loads
+  the JSONs lazily at first call. Server now exposes **11 tools**.
+- `src/knowledge/cab-lineage.json` — 2048 cab records (full Axe-Fx III
+  catalog; AM4 uses a 138-cab subset — filter once the CAB enum is
+  decoded) + 12-creator attribution legend.
 
 ## How to use this file
 

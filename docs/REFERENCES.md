@@ -88,6 +88,22 @@ session. First stop when encoding a message to send.
 Chronological log of every reverse-engineering session with raw captures and
 decoded findings. Use to understand how a claim in SYSEX-MAP became confirmed.
 
+### `src/knowledge/*-lineage.json`
+Model lineage dictionaries generated from the wiki scrape + Blocks Guide PDF
+by `scripts/extract-lineage.ts`. One file per block (amp/drive/reverb/delay/
+cab). Each record carries `am4Name` (canonical from `cacheEnums.ts`),
+`inspiredBy` (with `source` tag), `description`, `fractalQuotes`, and
+block-specific metadata (family/powerTubes/matchingDynaCab for amps;
+categories/clipTypes for drives; creator prefix for cabs). Re-run via
+`npm run extract-lineage` whenever the wiki scrape is refreshed.
+
+Provenance policy: only Fractal-authored content is captured (Blocks Guide
+entries, wiki parentheticals, forum quotes attributed `[Fractal Audio]`).
+Brand-authored quotes (Xotic, JHS, Macari's) and community-inferred
+qualitative tags (genre, era, mood adjectives) are deliberately omitted to
+avoid hallucination risk — any record without a Fractal source has its
+field populated via `flags: ['VERIFY: ...']` and no `inspiredBy`.
+
 ### `docs/DECISIONS.md`
 Architectural and scope decisions with rationale. Read before proposing changes
 to: MIDI library choice, module system, distribution model, MVP scope, or

@@ -91,6 +91,7 @@ async function main(): Promise<void> {
     'list_block_types',
     'list_enum_values',
     'list_params',
+    'lookup_lineage',
     'reconnect_midi',
     'save_to_location',
     'set_block_type',
@@ -114,6 +115,66 @@ async function main(): Promise<void> {
   if (!text.includes('amp.gain')) throw new Error(`list_params output missing amp.gain:\n${text}`);
   if (!text.includes('amp.type')) throw new Error(`list_params output missing amp.type:\n${text}`);
   console.log(`✓ list_params call returned catalog (${text.split('\n').length} lines)`);
+
+  // Exercise lookup_lineage forward + reverse — doesn't touch MIDI, just
+  // reads src/knowledge/*.json. Confirms the tool is wired up and the data
+  // is present.
+  const forwardResp = await request('tools/call', {
+    name: 'lookup_lineage',
+    arguments: { block_type: 'drive', name: 'T808 OD' },
+  });
+  if (forwardResp.error) throw new Error(`lookup_lineage forward error: ${forwardResp.error.message}`);
+  const forwardText = (forwardResp.result as { content: { text: string }[] }).content[0].text;
+  if (!forwardText.includes('T808 OD')) throw new Error(`lookup_lineage forward missing T808 OD:\n${forwardText}`);
+  if (!forwardText.includes('Tube Screamer')) throw new Error(`lookup_lineage forward missing Tube Screamer lineage:\n${forwardText}`);
+  console.log(`✓ lookup_lineage forward (drive/T808 OD) returned record with Tube Screamer lineage`);
+
+  const reverseResp = await request('tools/call', {
+    name: 'lookup_lineage',
+    arguments: { block_type: 'compressor', real_gear: '1176', include_quotes: false },
+  });
+  if (reverseResp.error) throw new Error(`lookup_lineage reverse error: ${reverseResp.error.message}`);
+  const reverseText = (reverseResp.result as { content: { text: string }[] }).content[0].text;
+  if (!reverseText.includes('JFET Studio Compressor')) {
+    throw new Error(`lookup_lineage reverse (compressor/1176) missing JFET Studio Compressor:\n${reverseText}`);
+  }
+  console.log(`✓ lookup_lineage reverse (compressor/"1176") found JFET Studio Compressor`);
+
+  // Structured filter: compressor by manufacturer ("MXR").
+  const mfrResp = await request('tools/call', {
+    name: 'lookup_lineage',
+    arguments: { block_type: 'compressor', manufacturer: 'MXR', include_quotes: false },
+  });
+  if (mfrResp.error) throw new Error(`lookup_lineage manufacturer error: ${mfrResp.error.message}`);
+  const mfrText = (mfrResp.result as { content: { text: string }[] }).content[0].text;
+  if (!mfrText.includes('Dynami-Comp')) {
+    throw new Error(`lookup_lineage manufacturer (MXR) missing Dynami-Comp variants:\n${mfrText}`);
+  }
+  console.log(`✓ lookup_lineage structured (compressor/manufacturer="MXR") found Dynami-Comp`);
+
+  // Phaser block: "classic MXR phaser block" use case from BK-021 spec.
+  const phaserResp = await request('tools/call', {
+    name: 'lookup_lineage',
+    arguments: { block_type: 'phaser', manufacturer: 'MXR', include_quotes: false },
+  });
+  if (phaserResp.error) throw new Error(`lookup_lineage phaser error: ${phaserResp.error.message}`);
+  const phaserText = (phaserResp.result as { content: { text: string }[] }).content[0].text;
+  if (!phaserText.includes('Block 90')) {
+    throw new Error(`lookup_lineage phaser (MXR) missing Block 90:\n${phaserText}`);
+  }
+  console.log(`✓ lookup_lineage structured (phaser/manufacturer="MXR") found Block 90`);
+
+  // Wah block by forward lookup.
+  const wahResp = await request('tools/call', {
+    name: 'lookup_lineage',
+    arguments: { block_type: 'wah', name: 'Cry Babe', include_quotes: false },
+  });
+  if (wahResp.error) throw new Error(`lookup_lineage wah error: ${wahResp.error.message}`);
+  const wahText = (wahResp.result as { content: { text: string }[] }).content[0].text;
+  if (!wahText.includes('Dunlop') || !wahText.includes('Cry Baby')) {
+    throw new Error(`lookup_lineage wah (Cry Babe) missing Dunlop Cry Baby lineage:\n${wahText}`);
+  }
+  console.log(`✓ lookup_lineage forward (wah/"Cry Babe") returned Dunlop Cry Baby`);
 
   child.stdin.end();
   await once(child, 'exit');

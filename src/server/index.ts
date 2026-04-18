@@ -27,6 +27,10 @@
  *   }
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import * as z from 'zod/v4';
@@ -152,6 +156,122 @@ function resolveValue(param: Param, value: number | string): number {
     throw new Error(`${param.block}.${param.name} out of range [${param.displayMin}..${param.displayMax}]: ${num}`);
   }
   return num;
+}
+
+// -- Lineage lookup (P3-007) ------------------------------------------------
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const KNOWLEDGE_DIR = path.join(__dirname, '..', 'knowledge');
+
+const LINEAGE_BLOCKS = [
+  'amp', 'drive', 'reverb', 'delay', 'compressor',
+  'phaser', 'chorus', 'flanger', 'wah',
+] as const;
+type LineageBlock = typeof LINEAGE_BLOCKS[number];
+
+interface LineageRecord {
+  am4Name: string;
+  wikiName?: string;
+  basedOn?: {
+    primary: string;
+    manufacturer?: string;
+    model?: string;
+    productName?: string;
+    source: string;
+  };
+  description?: string;
+  descriptionSource?: string;
+  fractalQuotes?: Array<{ text: string; url?: string; attribution?: string }>;
+  flags?: string[];
+  // amp-specific
+  family?: string;
+  powerTubes?: string;
+  matchingDynaCab?: string;
+  originalCab?: string;
+  // drive-specific
+  categories?: string[];
+  clipTypes?: string[];
+  // reverb-specific
+  familyType?: string;
+}
+
+const lineageCache: Partial<Record<LineageBlock, LineageRecord[]>> = {};
+
+function loadLineage(block: LineageBlock): LineageRecord[] {
+  const cached = lineageCache[block];
+  if (cached) return cached;
+  const file = path.join(KNOWLEDGE_DIR, `${block}-lineage.json`);
+  if (!fs.existsSync(file)) {
+    throw new Error(
+      `Lineage data missing at ${file}. Run \`npm run extract-lineage\` to regenerate from the wiki scrape + Blocks Guide PDF.`,
+    );
+  }
+  const parsed = JSON.parse(fs.readFileSync(file, 'utf8')) as { records?: LineageRecord[] };
+  const records = parsed.records ?? [];
+  lineageCache[block] = records;
+  return records;
+}
+
+function scoreRecord(rec: LineageRecord, query: string): number {
+  const q = query.toLowerCase();
+  let score = 0;
+  // Structured field hits score highest — they're deterministic, unlike
+  // substring matches on prose.
+  if (rec.basedOn?.manufacturer?.toLowerCase() === q) score += 20;
+  if (rec.basedOn?.model?.toLowerCase() === q) score += 20;
+  if (rec.basedOn?.productName?.toLowerCase().includes(q)) score += 12;
+  if (rec.am4Name.toLowerCase().includes(q)) score += 10;
+  if (rec.basedOn?.primary.toLowerCase().includes(q)) score += 8;
+  if (rec.wikiName && rec.wikiName.toLowerCase().includes(q)) score += 5;
+  if (rec.description && rec.description.toLowerCase().includes(q)) score += 5;
+  for (const qt of rec.fractalQuotes ?? []) {
+    if (qt.text.toLowerCase().includes(q)) score += 2;
+  }
+  return score;
+}
+
+function matchesStructured(
+  rec: LineageRecord,
+  filter: { manufacturer?: string; model?: string },
+): boolean {
+  if (!rec.basedOn) return false;
+  const ci = (a: string | undefined, b: string | undefined): boolean =>
+    !b || (a?.toLowerCase() === b.toLowerCase());
+  return (
+    ci(rec.basedOn.manufacturer, filter.manufacturer) &&
+    ci(rec.basedOn.model, filter.model)
+  );
+}
+
+function formatLineageRecord(rec: LineageRecord, includeQuotes: boolean, maxQuotes = 5): string {
+  const lines: string[] = [`am4Name: ${rec.am4Name}`];
+  if (rec.wikiName && rec.wikiName !== rec.am4Name) lines.push(`wikiName: ${rec.wikiName}`);
+  if (rec.family) lines.push(`family: ${rec.family}`);
+  if (rec.familyType) lines.push(`familyType: ${rec.familyType}`);
+  if (rec.categories?.length) lines.push(`categories: ${rec.categories.join(', ')}`);
+  if (rec.clipTypes?.length) lines.push(`clipTypes: ${rec.clipTypes.join(', ')}`);
+  if (rec.powerTubes) lines.push(`powerTubes: ${rec.powerTubes}`);
+  if (rec.originalCab) lines.push(`originalCab: ${rec.originalCab}`);
+  if (rec.matchingDynaCab) lines.push(`matchingDynaCab: ${rec.matchingDynaCab}`);
+  if (rec.basedOn) {
+    const parts: string[] = [`basedOn: ${rec.basedOn.primary}`];
+    if (rec.basedOn.manufacturer) parts.push(`manufacturer=${rec.basedOn.manufacturer}`);
+    if (rec.basedOn.model) parts.push(`model=${rec.basedOn.model}`);
+    if (rec.basedOn.productName) parts.push(`productName="${rec.basedOn.productName}"`);
+    parts.push(`source=${rec.basedOn.source}`);
+    lines.push(parts.join(' | '));
+  }
+  if (rec.description) lines.push(`description: ${rec.description}`);
+  if (includeQuotes && rec.fractalQuotes?.length) {
+    const shown = rec.fractalQuotes.slice(0, maxQuotes);
+    lines.push(`fractalQuotes (${shown.length}/${rec.fractalQuotes.length}):`);
+    for (const q of shown) {
+      const url = q.url ? ` [${q.url}]` : '';
+      lines.push(`  - "${q.text}"${url}`);
+    }
+  }
+  if (rec.flags?.length) lines.push(`flags: ${rec.flags.join('; ')}`);
+  return lines.join('\n');
 }
 
 // -- Server setup -----------------------------------------------------------
@@ -741,6 +861,149 @@ server.registerTool('reconnect_midi', {
       }],
     };
   }
+});
+
+server.registerTool('lookup_lineage', {
+  description: [
+    'Look up Fractal Audio\'s authored lineage info for an AM4 model — what',
+    'real hardware it\'s modeled after, Fractal\'s own description of the',
+    'algorithm, and forum quotes from the developer. Data lives in',
+    'src/knowledge/*-lineage.json and is sourced from the Fractal wiki +',
+    'Blocks Guide PDF; only Fractal-authored content is stored (no',
+    'community-inferred genre/era tags, no third-party reviews).',
+    'Three call shapes (exactly one required):',
+    '  (a) forward — { block_type, name }: return the record matching that',
+    '      canonical AM4 name (case-insensitive).',
+    '  (b) reverse by real-gear term — { block_type, real_gear }: substring',
+    '      search across basedOn / description / forum quotes. Returns the',
+    '      top 10 ranked matches. Use for fuzzy queries — including artist',
+    '      references like "Keith Urban sound" or "Cantrell tone" which',
+    '      match artist names in Fractal\'s description prose.',
+    '  (c) structured filter — { block_type, manufacturer?, model? }:',
+    '      exact-match against basedOn\'s structured fields. Most precise',
+    '      for queries like "classic MXR phaser" (manufacturer="MXR") or',
+    '      "LA-2A" (model="LA-2A"). Multiple structured fields AND together.',
+    'Response text is designed to be read by Claude, not shown verbatim to',
+    'the user — pull out the am4Name and summarize the lineage in your',
+    'own words.',
+  ].join(' '),
+  inputSchema: {
+    block_type: z.enum(LINEAGE_BLOCKS).describe(
+      'Which block\'s lineage to query. Currently amp/drive/reverb/delay/compressor/phaser/chorus/flanger/wah (cab coming once the AM4 cab enum is decoded; gate/tremolo/geq/filter/enhancer/peq/rotary/volpan are algorithmic-only and not in the lineage set).',
+    ),
+    name: z.string().optional().describe(
+      'Canonical AM4 model name for forward lookup (e.g. "T808 OD", "Optical Compressor", "5F1 Tweed Champlifier"). Case-insensitive.',
+    ),
+    real_gear: z.string().optional().describe(
+      'Real-hardware query for fuzzy reverse search (e.g. "1176", "Tube Screamer", "LA-2A", "EMT 140", "Fender Twin"). Returns the top AM4 models whose lineage text mentions the term.',
+    ),
+    manufacturer: z.string().optional().describe(
+      'Exact manufacturer filter (case-insensitive): "MXR", "Fender", "Ibanez", "Boss", "Marshall", "TC Electronic". Use alone or combined with model.',
+    ),
+    model: z.string().optional().describe(
+      'Exact model identifier filter (case-insensitive): "M-102", "TS-9", "LA-2A", "5F1", "1176", "2290". Use alone or combined with manufacturer.',
+    ),
+    include_quotes: z.boolean().optional().describe(
+      'Whether to include Fractal Audio forum quotes in the response. Default true. Pass false for a terser response when you only need the description/basedOn summary (some records have 15+ quotes).',
+    ),
+  },
+}, async ({ block_type, name, real_gear, manufacturer, model, include_quotes }) => {
+  const hasStructured = !!(manufacturer || model);
+  const shapeCount = [name !== undefined, real_gear !== undefined, hasStructured].filter(Boolean).length;
+  if (shapeCount !== 1) {
+    throw new Error(
+      'lookup_lineage requires exactly one call shape: `name` (forward), `real_gear` (fuzzy reverse), or at least one structured filter (`manufacturer` / `model`).',
+    );
+  }
+  const records = loadLineage(block_type);
+  const withQuotes = include_quotes ?? true;
+
+  if (hasStructured) {
+    const matches = records.filter((r) => matchesStructured(r, { manufacturer, model }));
+    if (matches.length === 0) {
+      const filter = [
+        manufacturer && `manufacturer="${manufacturer}"`,
+        model && `model="${model}"`,
+      ].filter(Boolean).join(', ');
+      return {
+        content: [{
+          type: 'text',
+          text: `No ${block_type} records match ${filter}. ${records.length} records scanned. ` +
+            `Try a fuzzy search with real_gear if you\'re unsure of the exact brand/model spelling, ` +
+            `or list valid manufacturer/model values by reading src/knowledge/${block_type}-lineage.json.`,
+        }],
+      };
+    }
+    const blocks = matches.slice(0, 10).map(
+      (r) => `── ${r.am4Name} ──\n${formatLineageRecord(r, withQuotes, 3)}`,
+    );
+    return {
+      content: [{
+        type: 'text',
+        text: `${matches.length} ${block_type} matches${matches.length > 10 ? ' (showing top 10)' : ''}:\n\n${blocks.join('\n\n')}`,
+      }],
+    };
+  }
+
+  if (name !== undefined) {
+    const q = name.toLowerCase().trim();
+    const exact = records.find(
+      (r) => r.am4Name.toLowerCase() === q || r.wikiName?.toLowerCase() === q,
+    );
+    const partial = exact ?? records.find(
+      (r) => r.am4Name.toLowerCase().includes(q) || r.wikiName?.toLowerCase().includes(q),
+    );
+    if (!partial) {
+      return {
+        content: [{
+          type: 'text',
+          text:
+            `No ${block_type} lineage record matches "${name}". The ${block_type}-lineage.json ` +
+            `catalog has ${records.length} records; try a reverse search with real_gear if you ` +
+            `know the real hardware but not the exact AM4 name.`,
+        }],
+      };
+    }
+    return {
+      content: [{
+        type: 'text',
+        text: formatLineageRecord(partial, withQuotes),
+      }],
+    };
+  }
+
+  // Reverse lookup: rank records by query-term hits across text fields.
+  const query = real_gear!.trim();
+  if (query.length < 2) {
+    throw new Error('`real_gear` query must be at least 2 characters.');
+  }
+  const scored = records
+    .map((r) => ({ r, score: scoreRecord(r, query) }))
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 10);
+
+  if (scored.length === 0) {
+    return {
+      content: [{
+        type: 'text',
+        text:
+          `No ${block_type} records mention "${query}". Searched across ${records.length} records ` +
+          `(am4Name, wikiName, basedOn, description, fractalQuotes). Try a different spelling ` +
+          `(e.g. "TS9" vs "Tube Screamer", "EVH" vs "5150") or widen the query.`,
+      }],
+    };
+  }
+  const blocks = scored.map(
+    ({ r, score }) => `── ${r.am4Name} (score ${score}) ──\n${formatLineageRecord(r, withQuotes, 3)}`,
+  );
+  return {
+    content: [{
+      type: 'text',
+      text:
+        `Top ${scored.length} ${block_type} matches for "${query}":\n\n${blocks.join('\n\n')}`,
+    }],
+  };
 });
 
 server.registerTool('list_enum_values', {
