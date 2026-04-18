@@ -32,6 +32,13 @@ const RENAME_PRESET_PID_HIGH = 0x000b;
 const SCENE_SWITCH_PID_LOW = 0x00ce;
 const SCENE_SWITCH_PID_HIGH = 0x000d;
 
+const PRESET_SWITCH_PID_LOW = 0x00ce;
+const PRESET_SWITCH_PID_HIGH = 0x000a;
+
+const SCENE_RENAME_PID_LOW = 0x00ce;
+const SCENE_RENAME_PID_HIGH_BASE = 0x0037;
+const SCENE_NAME_BYTES = 32;
+
 function encode14(n: number): [number, number] {
   if (n < 0 || n > 0x3fff) throw new Error(`14-bit value out of range: ${n}`);
   return [n & 0x7f, (n >> 7) & 0x7f];
@@ -260,12 +267,11 @@ export function buildSetPresetName(locationIndex: number, name: string): number[
  * Payload = 4-byte uint32 LE scene index — NOT a float32, to match
  * the integer semantics of save-to-slot.
  *
- * TENTATIVE decoding from `session-18-switch-scene.pcapng`: the capture
- * contains ONE unique scene-switch write (value=1, i.e. switch to
- * scene 2 under 0-indexed interpretation). The "pidHigh is fixed,
- * value is the scene index 0..3" model matches the block-placement
- * and save-to-slot shape, but is not yet confirmed against switches
- * to scenes 1/3/4. Capture those to close the loop (BK-011 follow-on).
+ * Decoded Session 21 from `session-21-switch-scene-1-3-4.pcapng`
+ * (combined with `session-18-switch-scene.pcapng`). All four scene
+ * indices confirmed: 0→scene 1, 1→scene 2, 2→scene 3, 3→scene 4.
+ * pidHigh stays fixed at 0x000D; only the u32 value changes. Byte-
+ * exact goldens for all four scenes live in `verify-msg`.
  */
 export function buildSwitchScene(sceneIndex: number): number[] {
   if (!Number.isInteger(sceneIndex) || sceneIndex < 0 || sceneIndex > 3) {
@@ -280,6 +286,87 @@ export function buildSwitchScene(sceneIndex: number): number[] {
     ...encode14(SCENE_SWITCH_PID_LOW),
     ...encode14(SCENE_SWITCH_PID_HIGH),
     ...encode14(ACTION_WRITE),
+    ...encode14(0x0000),
+    ...encode14(raw.length),
+    ...packed,
+  ];
+  const head = [SYSEX_START, ...FRACTAL_MFR, ...body];
+  return [...head, fractalChecksum(head), SYSEX_END];
+}
+
+/**
+ * Build a SWITCH-PRESET command that loads preset location
+ * `locationIndex` (0..103, A01..Z04) into the AM4's working buffer.
+ * Same register family as the other preset-level commands
+ * (pidLow=0x00CE) with pidHigh=0x000A and a standard WRITE action.
+ *
+ * Value encoding: **float32** (IEEE 754 LE) representing the location
+ * index — e.g. index 1 → float 1.0 → raw bytes `00 00 80 3f`. This is
+ * DIFFERENT from scene-switch (u32 LE) and save-to-slot (u32 LE); both
+ * encodings coexist in the same register. Decoded Session 21 from
+ * `session-22-switch-preset-via-ui.pcapng`, which captured the user
+ * clicking A01 → A02 → A01 in AM4-Edit. Two unique writes: float 1.0
+ * (A02) and float 0.0 (A01). Byte-exact goldens in `verify-msg`.
+ *
+ * UX note: this is "load this preset into the working buffer", not
+ * "save to this location." Calling this on an unsaved working buffer
+ * discards edits — upstream MCP tool should confirm before issuing.
+ */
+export function buildSwitchPreset(locationIndex: number): number[] {
+  if (!Number.isInteger(locationIndex) || locationIndex < 0 || locationIndex > 103) {
+    throw new Error(`Preset location index must be integer 0..103, got ${locationIndex}.`);
+  }
+  return buildSetFloatParam(
+    { pidLow: PRESET_SWITCH_PID_LOW, pidHigh: PRESET_SWITCH_PID_HIGH },
+    locationIndex,
+  );
+}
+
+/**
+ * Build a RENAME-SCENE command that sets the name of scene `sceneIndex`
+ * (0..3) in the current working buffer. Same envelope / action / payload
+ * structure as `buildSetPresetName`, with two differences:
+ *   - pidHigh varies per scene: `0x0037 + sceneIndex` (scenes 1..4 →
+ *     0x0037 / 0x0038 / 0x0039 / 0x003A).
+ *   - The 4-byte slot-index field at the head of the payload is zeroed
+ *     — scene names are scoped to the working buffer, not a preset
+ *     location.
+ *
+ * Decoded Session 21 from `session-20-rename-scene.pcapng` (scene 1)
+ * plus `session-22-rename-scene-{2,3,4}.pcapng` (scenes 2/3/4).
+ * Byte-exact goldens in `verify-msg` for scenes 2/3/4 with names
+ * "clean" / "chorus" / "lead"; scene 1 was the initial Session 19g
+ * capture confirming pidHigh=0x0037.
+ *
+ * Scope caveat: writes to the working buffer only. To persist scene
+ * names to a preset location, callers must still issue a
+ * `buildSaveToLocation` afterward.
+ */
+export function buildSetSceneName(sceneIndex: number, name: string): number[] {
+  if (!Number.isInteger(sceneIndex) || sceneIndex < 0 || sceneIndex > 3) {
+    throw new Error(`Scene index must be integer 0..3, got ${sceneIndex}.`);
+  }
+  if (name.length > SCENE_NAME_BYTES) {
+    throw new Error(`Scene name must be ≤ ${SCENE_NAME_BYTES} ASCII chars, got ${name.length}: "${name}".`);
+  }
+  for (let i = 0; i < name.length; i++) {
+    const c = name.charCodeAt(i);
+    if (c < 0x20 || c > 0x7e) {
+      throw new Error(`Scene name contains non-ASCII-printable char 0x${c.toString(16)} at position ${i}: "${name}".`);
+    }
+  }
+  const raw = new Uint8Array(4 + SCENE_NAME_BYTES);
+  // Bytes 0..3 stay zero (working-buffer scope, no slot index).
+  for (let i = 0; i < SCENE_NAME_BYTES; i++) {
+    raw[4 + i] = i < name.length ? name.charCodeAt(i) : 0x20;
+  }
+  const packed = Array.from(packValueChunked(raw));
+  const body: number[] = [
+    AM4_MODEL_ID,
+    FUNC_PARAM_RW,
+    ...encode14(SCENE_RENAME_PID_LOW),
+    ...encode14(SCENE_RENAME_PID_HIGH_BASE + sceneIndex),
+    ...encode14(ACTION_RENAME),
     ...encode14(0x0000),
     ...encode14(raw.length),
     ...packed,

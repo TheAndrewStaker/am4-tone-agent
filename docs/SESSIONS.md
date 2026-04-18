@@ -6,6 +6,109 @@ file is the chronological trail that reference is built from.
 
 ---
 
+## 2026-04-18 — Session 21 — Scene-switch confirmation, scene-rename map, preset-switch decoded
+
+**Goal:** close three Phase 1 open questions with the hardware captures
+the founder queued as HW-001, HW-004, HW-005. All three landed in one
+session.
+
+### Captures processed
+
+| Capture | Role |
+|---------|------|
+| `session-21-switch-scene-1-3-4.pcapng` | HW-001 — switches to scenes 1/3/4 to confirm scene-switch decode |
+| `session-22-rename-scene-2.pcapng` | HW-004 — rename scene 2 to "clean" |
+| `session-22-rename-scene-3.pcapng` | HW-004 — rename scene 3 to "chorus" |
+| `session-22-rename-scene-4.pcapng` | HW-004 — rename scene 4 to "lead" |
+| `session-22-switch-preset-via-ui.pcapng` | HW-005 — UI-initiated A01→A02→A01 preset switch |
+
+### 21a — Scene switch confirmed (HW-001)
+
+Session 20 tentatively decoded scene switch from a single capture
+(scene 2 = u32 LE value 1 at `pidLow=0x00CE, pidHigh=0x000D`). HW-001
+captured all remaining scenes:
+
+| Scene | Packed bytes | Raw u32 LE |
+|-------|--------------|-----------|
+| 1 | `00 00 00 00 00` | 0 |
+| 2 (prior) | `00 40 00 00 00` | 1 |
+| 3 | `01 00 00 00 00` | 2 |
+| 4 | `01 40 00 00 00` | 3 |
+
+pidHigh is fixed; only the value changes. "value = scene index 0..3"
+model confirmed. `buildSwitchScene` unchanged from Session 20; added
+three more byte-exact goldens to `verify-msg`.
+
+### 21b — Scene rename pidHigh map (HW-004)
+
+Three renames captured, each a 60-byte command matching the preset-
+rename envelope (`action=0x000C`, `hdr4=0x0024`, 36-byte payload) with
+different pidHighs:
+
+| Scene | pidHigh | Decoded name |
+|-------|---------|--------------|
+| 1 (prior) | `0x0037` | *(Session 19g capture)* |
+| 2 | `0x0038` | "clean" |
+| 3 | `0x0039` | "chorus" |
+| 4 | `0x003A` | "lead" |
+
+Pattern: `pidHigh = 0x0037 + sceneIndex` for scenes 0..3. Payload bytes
+0..3 (the slot-index field in preset rename) are zeroed — scene names
+are working-buffer scoped. `buildSetSceneName(sceneIndex, name)`
+landed in `src/protocol/setParam.ts`; `set_scene_name` MCP tool
+registered in the server. BK-011 decode complete.
+
+### 21c — Preset switch decoded (HW-005)
+
+`session-22-switch-preset-via-ui.pcapng` captured two unique writes
+on the user's A01→A02→A01 click sequence:
+
+| Time | Packed bytes | Unpacked raw (LE) | Interpretation |
+|------|--------------|--------------------|----------------|
+| t=10.874 | `00 00 10 03 78` | `00 00 80 3F` | float32 = 1.0 (→ A02) |
+| t=16.795 | `00 00 00 00 00` | `00 00 00 00` | float32 = 0.0 (→ A01) |
+
+**Preset switch is a `SET_FLOAT_PARAM`** at `pidLow=0x00CE`,
+`pidHigh=0x000A`, value = preset location index as **float32**. This
+is the first command in the preset-level register family to use
+float32 (scene-switch, save-to-slot, and renames all use u32 LE
+integers in the payload). Both encodings coexist on the same
+`pidLow=0x00CE` register — readers must discriminate by pidHigh.
+
+`buildSwitchPreset(locationIndex)` reuses the existing
+`buildSetFloatParam` helper. `switch_preset` MCP tool registered
+with a warning in its description about discarding unsaved edits
+in the working buffer.
+
+### New MCP tool count
+
+Server now exposes **14 tools** (was 11): added `set_scene_name`,
+`switch_preset`, `switch_scene`.
+
+### Preflight
+
+`npm run preflight` green. **33/33 verify-msg goldens match**
+(8 new this session: 3 scene switches, 3 scene renames, 2 preset
+switches). 8/8 verify-echo green. Smoke-server enumerates all 14
+tools.
+
+### What remains
+
+- **HW-002** (preset rename persistence test) still open from prior
+  session.
+- **HW-003** (save+reload round-trip test) still open.
+- **HW-006 / HW-007 / HW-008** (round-trip tests for the three new
+  Session 21 tools) queued in `HARDWARE-TASKS.md` for the founder's
+  next hardware session.
+
+### Cleanup
+
+- Temp script `scripts/decode-rename-names.ts` (used once to recover
+  the three typed-in scene names from packed bytes) deleted after
+  goldens landed.
+
+---
+
 ## 2026-04-15 — Session 10 — Cache Binary Schema Decoded (Section 1)
 
 **Goal:** turn the 129 KB `effectDefinitions_15_2p0.cache` into a typed

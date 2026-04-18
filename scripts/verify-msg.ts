@@ -8,6 +8,8 @@ import {
   buildSetFloatParam,
   buildSetParam,
   buildSetPresetName,
+  buildSetSceneName,
+  buildSwitchPreset,
   buildSwitchScene,
 } from '../src/protocol/setParam.js';
 import { KNOWN_PARAMS } from '../src/protocol/params.js';
@@ -145,12 +147,55 @@ const cases: { label: string; built: number[]; expected: string }[] = [
     expected: 'f000017415014e010b000c00000024003340000003095e733a1b6d6201004020100804020100402010080402010040201008040201004020100009f7',
   },
   {
-    // TENTATIVE — only switch-to-scene-2 captured. pidHigh=0x000D + value=u32
-    // scene index is extrapolated from the block-placement / save-to-slot
-    // pattern. Need captures of switches to scenes 1/3/4 to confirm.
-    label: 'buildSwitchScene(1) — matches session-18-switch-scene',
+    label: 'buildSwitchScene(1) — matches session-18-switch-scene (scene 2)',
     built: buildSwitchScene(1),
     expected: 'f000017415014e010d00010000000400004000000016f7',
+  },
+  // Session 21 confirmed: value = scene index (0..3) as u32 LE,
+  // pidHigh fixed at 0x000D. Captures: session-21-switch-scene-1-3-4.
+  {
+    label: 'buildSwitchScene(0) — matches session-21 switch-to-scene-1',
+    built: buildSwitchScene(0),
+    expected: 'f000017415014e010d00010000000400000000000056f7',
+  },
+  {
+    label: 'buildSwitchScene(2) — matches session-21 switch-to-scene-3',
+    built: buildSwitchScene(2),
+    expected: 'f000017415014e010d00010000000400010000000057f7',
+  },
+  {
+    label: 'buildSwitchScene(3) — matches session-21 switch-to-scene-4',
+    built: buildSwitchScene(3),
+    expected: 'f000017415014e010d00010000000400014000000017f7',
+  },
+  // Session 21: preset switch via UI. pidLow=0x00CE, pidHigh=0x000A,
+  // value = float32(locationIndex). Captures: session-22-switch-preset-via-ui.
+  {
+    label: 'buildSwitchPreset(0) — matches session-22 switch-to-A01 (float 0.0)',
+    built: buildSwitchPreset(0),
+    expected: 'f000017415014e010a00010000000400000000000051f7',
+  },
+  {
+    label: 'buildSwitchPreset(1) — matches session-22 switch-to-A02 (float 1.0)',
+    built: buildSwitchPreset(1),
+    expected: 'f000017415014e010a0001000000040000001003783af7',
+  },
+  // Session 21: scene renames. pidHigh = 0x0037 + sceneIndex (0..3).
+  // Captures: session-22-rename-scene-{2,3,4}.
+  {
+    label: 'buildSetSceneName(1, "clean") — matches session-22-rename-scene-2',
+    built: buildSetSceneName(1, 'clean'),
+    expected: 'f000017415014e0138000c000000240000000000030d5865305b44020100402010080402010040201008040201004020100804020100402010005ef7',
+  },
+  {
+    label: 'buildSetSceneName(2, "chorus") — matches session-22-rename-scene-3',
+    built: buildSetSceneName(2, 'chorus'),
+    expected: 'f000017415014e0139000c000000240000000000030d506f391d2e3201004020100804020100402010080402010040201008040201004020100048f7',
+  },
+  {
+    label: 'buildSetSceneName(3, "lead") — matches session-22-rename-scene-4',
+    built: buildSetSceneName(3, 'lead'),
+    expected: 'f000017415014e013a000c00000024000000000003314a613208040201004020100804020100402010080402010040201008040201004020100067f7',
   },
 ];
 

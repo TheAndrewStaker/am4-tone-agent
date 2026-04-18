@@ -46,6 +46,9 @@ import {
   buildSetBlockType,
   buildSetParam,
   buildSetPresetName,
+  buildSetSceneName,
+  buildSwitchPreset,
+  buildSwitchScene,
   isWriteEcho,
 } from '../protocol/setParam.js';
 import {
@@ -815,6 +818,142 @@ server.registerTool('set_preset_name', {
         `ack shape isn't fully decoded; verify by viewing the preset name on the AM4 ` +
         `or in AM4-Edit. If the name didn't stick, try calling save_to_location ` +
         `afterward — it's not yet confirmed whether rename persists on its own.\n` +
+        `Sent (${bytes.length}B): ${toHex(bytes)}\n` +
+        `All inbound SysEx during the ${WRITE_ECHO_TIMEOUT_MS} ms window:\n` +
+        formatCaptured(),
+    }],
+  };
+});
+
+server.registerTool('set_scene_name', {
+  description: [
+    'Rename one of the four scenes in the current working buffer. Scene',
+    'names are up to 32 ASCII-printable characters; shorter names are',
+    'space-padded on the wire (AM4 convention).',
+    'SCOPE: writes to the working buffer only. To persist the new name,',
+    'call save_to_location afterward — otherwise the rename is lost when',
+    'the user loads a different preset. No gate on which scene, since',
+    'scene names live in the working buffer and the working-buffer scope',
+    'is the safety boundary.',
+  ].join(' '),
+  inputSchema: {
+    scene_index: z.number().int().min(1).max(4).describe(
+      'Scene number 1..4 (matches AM4-Edit\'s UI numbering). Index 0..3 internally.',
+    ),
+    name: z.string().max(32).describe(
+      'New scene name, up to 32 ASCII-printable characters. Shorter names are space-padded to 32 on the wire.',
+    ),
+  },
+}, async ({ scene_index, name }) => {
+  const sceneIdx = scene_index - 1;
+  const bytes = buildSetSceneName(sceneIdx, name);
+  const conn = ensureMidi();
+  const captured: number[][] = [];
+  const unsubscribe = conn.onMessage((msg) => {
+    if (msg[0] === 0xf0) captured.push([...msg]);
+  });
+  conn.send(bytes);
+  await new Promise<void>((resolve) => setTimeout(resolve, WRITE_ECHO_TIMEOUT_MS));
+  unsubscribe();
+  const formatCaptured = (): string => {
+    if (captured.length === 0) return '  (none)';
+    return captured.map((m, i) => `  [${i}] (${m.length}B) ${toHex(m)}`).join('\n');
+  };
+  return {
+    content: [{
+      type: 'text',
+      text:
+        `Sent scene rename: scene ${scene_index} → "${name}". Writes to the ` +
+        `working buffer only — call save_to_location to persist across ` +
+        `preset loads. The rename-command ack shape isn't fully decoded; ` +
+        `verify on the AM4 display or in AM4-Edit.\n` +
+        `Sent (${bytes.length}B): ${toHex(bytes)}\n` +
+        `All inbound SysEx during the ${WRITE_ECHO_TIMEOUT_MS} ms window:\n` +
+        formatCaptured(),
+    }],
+  };
+});
+
+server.registerTool('switch_preset', {
+  description: [
+    'Load a preset location (A01..Z04) into the AM4\'s working buffer.',
+    'Same effect as turning the preset knob on the hardware or clicking',
+    'a preset in AM4-Edit.',
+    'WARNING: discards any unsaved edits in the current working buffer.',
+    'If the user has been building a tone with apply_preset / set_param',
+    'and hasn\'t yet called save_to_location, those edits are lost when',
+    'the new preset loads. Upstream MCP tools should confirm intent before',
+    'issuing this, especially after a session of tone-building.',
+    'Not gated to Z04 — this is a READ-into-working-buffer, it does not',
+    'modify any stored preset. All 104 locations are valid targets.',
+  ].join(' '),
+  inputSchema: {
+    location: z.string().describe(
+      'AM4 preset location in bank+slot form, A01..Z04 (26 banks × 4 per bank = 104 locations).',
+    ),
+  },
+}, async ({ location }) => {
+  const normalized = location.trim().toUpperCase();
+  const locationIndex = parseLocationCode(normalized);
+  const bytes = buildSwitchPreset(locationIndex);
+  const conn = ensureMidi();
+  const captured: number[][] = [];
+  const unsubscribe = conn.onMessage((msg) => {
+    if (msg[0] === 0xf0) captured.push([...msg]);
+  });
+  conn.send(bytes);
+  await new Promise<void>((resolve) => setTimeout(resolve, WRITE_ECHO_TIMEOUT_MS));
+  unsubscribe();
+  const formatCaptured = (): string => {
+    if (captured.length === 0) return '  (none)';
+    return captured.map((m, i) => `  [${i}] (${m.length}B) ${toHex(m)}`).join('\n');
+  };
+  return {
+    content: [{
+      type: 'text',
+      text:
+        `Switched to preset ${formatLocationCode(locationIndex)} (index ${locationIndex}). ` +
+        `Any unsaved working-buffer edits were discarded. Verify on the AM4 display.\n` +
+        `Sent (${bytes.length}B): ${toHex(bytes)}\n` +
+        `All inbound SysEx during the ${WRITE_ECHO_TIMEOUT_MS} ms window:\n` +
+        formatCaptured(),
+    }],
+  };
+});
+
+server.registerTool('switch_scene', {
+  description: [
+    'Switch to one of the four scenes in the current preset. Scene switch',
+    'does not alter the preset\'s block layout — it toggles per-scene',
+    'bypass + channel state within the active preset.',
+    'SCOPE: current working buffer only. No persistence concerns — scene',
+    'index isn\'t stored; the next preset load starts at its default scene.',
+  ].join(' '),
+  inputSchema: {
+    scene_index: z.number().int().min(1).max(4).describe(
+      'Scene number 1..4 (matches AM4-Edit\'s UI numbering). Index 0..3 internally.',
+    ),
+  },
+}, async ({ scene_index }) => {
+  const sceneIdx = scene_index - 1;
+  const bytes = buildSwitchScene(sceneIdx);
+  const conn = ensureMidi();
+  const captured: number[][] = [];
+  const unsubscribe = conn.onMessage((msg) => {
+    if (msg[0] === 0xf0) captured.push([...msg]);
+  });
+  conn.send(bytes);
+  await new Promise<void>((resolve) => setTimeout(resolve, WRITE_ECHO_TIMEOUT_MS));
+  unsubscribe();
+  const formatCaptured = (): string => {
+    if (captured.length === 0) return '  (none)';
+    return captured.map((m, i) => `  [${i}] (${m.length}B) ${toHex(m)}`).join('\n');
+  };
+  return {
+    content: [{
+      type: 'text',
+      text:
+        `Switched to scene ${scene_index}. Verify on the AM4 display.\n` +
         `Sent (${bytes.length}B): ${toHex(bytes)}\n` +
         `All inbound SysEx during the ${WRITE_ECHO_TIMEOUT_MS} ms window:\n` +
         formatCaptured(),

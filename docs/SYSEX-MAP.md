@@ -443,14 +443,15 @@ slot until factory-preset safety classification lands (P1-008).
 
 ---
 
-## 6e. Rename (preset and scene) 🟢 preset / 🟡 scene
+## 6e. Rename (preset and scene) 🟢
 
-**Cracked Session 19** from `session-20-rename-preset.pcapng` and
-`session-20-rename-scene.pcapng`. Renaming a preset or a scene uses a
-shared command shape with a new action byte (`0x000C`) on the same
-block-slot register family (`pidLow=0x00CE`).
+**Cracked Session 19 (preset), Session 21 (scene)** from the capture
+set `session-20-rename-preset.pcapng` + `session-20-rename-scene.pcapng`
+(scene 1) + `session-22-rename-scene-{2,3,4}.pcapng`. Renaming a
+preset or a scene uses a shared command shape with action byte `0x000C`
+on the same block-slot register family (`pidLow=0x00CE`).
 
-### Preset rename (fully decoded)
+### Preset rename
 
 - **function** `0x01` (PARAM_RW)
 - **pidLow** `0x00CE`, **pidHigh** `0x000B`
@@ -469,19 +470,34 @@ block-slot register family (`pidLow=0x00CE`).
 |---------|----------|----------------------|
 | Rename Z04 → "boston" | `buildSetPresetName(103, "boston")` | `F0 00 01 74 15 01 4E 01 0B 00 0C 00 00 00 24 00 33 40 00 00 03 09 5E 73 3A 1B 6D 62 01 00 40 20 10 08 04 02 01 00 40 20 10 08 04 02 01 00 40 20 10 08 04 02 01 00 40 20 10 00 09 F7` |
 
-### Scene rename (partially decoded, 🟡)
+### Scene rename
 
-The captured scene rename has the same envelope, same action (0x000C),
-same 36-byte payload shape (bytes 0..3 = zeros, bytes 4..35 = 32-byte
-space-padded ASCII name), but a different **pidHigh** — `0x0037` in
-the one capture we have. Open question: which scene (1..4) maps to
-which pidHigh? Only one scene was renamed in the capture, so we know
-0x0037 ↔ some specific scene but not the full table.
+Same envelope, same action (0x000C), same 36-byte payload shape as
+preset rename, with two differences:
+- **pidHigh** follows the linear pattern `0x0037 + sceneIndex`
+  (scenes 1..4 → 0x0037 / 0x0038 / 0x0039 / 0x003A).
+- Payload bytes 0..3 are **zeroed** — scene names are scoped to the
+  working buffer, not a preset location.
 
-**To finish decoding:** capture three more scene renames (one for each
-of scenes 2, 3, 4). Likely pattern: four consecutive pidHighs
-0x0037..0x003A. Once confirmed, `buildSetSceneName(sceneIndex, name)`
-is a trivial variant of `buildSetPresetName`. Tracked in BK-011.
+#### Captured goldens (byte-exact in `verify-msg`)
+
+| Capture | Built by | pidHigh |
+|---------|----------|---------|
+| Rename scene 2 → "clean"  | `buildSetSceneName(1, "clean")`  | `0x0038` |
+| Rename scene 3 → "chorus" | `buildSetSceneName(2, "chorus")` | `0x0039` |
+| Rename scene 4 → "lead"   | `buildSetSceneName(3, "lead")`   | `0x003A` |
+
+Scene 1 rename (pidHigh `0x0037`) is covered by the Session 19g
+capture and served as the anchor point for the linear map.
+
+### Persistence — still open
+
+Hardware test pending (HW-002 preset rename, HW-008 scene rename):
+do these writes stick across a preset reload, or do they live in the
+working buffer only until `save_to_location` runs? Scene rename is
+explicitly working-buffer-scoped on the wire (zeroed slot field);
+preset rename addresses a specific location but the AM4 may still
+require an explicit save.
 
 ### Payload packing — chunked (7 raw → 8 wire)
 
@@ -499,7 +515,57 @@ correct chunking.
 ### WRITE SAFETY
 
 Same as save-to-slot — `set_preset_name` is hard-gated to Z04 until
-P1-008 relaxes the restriction.
+P1-008 relaxes the restriction. `set_scene_name` is NOT gated
+because it writes to the working buffer only; the scene names land
+at a stored location only if the caller explicitly follows up with
+`save_to_location`.
+
+---
+
+## 6f. Scene-switch + Preset-switch (active-preset navigation) 🟢
+
+Two reads/writes that change what the AM4 currently plays without
+modifying any stored preset. Both live on the same
+`pidLow=0x00CE` register family as block placement and rename, but
+differ in payload encoding.
+
+### Scene switch (confirmed Session 21)
+
+- **pidLow** `0x00CE`, **pidHigh** `0x000D`
+- **action** `0x0001` (standard WRITE)
+- **Payload** (4 raw): uint32 LE scene index `0..3` (0 ↔ UI scene 1,
+  3 ↔ UI scene 4).
+
+Decoded across `session-18-switch-scene.pcapng` (scene 2) +
+`session-21-switch-scene-1-3-4.pcapng` (scenes 1/3/4). Byte-exact
+goldens for all four scenes in `verify-msg`. `buildSwitchScene` +
+`switch_scene` MCP tool.
+
+### Preset switch (confirmed Session 21)
+
+- **pidLow** `0x00CE`, **pidHigh** `0x000A`
+- **action** `0x0001` (standard WRITE)
+- **Payload** (4 raw): **IEEE 754 LE float32** of the preset location
+  index (A01 → 0.0, Z04 → 103.0).
+
+**Encoding note:** float32 is unusual here — scene-switch, save-to-
+slot, and preset-rename all use u32 LE for their index fields. Preset
+switch is the only command in the family using float32. Both
+encodings coexist on the same register; readers must distinguish by
+pidHigh (0x000A → float, 0x000D → u32).
+
+Decoded from `session-22-switch-preset-via-ui.pcapng` (user clicked
+A01 → A02 → A01 in AM4-Edit, yielding float 1.0 and float 0.0
+writes). Byte-exact goldens for locations 0 and 1 in `verify-msg`.
+`buildSwitchPreset` + `switch_preset` MCP tool.
+
+### UX implication
+
+`switch_preset` loads the target location into the working buffer,
+**discarding any unsaved edits**. Callers should confirm intent
+before issuing after a session of `apply_preset` / `set_param`
+activity. The MCP tool description carries this warning; upstream
+prompt behavior is the founder's call.
 
 ---
 

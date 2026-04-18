@@ -28,8 +28,13 @@ Claude picks up from there and moves the item to ⏳ or ✅.
 
 ## Active queue — AM4 (Phase 1 wrap)
 
-### HW-001 — Capture scenes 1/3/4 switches 🔜
+### HW-001 — Capture scenes 1/3/4 switches ✅
 
+- **Captured 2026-04-18:** `samples/captured/session-21-switch-scene-1-3-4.pcapng`
+- **Decoded Session 21:** confirmed `value = scene index 0..3` (u32 LE),
+  pidHigh fixed at `0x000D`. Byte-exact goldens for all 4 scenes in
+  `verify-msg`. `buildSwitchScene` unchanged; `switch_scene` MCP tool
+  registered.
 - **For:** confirms scene-switch decode (STATE.md "single next action";
   Session 20 tentative)
 - **Why:** Session 20 captured only the switch *to* scene 2 and
@@ -88,8 +93,17 @@ Claude picks up from there and moves the item to ⏳ or ✅.
   from the tool response. We'll diff it against AM4-Edit's save
   traffic in `session-18-save-preset-z04.pcapng`.
 
-### HW-004 — Capture scene renames for scenes 2, 3, 4 🔜
+### HW-004 — Capture scene renames for scenes 2, 3, 4 ✅
 
+- **Captured 2026-04-18:**
+  - `samples/captured/session-22-rename-scene-2.pcapng` (name "clean")
+  - `samples/captured/session-22-rename-scene-3.pcapng` (name "chorus")
+  - `samples/captured/session-22-rename-scene-4.pcapng` (name "lead")
+- **Decoded Session 21:** pidHigh linear pattern
+  `0x0037 + sceneIndex` (scenes 1..4 → 0x37/0x38/0x39/0x3A). Payload
+  identical to preset rename except bytes 0..3 are zeroed (working-buffer
+  scope). `buildSetSceneName` + `set_scene_name` MCP tool landed.
+  Closes BK-011 decode. Scene 1 name still uses Session 19g capture.
 - **For:** BK-011 (scene naming completion)
 - **Why:** scene 1 rename was captured (pidHigh=`0x0037`), Session 19g
   extrapolated the per-scene mapping but hasn't verified scenes 2–4.
@@ -104,8 +118,15 @@ Claude picks up from there and moves the item to ⏳ or ✅.
   rename capture, with a different pidHigh per scene. Report the three
   new pidHighs (or confirm no pattern).
 
-### HW-005 — Re-capture AM4-Edit switching presets (UI-initiated) 🔜
+### HW-005 — Re-capture AM4-Edit switching presets (UI-initiated) ✅
 
+- **Captured 2026-04-18:** `samples/captured/session-22-switch-preset-via-ui.pcapng`
+- **Decoded Session 21:** preset switch is a `SET_FLOAT_PARAM` at
+  `pidLow=0x00CE / pidHigh=0x000A`, value = preset location index as
+  **float32** (NOT u32 — differs from scene-switch and save-to-slot
+  which use u32). User's A01→A02→A01 click sequence captured as
+  float 1.0 and float 0.0. `buildSwitchPreset` + `switch_preset` MCP
+  tool landed.
 - **For:** Phase 1 wrap — preset-switch decode (currently inconclusive,
   STATE.md "deferred")
 - **Why:** `session-18-switch-preset.pcapng` shows heavy read-poll
@@ -122,6 +143,68 @@ Claude picks up from there and moves the item to ⏳ or ✅.
 - **Expected:** 1–2 clean outgoing writes distinct from the polling
   noise. Report the isolated frames (`parse-capture` handles the
   separation).
+
+### HW-006 — Hardware-test `switch_scene` 🔜
+
+- **For:** Session 21 new tool — verify the `switch_scene` MCP tool
+  actually moves the AM4 through all four scenes
+- **Why:** byte-exact goldens match the wire, but the device's
+  interpretation of the write (does the LED / display update?) is
+  a separate question that only hardware confirms.
+- **Steps:**
+  1. Restart Claude Desktop (picks up `switch_scene`; 14 tools now).
+  2. Load any preset on the AM4 (Z04 is fine).
+  3. Ask Claude *"switch to scene 2"*. Watch the AM4 scene indicator.
+  4. Repeat for scenes 3, 4, 1.
+- **Report which outcome you see:**
+  - All four scene switches visible on the AM4 display → ✅ done.
+  - Some scenes work but not others → pidHigh map wrong for the
+    failing ones; report which.
+  - Nothing visible → the write lands on a different register than
+    the visual scene indicator; decode incomplete.
+
+### HW-007 — Hardware-test `switch_preset` 🔜
+
+- **For:** Session 21 new tool — verify `switch_preset` loads the
+  target location into the working buffer, including edge locations
+- **Why:** goldens cover locations 0 (A01) and 1 (A02); Z04 (index
+  103) and mid-range banks (e.g. M02) are untested. Float encoding
+  should handle them identically, but worth confirming.
+- **Steps:**
+  1. Restart Claude Desktop.
+  2. On the AM4, load some distinctive preset (e.g. A01).
+  3. Ask Claude *"switch to preset B03"*. AM4 display should switch.
+  4. Ask *"switch to Z04"* (edge case — index 103).
+  5. Ask *"switch to M02"* (mid-range bank).
+  6. Return to A01.
+- **Destructive test (optional):** make an unsaved change (e.g.
+  `set_param amp.gain 8`), then `switch_preset A01`. Confirm the
+  unsaved edit is gone when you reload Z04.
+- **Report:** any locations that failed to load, or where the AM4
+  display disagreed with the asked location.
+
+### HW-008 — Hardware-test `set_scene_name` persistence 🔜
+
+- **For:** BK-011 (scene naming) — same persistence question we asked
+  for preset rename (HW-002)
+- **Why:** `set_scene_name` writes to the working buffer. Unknown
+  whether subsequent `save_to_location` persists the scene names with
+  the preset, or whether they're transient.
+- **Steps:**
+  1. Restart Claude Desktop (picks up `set_scene_name`).
+  2. Build a preset on Z04 (`apply_preset`).
+  3. Ask Claude *"rename scene 2 to 'verse', scene 3 to 'chorus', scene 4 to 'solo'"*.
+  4. Check names on the AM4 display (navigate to each scene).
+  5. Call `save_to_location Z04`.
+  6. Load a different preset (A01), then return to Z04.
+- **Report which outcome you see:**
+  - Scene names persist through save + preset switch → ✅ naming
+    stack complete, BK-011 fully closed.
+  - Scene names show before save but are blank after preset switch →
+    save doesn't capture scene names; need a separate "save scene
+    names" command to decode.
+  - Scene names don't even show immediately after rename → likely
+    pidHigh or payload bug we missed; report what you saw.
 
 ---
 

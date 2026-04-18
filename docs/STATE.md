@@ -5,7 +5,15 @@
 > hardware tasks (USB captures, round-trip tests, reference dumps) live
 > in **`docs/HARDWARE-TASKS.md`** — check that file alongside this one at
 > session start.
-> Last updated: **2026-04-17** (Session 20 (cont) — P3-007 lineage
+> Last updated: **2026-04-18** (Session 21 — scene-switch confirmed,
+> scene-rename pidHigh map (`0x37 + sceneIndex`), preset-switch decoded
+> as `SET_FLOAT_PARAM` at `pidLow=0xCE / pidHigh=0x0A` with float32
+> location index (differs from u32 semantics of scene-switch / save /
+> rename). Three new MCP tools landed: `set_scene_name`, `switch_preset`,
+> `switch_scene`. Server now exposes 14 tools. 33/33 verify-msg goldens,
+> preflight green. Three new round-trip hardware tests queued —
+> HW-006/007/008.)
+> Prior context (Session 20 (cont)): P3-007 lineage
 > dictionaries shipped. `scripts/extract-lineage.ts` parses the wiki scrape
 > + Blocks Guide PDF into `src/knowledge/{amp,drive,reverb,delay,
 > compressor,cab}-lineage.json`. Coverage: amp 219/248 matched (88%)
@@ -61,23 +69,22 @@ float32. One open question remains before the IR can cover full presets:
 
 ## The single next action
 
-### Capture switches to scenes 1/3/4 to confirm scene-switch pidHigh
+### Hardware-test the 3 new tools from Session 21 (HW-006 / HW-007 / HW-008)
 
-Session 20 decoded scene switch tentatively from a single-transition
-capture (value=1 → scene 2). To confirm the "value = scene index 0..3"
-model instead of "pidHigh changes per scene", capture AM4-Edit switching
-to each of scenes 1, 3, 4 and compare.
+Session 21 decoded scene-switch confirmation, scene-rename map, and
+preset-switch — server now exposes 14 tools including `switch_scene`,
+`switch_preset`, and `set_scene_name`. The wire bytes are byte-exact
+against goldens, but the device's behavior on the writes is only
+confirmable by watching the AM4 display. Queue details are in
+`docs/HARDWARE-TASKS.md`.
 
-1. Run USBPcap on the AM4 interface.
-2. In AM4-Edit, click scene 1 → 3 → 4 → 1 (or similar).
-3. Save as `samples/captured/session-21-switch-scene-1-3-4.pcapng`.
-4. `parse-capture` → expect three 23-byte writes all at pidLow=0x00CE,
-   pidHigh=0x000D, action=0x0001, varying only in the packed value
-   (u32 LE 0, 2, 3 respectively). If they instead have *different*
-   pidHighs and the same value, that's the "pidHigh-per-scene" model
-   and `buildSwitchScene` needs a different shape.
+Summary for Claude Desktop (restart required to pick up 14 tools):
 
-Hardware-test follow-ups (deferred from last session, still outstanding):
+- **HW-006 `switch_scene`** — ask *"switch to scene 2, then 3, then 4, then 1"*. Confirm the AM4 scene indicator moves each time.
+- **HW-007 `switch_preset`** — ask *"switch to B03"*, *"switch to Z04"*, *"switch to M02"*. Confirm the AM4 preset display matches.
+- **HW-008 `set_scene_name`** — ask *"rename scene 2 to 'verse', scene 3 to 'chorus', scene 4 to 'solo'"*, then `save_to_location Z04`, then load A01 and back to Z04. Confirm the names persist across preset switches.
+
+Hardware-test follow-ups (deferred from prior sessions, still outstanding):
 
 ### Hardware-test `set_preset_name` and confirm whether rename persists
 

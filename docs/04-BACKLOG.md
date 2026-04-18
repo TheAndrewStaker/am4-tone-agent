@@ -577,25 +577,22 @@ reconnect_midi as a manual escape hatch.
     `am4-protocol` by default, with MCP tool wiring in the server
     package.
 
-### BK-011 Preset and scene naming
-- **Context:** the AM4 supports editable names on both presets and
-  scenes (visible on the device display). The current toolset places
-  blocks and saves to slots but never sets the name, so saved presets
-  keep whatever name the slot had before, which is confusing once a
-  user has built several Z04-style scratch presets.
-- **Prereqs:** capture AM4-Edit renaming a preset AND renaming a scene
-  (separate commands — probably). Likely another PARAM_RW (function
-  0x01) variant with a new action byte and an ASCII payload. Preset
-  name length on Fractal hardware is typically 16–32 chars; scene
-  names typically ~8. Confirm by capture.
-- **Scope:** decode both commands; add `set_preset_name(name)` and
-  `set_scene_name(scene_index, name)` MCP tools; extend `apply_preset`
-  to take an optional `name` field; extend the (future) scene payload
-  to take per-scene names. Validation: length limits + ASCII-only
-  per the device's character set.
-- **Unlock:** when a user says "build the Boston Rockman tone and save
-  it", the resulting Z04 entry reads "Boston Rockman" on the device
-  instead of "Z04 scratch" or leftover name.
+### ~~BK-011~~ Preset and scene naming — 🟢 decode shipped Session 21
+- **Shipped:** `buildSetPresetName` (Session 19g) + `buildSetSceneName`
+  (Session 21) decoded. MCP tools `set_preset_name` and `set_scene_name`
+  registered. Scene pidHigh map is `0x0037 + sceneIndex` (scenes 1..4).
+  Both 32-byte payloads space-padded, ASCII-only validated. Byte-exact
+  goldens in `verify-msg`.
+- **Remaining work:** hardware-test whether the rename writes persist
+  across preset reloads (HW-002 for preset, HW-008 for scene). If the
+  writes are working-buffer-scoped, design a combined `save_preset`
+  tool that chains `save_to_location` + `set_preset_name` +
+  `set_scene_name`s in one call so the agent doesn't have to orchestrate
+  the ordering manually.
+- **Unlock:** when a user says *"build the Boston Rockman tone and
+  save it"*, the saved preset reads "Boston Rockman" on the device
+  instead of leftover name. Scene names surface in the UI for
+  rehearsal / gig clarity.
 
 ### BK-009 `get_block_layout` — read current working-buffer chain
 - **Context:** Claude Desktop suggested (Session 19) that additive tweaks
@@ -613,13 +610,22 @@ reconnect_midi as a manual escape hatch.
 - **Unlock:** additive edits, "what's in slot 2?" queries, apply_preset
   can diff before writing instead of clobbering.
 
-### BK-010 Scene support in `apply_preset`
+### BK-010 Scene support in `apply_preset` — ⏳ partial (switch decoded, per-scene payload still open)
 - **Context:** AM4 has 4 scenes per preset for per-scene bypass +
   channel assignment. "Make this louder for the solo" is natural.
-- **Captures:** `session-18-switch-scene.pcapng` exists, not decoded.
-- **Scope:** decode the scene-switch protocol; extend `apply_preset`
-  shape to take `scenes: [{ index: 1..4, bypass?: [...], channels?: {...} }]`;
-  add `set_scene(index)` MCP tool for live scene changes.
+- **Decoded (Session 20 + Session 21):** scene-switch command —
+  `pidLow=0x00CE / pidHigh=0x000D`, u32 LE scene index 0..3. MCP tool
+  `switch_scene(scene_index)` shipped; hardware-test queued as HW-006.
+  Scene-rename also shipped (BK-011). Scene-to-scene transitions now
+  usable end-to-end.
+- **Still open for BK-010's real goal:** extending `apply_preset` IR
+  to carry per-scene bypass + channel state. The `apply_preset` shape
+  should accept `scenes: [{ index: 1..4, bypass?: [...], channels?: {...} }]`
+  and emit the correct write sequence. The per-scene bypass/channel
+  commands are NOT decoded — we know scene index changes via switch,
+  but the underlying "this block is bypassed in scene N" writes haven't
+  been captured. Capture of AM4-Edit toggling bypass-per-scene is the
+  next protocol step.
 - **Prereqs:** per-block channel pidHighs need one capture each to
   confirm (we extrapolated from amp.channel in Session 08 but only
   amp is verified).
