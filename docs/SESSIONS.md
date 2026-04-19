@@ -6,6 +6,96 @@ file is the chronological trail that reference is built from.
 
 ---
 
+## 2026-04-19 — Session 25 (cont) — startup-banner port scan + P1-010 Session A
+
+Two follow-on non-HW release items after the midi_ports / error-path
+work earlier in the session.
+
+### Startup banner now logs port detection (P5-009 #3)
+
+`main()` in `src/server/index.ts` calls `listMidiPorts()` at boot
+and logs a verdict to stderr. Claude Desktop surfaces stderr in its
+MCP log, so the user sees the server's view of the USB state
+before any tool call:
+
+```
+AM4 Tone Agent MCP server running on stdio.
+Startup port scan: AM4 detected (in: "AM4", out: "AM4").
+```
+
+Four verdict states map to the same logic as `list_midi_ports`:
+
+- both directions visible → "AM4 detected (in: ..., out: ...)"
+- one direction visible → "AM4 partially visible — one direction missing; check driver"
+- zero MIDI ports → "no MIDI ports visible (driver likely not installed)"
+- ports present but no AM4 → "AM4 not visible among N inputs / M outputs"
+
+Port enumeration is wrapped in try/catch — if node-midi throws on a
+hostile platform, the server still starts and logs the enumeration
+failure instead of dying.
+
+### P1-010 Session A — bulk param registration infrastructure
+
+Session A ships the pipeline that closes P1-007's coverage gate
+without 400 one-off hardware captures. Three new files + one new
+preflight golden:
+
+- `src/protocol/paramNames.ts` — hand-maintained name table. Keyed
+  by `(block, id)`. Seed: 20 entries (every in-band name in
+  KNOWN_PARAMS today — amp.gain/bass/type, drive.drive/type,
+  reverb.mix/type, delay.time/type, and the 11 Tier-3 block Type
+  selectors confirmed in Session 18).
+- `scripts/gen-params-from-cache.ts` — walks every CONFIRMED cache
+  block (per `docs/CACHE-BLOCKS.md`), looks up each record's id in
+  paramNames.ts, infers the unit from the cache `c` scale field
+  (c=10→knob_0_10, c=100→percent, c=1000→ms, c=1→db, enum→enum),
+  and emits `src/protocol/cacheParams.ts` with one
+  `KNOWN_PARAMS`-shape entry per surviving record.
+- `src/protocol/cacheParams.ts` — generated, committed (like
+  cacheEnums.ts). 20 entries for now; grows as paramNames.ts fills.
+- `scripts/verify-cache-params.ts` — preflight golden. For every
+  key in CACHE_PARAMS, asserts the entry matches KNOWN_PARAMS on
+  pidLow/pidHigh/unit/displayMin/displayMax/enumValues. Fails loudly
+  on any divergence. 20/20 pass today, which means the generator
+  produces the same Param entries the hand-authored registry does.
+
+**Why this matters for release.** P5-009 item 6 flags param
+hallucination as a release-blocking UX regression — Claude invents
+full-size-Fractal params (mid/treble/presence on amp, feedback/mix
+on delay) that AM4 doesn't expose. Today's KNOWN_PARAMS registers
+only 25 params across 15 blocks; the cache holds ~200–350
+addressable records. Session A unblocks the coverage sweep: each
+name added to paramNames.ts is one more param Claude can
+meaningfully call. Session B (the name-filling exercise, probably
+2–3 sessions of Blocks Guide + AM4-Edit cross-reference work) can
+now land without touching the generator or the verifier.
+
+**Out-of-band params stay hand-authored.** Five params in
+KNOWN_PARAMS don't appear in the cache at all:
+`amp.level` (pidHigh=0x0000, no id=0 record) and
+`{amp,drive,reverb,delay}.channel` (pidHigh=0x07D2, no cache row).
+These remain declared in `params.ts` directly; the generator
+ignores them and the verifier doesn't flag them because they
+don't appear in CACHE_PARAMS.
+
+**npm scripts:** `gen-params` regenerates cacheParams.ts after
+editing paramNames.ts; `verify-cache-params` runs the golden.
+Both are in the `test` chain.
+
+### Files touched (this sub-session)
+
+- `src/server/index.ts` — startup-banner port scan.
+- `src/protocol/paramNames.ts` — new, hand-authored name seed.
+- `scripts/gen-params-from-cache.ts` — new, generator.
+- `src/protocol/cacheParams.ts` — new, generated.
+- `scripts/verify-cache-params.ts` — new, golden.
+- `package.json` — `gen-params` + `verify-cache-params` scripts
+  (verifier added to `test` chain).
+- `docs/STATE.md`, `docs/04-BACKLOG.md`, `docs/PROMPT-COVERAGE.md` —
+  marked P5-009 #3 shipped, P1-010 Session A shipped.
+
+---
+
 ## 2026-04-19 — Session 25 — P5-009 release-polish (list_midi_ports + graceful AM4-not-found)
 
 **Goal:** close the first two P5-009 pre-release ergonomics items —

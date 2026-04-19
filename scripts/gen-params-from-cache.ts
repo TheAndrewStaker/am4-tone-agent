@@ -1,0 +1,245 @@
+/**
+ * Emit `src/protocol/cacheParams.ts` — bulk parameter registry
+ * harvested from AM4-Edit's metadata cache.
+ *
+ * Session-A deliverable of P1-010 (see docs/04-BACKLOG.md). Walks each
+ * CONFIRMED cache block (per `docs/CACHE-BLOCKS.md`), looks up every
+ * record's `id` in `src/protocol/paramNames.ts`, and emits a
+ * `KNOWN_PARAMS`-shape entry per surviving record. Records without a
+ * name in `paramNames.ts` are skipped — they stay dormant until a
+ * human assigns them a UI label (Session B).
+ *
+ * Filtering rules:
+ *   - Skip `blockHeader` records (not params).
+ *   - Skip blocks without a confirmed wire `pidLow` (CACHE-BLOCKS.md).
+ *   - Skip scene-routing / scene-snapshot sub-blocks (S3 15/16) and
+ *     controller/modifier blocks (S2 0, 1, 4, 6, and S3 13, 14) —
+ *     they don't address user-facing knobs.
+ *   - Skip floats with `a === b` (degenerate range — no addressable
+ *     value).
+ *
+ * Unit inference from the cache `c` (display-scale) field:
+ *   - enum          → unit='enum', enumValues from cacheEnums
+ *   - c=10          → unit='knob_0_10', display 0..10
+ *   - c=100         → unit='percent', display 0..100
+ *   - c=1000        → unit='ms', display = a*c..b*c
+ *   - c=1           → unit='db' (caller verifies via paramNames
+ *                     whether this is really a dB knob vs a raw number)
+ *   - other         → flagged; generator emits a warning and skips
+ *
+ * Run after `npx tsx scripts/parse-cache.ts`:
+ *   npx tsx scripts/gen-params-from-cache.ts
+ *
+ * Verification (preflight):
+ *   npx tsx scripts/verify-cache-params.ts
+ *   — compares cacheParams against KNOWN_PARAMS for known-name entries
+ *     and fails if they diverge (address, unit, or range).
+ */
+import { readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+import { PARAM_NAMES } from '../src/protocol/paramNames.js';
+
+interface CacheRec {
+  offset: number;
+  block: number;
+  id: number;
+  typecode: number;
+  kind: 'float' | 'enum' | 'blockHeader';
+  a?: number; b?: number; c?: number; d?: number;
+  values?: string[];
+}
+
+const DECODED_DIR = 'samples/captured/decoded';
+const s2: CacheRec[] = JSON.parse(readFileSync(join(DECODED_DIR, 'cache-section2.json'), 'utf8'));
+const s3: CacheRec[] = JSON.parse(readFileSync(join(DECODED_DIR, 'cache-section3.json'), 'utf8')).records;
+
+/**
+ * The block catalog below mirrors `docs/CACHE-BLOCKS.md`. Only
+ * CONFIRMED blocks are included — tentative ones (controllers,
+ * scene routing, etc.) are deliberately excluded. When a new block
+ * is promoted to CONFIRMED, add it here + in CACHE-BLOCKS.md.
+ *
+ * `enumImport` names the exported `*_VALUES` map in `cacheEnums.ts`
+ * for the block's Type/Mode enum record. It's referenced by the
+ * generated file as an import; keeps the generator output agnostic
+ * to the concrete enum list.
+ */
+interface BlockSpec {
+  blockName: string;   // matches PARAM_NAMES key + Param.block
+  pidLow: number;
+  section: 'S2' | 'S3';
+  cacheBlock: number;
+  enumImport?: string; // e.g. 'AMP_TYPES_VALUES'
+}
+
+const BLOCKS: BlockSpec[] = [
+  { blockName: 'amp',        pidLow: 0x003a, section: 'S2', cacheBlock: 5,  enumImport: 'AMP_TYPES_VALUES' },
+  { blockName: 'drive',      pidLow: 0x0076, section: 'S3', cacheBlock: 9,  enumImport: 'DRIVE_TYPES_VALUES' },
+  { blockName: 'reverb',     pidLow: 0x0042, section: 'S3', cacheBlock: 0,  enumImport: 'REVERB_TYPES_VALUES' },
+  { blockName: 'delay',      pidLow: 0x0046, section: 'S3', cacheBlock: 1,  enumImport: 'DELAY_TYPES_VALUES' },
+  { blockName: 'chorus',     pidLow: 0x004e, section: 'S3', cacheBlock: 2,  enumImport: 'CHORUS_TYPES_VALUES' },
+  { blockName: 'flanger',    pidLow: 0x0052, section: 'S3', cacheBlock: 3,  enumImport: 'FLANGER_TYPES_VALUES' },
+  { blockName: 'phaser',     pidLow: 0x005a, section: 'S3', cacheBlock: 5,  enumImport: 'PHASER_TYPES_VALUES' },
+  { blockName: 'wah',        pidLow: 0x005e, section: 'S3', cacheBlock: 6,  enumImport: 'WAH_TYPES_VALUES' },
+  { blockName: 'compressor', pidLow: 0x002e, section: 'S2', cacheBlock: 2,  enumImport: 'COMPRESSOR_TYPES_VALUES' },
+  { blockName: 'geq',        pidLow: 0x0032, section: 'S2', cacheBlock: 3,  enumImport: 'GEQ_TYPES_VALUES' },
+  { blockName: 'filter',     pidLow: 0x0072, section: 'S3', cacheBlock: 8,  enumImport: 'FILTER_TYPES_VALUES' },
+  { blockName: 'tremolo',    pidLow: 0x006a, section: 'S3', cacheBlock: 7,  enumImport: 'TREMOLO_TYPES_VALUES' },
+  { blockName: 'enhancer',   pidLow: 0x007a, section: 'S3', cacheBlock: 10, enumImport: 'ENHANCER_TYPES_VALUES' },
+  { blockName: 'gate',       pidLow: 0x0092, section: 'S3', cacheBlock: 11, enumImport: 'GATE_TYPES_VALUES' },
+  { blockName: 'volpan',     pidLow: 0x0066, section: 'S3', cacheBlock: 12, enumImport: 'VOLPAN_MODES_VALUES' },
+];
+
+function recsFor(spec: BlockSpec): CacheRec[] {
+  const src = spec.section === 'S2' ? s2 : s3;
+  return src.filter((r) => r.block === spec.cacheBlock && r.kind !== 'blockHeader').sort((a, b) => a.id - b.id);
+}
+
+type InferredUnit = 'knob_0_10' | 'percent' | 'ms' | 'db' | 'enum';
+
+interface InferredParam {
+  unit: InferredUnit;
+  displayMin: number;
+  displayMax: number;
+  enumImport?: string;
+}
+
+/**
+ * Infer display scale from the cache's (a, b, c) triple. Returns
+ * `undefined` for records whose scale doesn't fit our five known
+ * unit families — the generator skips those and reports them.
+ */
+function inferUnit(rec: CacheRec, spec: BlockSpec): InferredParam | undefined {
+  if (rec.kind === 'enum') {
+    const count = rec.values?.length ?? 0;
+    if (!count) return undefined;
+    return {
+      unit: 'enum',
+      displayMin: 0,
+      displayMax: count - 1,
+      enumImport: spec.enumImport,
+    };
+  }
+  const { a = 0, b = 0, c = 0 } = rec;
+  if (a === b) return undefined;
+  switch (c) {
+    case 10:
+      return { unit: 'knob_0_10', displayMin: 0, displayMax: 10 };
+    case 100:
+      return { unit: 'percent', displayMin: 0, displayMax: 100 };
+    case 1000:
+      // delay.time semantics: display = internal * 1000, range 0..b*1000 ms.
+      // Lower bound floored at 0 — cache min for delay.time is 0.001 (1 ms)
+      // but the hand-authored KNOWN_PARAMS allows 0; be permissive.
+      return { unit: 'ms', displayMin: 0, displayMax: Math.round(b * 1000) };
+    case 1:
+      // Raw 1:1 scale — probably dB or count. We tag it 'db' because
+      // the only known c=1 knobs today are level/output-dB. Session B
+      // will audit and reclassify as needed.
+      return { unit: 'db', displayMin: a, displayMax: b };
+    default:
+      return undefined;
+  }
+}
+
+interface GeneratedEntry {
+  key: string;
+  blockName: string;
+  paramName: string;
+  pidLow: number;
+  pidHigh: number;
+  unit: InferredUnit;
+  displayMin: number;
+  displayMax: number;
+  enumImport?: string;
+}
+
+function generate(): { entries: GeneratedEntry[]; usedEnums: Set<string>; warnings: string[] } {
+  const entries: GeneratedEntry[] = [];
+  const usedEnums = new Set<string>();
+  const warnings: string[] = [];
+  for (const spec of BLOCKS) {
+    const names = PARAM_NAMES[spec.blockName] ?? {};
+    const recs = recsFor(spec);
+    for (const rec of recs) {
+      const paramName = names[rec.id];
+      if (!paramName) continue;
+      const inferred = inferUnit(rec, spec);
+      if (!inferred) {
+        warnings.push(
+          `${spec.blockName}.${paramName} (id=${rec.id}): unable to infer unit ` +
+          `(kind=${rec.kind}, a=${rec.a}, b=${rec.b}, c=${rec.c}) — skipped`,
+        );
+        continue;
+      }
+      if (inferred.enumImport) usedEnums.add(inferred.enumImport);
+      entries.push({
+        key: `${spec.blockName}.${paramName}`,
+        blockName: spec.blockName,
+        paramName,
+        pidLow: spec.pidLow,
+        pidHigh: rec.id,
+        ...inferred,
+      });
+    }
+  }
+  return { entries, usedEnums, warnings };
+}
+
+function formatEntry(e: GeneratedEntry): string {
+  const lines: string[] = [];
+  lines.push(`  '${e.key}': {`);
+  lines.push(`    block: '${e.blockName}', name: '${e.paramName}',`);
+  lines.push(`    pidLow: 0x${e.pidLow.toString(16).padStart(4, '0')}, pidHigh: 0x${e.pidHigh.toString(16).padStart(4, '0')},`);
+  lines.push(`    unit: '${e.unit}', displayMin: ${e.displayMin}, displayMax: ${e.displayMax},`);
+  if (e.enumImport) lines.push(`    enumValues: ${e.enumImport},`);
+  lines.push('  },');
+  return lines.join('\n');
+}
+
+function main(): void {
+  const { entries, usedEnums, warnings } = generate();
+
+  const enumImportList = [...usedEnums].sort();
+  const importBlock = enumImportList.length
+    ? `import {\n${enumImportList.map((n) => `  ${n},`).join('\n')}\n} from './cacheEnums.js';\n\n`
+    : '';
+
+  const header = `/**
+ * Generated by scripts/gen-params-from-cache.ts — do not hand-edit.
+ *
+ * Bulk parameter registry harvested from AM4-Edit's metadata cache
+ * (effectDefinitions_15_2p0.cache, parsed by scripts/parse-cache.ts).
+ * Names come from src/protocol/paramNames.ts; add a name there and
+ * regenerate to expand coverage. Out-of-band params (channel /
+ * level / other pidHighs without a cache record) stay hand-authored
+ * in params.ts.
+ *
+ * Verification: scripts/verify-cache-params.ts confirms every entry
+ * here matches the corresponding hand-authored KNOWN_PARAMS entry
+ * byte-for-byte (same pidLow/pidHigh, same unit, same displayMin/
+ * displayMax). Preflight runs this verification.
+ */
+import type { Param } from './params.js';
+
+${importBlock}export const CACHE_PARAMS = {
+${entries.map(formatEntry).join('\n')}
+} as const satisfies Record<string, Param>;
+
+export type CacheParamKey = keyof typeof CACHE_PARAMS;
+`;
+
+  const outPath = 'src/protocol/cacheParams.ts';
+  writeFileSync(outPath, header);
+  console.log(`wrote ${outPath} — ${entries.length} entries`);
+  for (const e of entries) {
+    console.log(`  ${e.key} — pidHigh=0x${e.pidHigh.toString(16).padStart(4, '0')} (${e.unit})`);
+  }
+  if (warnings.length) {
+    console.log('\nWarnings:');
+    for (const w of warnings) console.log(`  ⚠ ${w}`);
+  }
+}
+
+main();

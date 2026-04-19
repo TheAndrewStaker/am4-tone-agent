@@ -5,20 +5,22 @@
 > hardware tasks (USB captures, round-trip tests, reference dumps) live
 > in **`docs/HARDWARE-TASKS.md`** — check that file alongside this one at
 > session start.
-> Last updated: **2026-04-19** (Session 25 — P5-009 release-polish
-> items 1 + 2. New `list_midi_ports` MCP tool enumerates every MIDI
-> input/output the server sees and flags which ones look like the AM4
-> ("am4" / "fractal" substring). Does NOT open the AM4 connection —
-> safe to call mid-session and safe to call before the AM4 is plugged
-> in. The "AM4 not found" error path rewritten: now lists common
-> causes (power/USB/driver/AM4-Edit exclusivity), shows visible ports
-> for diagnostics, and points at `list_midi_ports` + `reconnect_midi`
-> as the user-facing recovery path. Tool count 15 → 16. Smoke-server
-> assertion covers the new tool (tool wired up, returns
-> Inputs/Outputs-structured text). No hardware required — enumeration
-> works regardless of AM4 connection state. Preflight green
-> (33/33 verify-msg, 16/16 verify-pack, 8/8 verify-echo,
-> smoke-server 16 tools).)
+> Last updated: **2026-04-19** (Session 25 — three non-HW release
+> items: (a) `list_midi_ports` MCP tool + graceful "AM4 not found"
+> error (P5-009 #1+#2); (b) startup banner extended with port-detection
+> verdict to stderr so users see "AM4 detected / partially visible /
+> no MIDI ports visible" the moment the server boots (P5-009 #3);
+> (c) P1-010 Session A infrastructure — `scripts/gen-params-from-cache.ts`
+> + `src/protocol/paramNames.ts` (seed: 20 names across 15 blocks)
+> + generated `src/protocol/cacheParams.ts` + `scripts/verify-cache-
+> params.ts` golden that fails preflight if CACHE_PARAMS diverges
+> from KNOWN_PARAMS. All 20 in-band entries byte-match the hand-
+> authored registry. Adding a new name to paramNames.ts now
+> immediately expands the generated registry; Session B is a
+> manual-table-filling exercise (no infra change needed). Tool
+> count 15 → 16. Preflight green (33/33 verify-msg, 16/16 verify-
+> pack, 8/8 verify-echo, 20/20 verify-cache-params, smoke-server
+> 16 tools).)
 > Prior context (Session 24): BK-027 phase 1 —
 > kitchen-sink `apply_preset`. Added `slots[i].channels` (A/B/C/D →
 > per-channel params) alongside the existing `channel` / `params` shapes.
@@ -297,22 +299,44 @@ index table (only index 8 has been wire-verified).
 Older breakthroughs (sessions 04–08, 10–14) are archived in `SESSIONS.md`.
 Sessions 15–19 (current) are kept here for fast orientation.
 
-0000000000. **Session 25 — P5-009 release-polish (list_midi_ports + graceful
-            AM4-not-found).** Two pre-release ergonomics items landed with
-            zero hardware work. New `list_midi_ports` MCP tool enumerates
-            inputs + outputs via a connection-free `listMidiPorts()` helper
-            in `src/protocol/midi.ts`, tagging AM4-looking ports and
-            returning a verdict line ("AM4 input + output both visible" /
-            "Only one of AM4 input/output is visible" / "No MIDI ports of
-            any kind are visible"). The "AM4 not found" error in
-            `connectAM4()` rewritten to list the three common causes
-            (power/USB/driver, AM4-Edit port exclusivity, missing driver),
-            show whatever ports ARE visible, and point at `list_midi_ports`
-            + `reconnect_midi` as the recovery path. Tool count 15 → 16.
-            Smoke-server picked up a `list_midi_ports` assertion — verifies
-            the tool is wired up and returns Inputs/Outputs-structured
-            output (port content itself is environment-dependent). Closes
-            P5-009 items 1 and 2. Preflight green.
+0000000000. **Session 25 — three non-HW release items in one pass.**
+
+            **(a) `list_midi_ports` MCP tool + graceful AM4-not-found
+            (P5-009 #1+#2).** New connection-free `listMidiPorts()` helper
+            in `src/protocol/midi.ts`. Tool enumerates inputs + outputs,
+            tags AM4-looking ports ("am4" / "fractal" substring), returns
+            a verdict ("both visible" / "partially visible" / "no MIDI
+            ports" / "AM4 not visible among N ports"). The `connectAM4()`
+            "AM4 not found" error rewritten: lists common causes
+            (power/USB/driver/AM4-Edit exclusivity), shows visible ports,
+            and points at `list_midi_ports` + `reconnect_midi` as recovery.
+            Tool count 15 → 16. Smoke-server covers the new tool.
+
+            **(b) Startup banner extended (P5-009 #3).** `main()` now
+            logs a port-detection verdict to stderr at boot — "AM4
+            detected (in: ..., out: ...)" on the happy path, or one of
+            three diagnostic strings on failure. Visible in Claude
+            Desktop's MCP server log the moment the server launches,
+            even before the first tool call.
+
+            **(c) P1-010 Session A — bulk param registration infra.**
+            `scripts/gen-params-from-cache.ts` walks every CONFIRMED
+            cache block (per `docs/CACHE-BLOCKS.md`), looks up each
+            record id in `src/protocol/paramNames.ts` (hand-maintained
+            name table), and emits `src/protocol/cacheParams.ts` as
+            generated TypeScript. Unit inference maps cache `c` to
+            one of 5 Units (c=10→knob_0_10, c=100→percent, c=1000→ms,
+            c=1→db, enum→enum). Records without a name in paramNames.ts
+            are skipped (stay dormant until Session B). `scripts/verify-
+            cache-params.ts` is a new preflight golden: it compares
+            CACHE_PARAMS to KNOWN_PARAMS for shared keys and fails on
+            any divergence (pidLow, pidHigh, unit, displayMin/Max,
+            enumValues). 20/20 in-band KNOWN_PARAMS entries regenerate
+            byte-identically from the cache. Coverage-growth path:
+            add a (block, id) → name entry to paramNames.ts, run
+            `npm run gen-params`, preflight proves no regression.
+            npm scripts: `gen-params`, `verify-cache-params`.
+            Preflight green.
 
 000000000. **Session 24 — BK-027 phase 1 (kitchen-sink `apply_preset`).**
            `apply_preset` now accepts `slots[i].channels`, a per-channel

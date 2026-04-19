@@ -1588,7 +1588,27 @@ async function main(): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   // MCP servers log to stderr — stdout is owned by the transport.
+  // The port enumeration mirrors what list_midi_ports would return at
+  // this moment; if the user reports "AM4 not connected" later, the
+  // startup banner captures whatever state the server started with.
   console.error('AM4 Tone Agent MCP server running on stdio.');
+  try {
+    const { inputs, outputs } = listMidiPorts();
+    const am4In = inputs.find((p) => p.looksLikeAM4);
+    const am4Out = outputs.find((p) => p.looksLikeAM4);
+    const verdict = am4In && am4Out
+      ? `AM4 detected (in: "${am4In.name}", out: "${am4Out.name}")`
+      : am4In || am4Out
+        ? 'AM4 partially visible — one direction missing; check driver'
+        : inputs.length === 0 && outputs.length === 0
+          ? 'no MIDI ports visible (driver likely not installed)'
+          : `AM4 not visible among ${inputs.length} inputs / ${outputs.length} outputs`;
+    console.error(`Startup port scan: ${verdict}.`);
+  } catch (err) {
+    // Port enumeration shouldn't throw, but if node-midi barfs on this
+    // platform we don't want startup to die — log and continue.
+    console.error(`Startup port scan failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 main().catch((err) => {

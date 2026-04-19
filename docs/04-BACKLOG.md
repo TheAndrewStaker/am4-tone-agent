@@ -272,6 +272,17 @@ the device's own store command to persist. See `docs/DECISIONS.md`.
 - Reopen only if the puppet-the-device path proves insufficient.
 
 ### P1-010 Bulk param registration from cache (fulfills P1-007 coverage gate)
+- **Status (2026-04-19, Session 25).** Session A infrastructure
+  **shipped.** `scripts/gen-params-from-cache.ts`,
+  `src/protocol/paramNames.ts` (seed table, 20 entries), generated
+  `src/protocol/cacheParams.ts`, and `scripts/verify-cache-params.ts`
+  (preflight golden). Adding a `(block, id) → name` entry to
+  paramNames.ts and running `npm run gen-params` now automatically
+  extends CACHE_PARAMS; preflight proves no regression against
+  hand-authored KNOWN_PARAMS. 20/20 in-band KNOWN_PARAMS entries
+  regenerate byte-identically from the cache. Remaining sessions
+  (B / C / D / E) don't need infra changes — they're name-filling,
+  unit-audit, hardware spot-check, and audit-wiring respectively.
 - **Context.** P1-007 sets the coverage bar; P1-010 is the concrete
   path to get there without 400 one-off captures. Session 15 proved
   **wire `pidHigh` == cache record `id`** for Amp/Drive/Reverb/Delay,
@@ -805,8 +816,13 @@ without installing Node, a C++ toolchain, or editing JSON by hand. See
      users to `list_midi_ports` + `reconnect_midi` as the recovery
      path. No more stack traces on the first tool call when the AM4
      isn't connected.
-  3. Startup-banner log of detected ports to stderr (already present,
-     just confirm it matches what `list_midi_ports` would return).
+  3. ✅ **Shipped Session 25.** Startup banner extended: the server
+     now logs a port-detection verdict to stderr on boot — one of
+     "AM4 detected (in: ..., out: ...)", "AM4 partially visible",
+     "no MIDI ports visible", or "AM4 not visible among N inputs /
+     M outputs". Mirrors what `list_midi_ports` would return at
+     server-start time, so a Claude Desktop user sees the server's
+     view of the USB state in the MCP log before the first tool call.
   4. README with install paths per client (Claude Desktop double-click,
      Claude Code `claude mcp add`, raw JSON config) and a "confirm it
      works" smoke flow ("ask Claude to place a compressor, watch AM4
