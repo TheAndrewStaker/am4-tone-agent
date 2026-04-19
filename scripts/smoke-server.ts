@@ -180,6 +180,69 @@ async function main(): Promise<void> {
   }
   console.log(`✓ lookup_lineage forward (wah/"Cry Babe") returned Dunlop Cry Baby`);
 
+  // apply_preset validation (BK-027 phase 1). Exercises the pre-MIDI
+  // validation path so the smoke test runs without a connected AM4.
+  // Errors from the handler surface as a tool result with isError=true
+  // and a text content block carrying the thrown message.
+  const assertApplyPresetError = async (
+    label: string,
+    args: unknown,
+    expectedFragment: string,
+  ): Promise<void> => {
+    const resp = await request('tools/call', {
+      name: 'apply_preset',
+      arguments: args,
+    });
+    const result = resp.result as
+      | { isError?: boolean; content: { type: string; text: string }[] }
+      | undefined;
+    const errMessage = resp.error?.message ?? result?.content?.[0]?.text ?? '';
+    const rejected = !!resp.error || result?.isError === true;
+    if (!rejected) {
+      throw new Error(`apply_preset ${label}: expected rejection, got success: ${JSON.stringify(resp.result)}`);
+    }
+    if (!errMessage.includes(expectedFragment)) {
+      throw new Error(
+        `apply_preset ${label}: expected error to include "${expectedFragment}", got:\n${errMessage}`,
+      );
+    }
+  };
+
+  await assertApplyPresetError(
+    'mutual exclusion (channel + channels)',
+    { slots: [{ position: 1, block_type: 'amp', channel: 'A', channels: { B: { gain: 5 } } }] },
+    "'channels' (per-channel params) and 'channel'",
+  );
+  console.log(`✓ apply_preset rejects channels+channel combo with mutual-exclusion error`);
+
+  await assertApplyPresetError(
+    'mutual exclusion (params + channels)',
+    { slots: [{ position: 1, block_type: 'amp', params: { gain: 6 }, channels: { A: { bass: 5 } } }] },
+    "'channels' (per-channel params) and 'params'",
+  );
+  console.log(`✓ apply_preset rejects channels+params combo with mutual-exclusion error`);
+
+  await assertApplyPresetError(
+    'channels on a block without channels',
+    { slots: [{ position: 1, block_type: 'compressor', channels: { A: { ratio: 4 } } }] },
+    "doesn't have channels",
+  );
+  console.log(`✓ apply_preset rejects channels on compressor (no channel register)`);
+
+  await assertApplyPresetError(
+    'unknown channel letter',
+    { slots: [{ position: 1, block_type: 'amp', channels: { E: { gain: 6 } } }] },
+    'must be one of A/B/C/D',
+  );
+  console.log(`✓ apply_preset rejects unknown channel letter E`);
+
+  await assertApplyPresetError(
+    'unknown param inside channels.<letter>',
+    { slots: [{ position: 1, block_type: 'amp', channels: { A: { not_a_real_param: 6 } } }] },
+    'channels.A.not_a_real_param',
+  );
+  console.log(`✓ apply_preset surfaces path-like error for unknown param inside channels`);
+
   child.stdin.end();
   await once(child, 'exit');
   const stderrStr = Buffer.concat(stderrChunks).toString('utf8');

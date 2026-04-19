@@ -6,6 +6,92 @@ file is the chronological trail that reference is built from.
 
 ---
 
+## 2026-04-19 — Session 24 — BK-027 phase 1 (kitchen-sink `apply_preset`)
+
+**Goal:** let Claude build a multi-channel preset in one MCP call. The
+realistic prompt from the Session 22 conversation — *"clean tone on
+amp channel A, lead tone on amp channel D, …"* — previously required
+~10 round-trips: `apply_preset` to lay out blocks, then a sequence of
+channel-switches + `set_params` per channel. With per-slot `channels`
+support, the same preset lands in one call.
+
+### Schema change
+
+`slots[i]` gains an optional `channels` field:
+
+```typescript
+slots: [{
+  position: 1,
+  block_type: "amp",
+  channels: {
+    A: { type: "Deluxe Verb Normal", gain: 3, bass: 5 },
+    D: { type: "1959SLP Normal", gain: 8, bass: 6 },
+  },
+}]
+```
+
+Keys are channel letters A/B/C/D (case-insensitive); values are the
+same param-name→value maps as the legacy `params` field. Mutually
+exclusive with `channel` and `params` on the same slot — validation
+surfaces a clear error if a caller combines them. Rejected for blocks
+that don't expose channels (compressor, geq, chorus, flanger, phaser,
+wah, volpan, tremolo, filter, enhancer, gate, rotary, peq).
+
+### Execution order
+
+Per slot with `channels`:
+
+1. Block-placement write (existing).
+2. For each letter in canonical A→B→C→D order that's present in the
+   map:
+   - Channel-switch write.
+   - Param writes in `Object.entries` order for that letter.
+
+Empty channel maps (`channels: { A: {} }`) skip the channel-switch for
+that letter — no redundant writes. Missing letters also skip; only
+the specified channels are touched. Post-call `lastKnownChannel[block]`
+reflects the last channel in the A→B→C→D walk.
+
+### Validation
+
+All validation happens before any MIDI send. Error messages carry a
+path prefix so Claude can surface the exact field that failed:
+
+- `slots[0] (position 1, amp) channels.B.gain: amp.gain out of range [0..10]: 12`
+- `slots[1] (position 2, compressor): block "compressor" doesn't have channels. Drop the channels field …`
+- `slots[0] (position 1, amp) channels.E: must be one of A/B/C/D (case-insensitive), got "E".`
+
+### Testing
+
+Smoke-server (`npm run smoke-server`) gained five validation-path
+assertions:
+
+- Mutual exclusion: `channel + channels` combo → rejected.
+- Mutual exclusion: `params + channels` combo → rejected.
+- `channels` on a non-channel block (compressor) → rejected with
+  block-has-no-channels message.
+- Unknown channel letter (`E`) → rejected with A/B/C/D enumeration.
+- Unknown param inside `channels.A.*` → rejected with path-prefixed
+  error.
+
+All five exercise the pre-MIDI validation layer, so the smoke test
+still runs without a connected AM4. Full preflight green (33/33
+verify-msg, 16/16 verify-pack, 8/8 verify-echo).
+
+### Not in this change
+
+- **Phase 2 (scenes).** `scenes[]` array in `apply_preset` depends on
+  HW-011 decoding scene→channel and scene→bypass writes. Tracked in
+  backlog; not doable without hardware.
+- **Hardware round-trip.** The new shape produces the same primitive
+  writes (channel-switch + SET_PARAM) that Session 19 already
+  verified on hardware. A combined hardware test — e.g. *"build a
+  preset with amp channel A at gain 3 and amp channel D at gain 8"* —
+  is queued as **HW-012** so the founder can confirm the orchestration
+  end-to-end once the next hardware session runs.
+
+---
+
 ## 2026-04-19 — Session 23 — Tool-response trim + unified ack helper
 
 **Goal:** reduce per-tool-call response size in Claude Desktop and unify

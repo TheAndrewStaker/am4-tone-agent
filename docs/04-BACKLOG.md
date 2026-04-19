@@ -1749,6 +1749,12 @@ Skip until explicit user demand materializes.
   likely half the effort because we have a template by then.
 
 ### BK-027 Kitchen-sink `apply_preset` (blocks × channels × scenes, one call)
+- **Status (2026-04-19):** **Phase 1 shipped (Session 24).**
+  `slots[i].channels` per-channel param maps land on the current
+  implementation; smoke-server covers the validation paths. Phase 2
+  (scenes) still blocked on HW-011 decodes. Hardware round-trip of
+  phase 1 is queued as HW-012 — not a release blocker since the
+  underlying writes are previously-verified primitives.
 - **Context.** Session 22 conversation produced a realistic user prompt
   the tool stack currently can't satisfy in one call: *"make a preset
   with a clean scene, a crunch scene, a rhythm scene, and a solo

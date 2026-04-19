@@ -5,8 +5,17 @@
 > hardware tasks (USB captures, round-trip tests, reference dumps) live
 > in **`docs/HARDWARE-TASKS.md`** — check that file alongside this one at
 > session start.
-> Last updated: **2026-04-19** (Session 23 — tool-response trim +
-> unified ack helper. `sendCommandAndAwaitAck` generalized to
+> Last updated: **2026-04-19** (Session 24 — BK-027 phase 1:
+> kitchen-sink `apply_preset`. Added `slots[i].channels` (A/B/C/D →
+> per-channel params) alongside the existing `channel` / `params` shapes.
+> Backwards-compatible extension; mutually exclusive with `channel` /
+> `params` per-slot. Multi-channel preset build ("clean on A, lead on
+> D") now lands in one MCP call instead of the previous ~10 round-trip
+> sequence. Smoke-server gained five validation-path assertions — no
+> hardware required since all exercise the pre-MIDI validation layer.
+> Preflight green. Phase 2 (scenes) still blocked on HW-011.)
+> Prior context (Session 23): tool-response trim + unified ack helper.
+> `sendCommandAndAwaitAck` generalized to
 > `sendAndAwaitAck(conn, bytes, predicate)`; `switch_preset` /
 > `switch_scene` moved from the passive-capture path to predicate-based
 > `isWriteEcho` matching (their ack shape per HW-006/HW-007); `set_param`
@@ -15,7 +24,7 @@
 > No hardware work, no new captures — release-readiness / Claude-Desktop
 > token-efficiency only. Preflight green (33/33 verify-msg, 16/16
 > verify-pack, 8/8 verify-echo, smoke-server 15 tools). No change to
-> tool count; no protocol change.)
+> tool count; no protocol change.
 > Prior context (Session 21): scene-switch confirmed, scene-rename
 > pidHigh map (`0x37 + sceneIndex`), preset-switch decoded as
 > `SET_FLOAT_PARAM` at `pidLow=0xCE / pidHigh=0x0A` with float32
@@ -273,6 +282,24 @@ index table (only index 8 has been wire-verified).
 
 Older breakthroughs (sessions 04–08, 10–14) are archived in `SESSIONS.md`.
 Sessions 15–19 (current) are kept here for fast orientation.
+
+000000000. **Session 24 — BK-027 phase 1 (kitchen-sink `apply_preset`).**
+           `apply_preset` now accepts `slots[i].channels`, a per-channel
+           param map keyed by A/B/C/D (case-insensitive), mutually
+           exclusive with the legacy `channel` / `params` shapes.
+           Validation is atomic and path-like ("slots[0] channels.B.gain:
+           out of range [0..10]: 12"). Per-slot execution walks the
+           channel map in A→B→C→D canonical order regardless of how
+           the caller ordered the object keys — each letter emits a
+           channel-switch write followed by its param writes, so the
+           wire sequence is deterministic. Backwards-compatible: no
+           existing apply_preset call shape changes behavior; this is
+           purely additive. Smoke-server picked up five
+           validation-path assertions (channel+channels conflict,
+           params+channels conflict, channels on a block without
+           channels, unknown letter, unknown param path). Preflight
+           green. Phase 2 (scenes) remains blocked on HW-011 per
+           backlog.
 
 00000000. **Session 23 — tool-response trim + unified ack helper.**
           `sendCommandAndAwaitAck` generalized to

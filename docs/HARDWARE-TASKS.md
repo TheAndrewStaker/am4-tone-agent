@@ -354,6 +354,45 @@ Claude picks up from there and moves the item to ⏳ or ✅.
     a switch) → paste the full sequence of tool-response hex and
     we'll decode.
 
+### HW-012 — Round-trip `apply_preset` with the new per-slot `channels` shape 🔜
+
+- **For:** BK-027 phase 1 (Session 24). The new shape produces the same
+  primitive writes (channel-switch + SET_PARAM) that Session 19 already
+  verified on hardware, but an end-to-end hardware test confirms the
+  orchestration across channels in one call — ordering, per-channel
+  param landing, and `lastKnownChannel` tracking.
+- **Why this isn't automatic.** `apply_preset`'s goldens are captured
+  at the protocol layer (byte-exact against known writes). The channels
+  field stitches several such writes together; stitching-layer bugs
+  (wrong letter mapping, missing channel switch before params, param
+  order mismatch) won't fail the goldens. One hardware session
+  confirms the orchestration.
+- **Steps:**
+  1. Restart Claude Desktop (picks up the extended `apply_preset`
+     schema — no new tool count, same 15 tools).
+  2. Load Z04 on the AM4. Navigate to clear / known state.
+  3. Ask Claude *"build me a preset with amp on slot 1: channel A at
+     gain 3 using Deluxe Verb Normal, and channel D at gain 8 using
+     1959SLP Normal. Reverb on slot 2 with mix 30 on channel A."*
+  4. Observe a **single** `apply_preset` call (not a sequence). Verify
+     on the AM4:
+     - Slot 1 shows amp, slot 2 shows reverb.
+     - Switching the AM4's Amp channel knob between A and D shows the
+       two distinct amp types + gains.
+     - Reverb mix 30 on whichever channel is active.
+  5. Optional: ask *"now switch the amp to channel A"* (or use the
+     hardware knob) and verify gain 3 is there; then channel D and
+     verify gain 8.
+- **Expected outcome:** preset plays correctly with per-channel
+  tonality, zero follow-up tool calls needed after the initial
+  `apply_preset`. If the channel walk misbehaves (e.g. channel D
+  receives channel A's values), capture the tool response text and
+  compare the prepared-writes ✓/? lines against the user's intent.
+- **Not a blocker for release:** this is validation of a
+  convenience-layer change, not a protocol decode. The shape can
+  safely ship pre-test since the underlying writes are all
+  previously-verified primitives.
+
 ### HW-011 — Capture scene→channel and scene→bypass assignments (BK-010 + BK-027) 🔜
 
 - **For:** the two remaining undecoded scene-level writes — (a) "scene N

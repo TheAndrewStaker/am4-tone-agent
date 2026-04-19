@@ -706,32 +706,38 @@ server.registerTool('list_block_types', {
 
 server.registerTool('apply_preset', {
   description: [
-    'Lay out an entire preset in one call: place (or clear) each block slot',
-    'and set the parameters within each placed block. Use this when the',
-    'user is building a tone from scratch or applying a named preset concept',
-    '— it replaces a sequence of set_block_type + set_params calls with a',
+    'Lay out an entire preset in one call: place (or clear) each block slot,',
+    'and fill in parameter values — either for the currently-active channel',
+    'or for specific A/B/C/D channels. Use this when the user is building a',
+    'tone from scratch or applying a named preset concept — it replaces a',
+    'sequence of set_block_type + set_param + channel-switch calls with a',
     'single structured request.',
-    'Shape: { slots: [{ position: 1..4, block_type: "amp"|..., channel?: "A"|"B"|"C"|"D", params?: {...} }] }.',
-    'For each slot the tool emits the block-placement write first, then (if',
-    '`channel` is specified) a channel-switch write for that block, then one',
-    'set-param write per entry in `params`. Params are keyed by the',
-    'parameter name within the block (e.g. { gain: 6, bass: 5 }) — the tool',
-    'joins `block_type` + param name internally. Skip `params` to just place',
-    'the block.',
+    'Each slot accepts these optional shapes (pick at most one per slot):',
+    '  • params — writes to whichever channel the block is on now.',
+    '    Example: { gain: 6, bass: 5 }.',
+    '  • channel + params — switches to the specified channel first, then',
+    '    writes params there. Example: { channel: "B", params: { gain: 8 } }.',
+    '  • channels — per-channel param maps, one entry per channel you want',
+    '    to fill. Keys are A/B/C/D (case-insensitive). Use this to',
+    '    configure multiple channels of the same block in one call — e.g.',
+    '    clean tone on channel A and lead tone on channel D. Example:',
+    '    { channels: { A: { type: "Deluxe Verb Normal", gain: 3 },',
+    '                  D: { type: "1959SLP Normal", gain: 8 } } }.',
+    'Only amp / drive / reverb / delay have channels — `channel` and',
+    '`channels` are rejected for other blocks. Channel maps are written in',
+    'canonical A→B→C→D order so the last-written channel is predictable.',
     'CHANNEL/SCENE MODEL: channels (A/B/C/D) hold the param values; scenes',
-    'pick which channel each block uses. `channel` on a slot selects which',
-    'channel the params get written to, for that block only. Only amp / drive',
-    '/ reverb / delay have channels — the argument is rejected for other',
-    'blocks. If the user wants a preset where one slot varies tone across',
-    'scenes, call apply_preset once per channel to fill out that block\'s',
-    'channel values. If the user doesn\'t mention scenes, omit `channel` and',
-    'the writes land on whatever channel each block is currently on.',
+    'pick which channel each block uses. If the user wants a preset where',
+    'a block varies tone across scenes, use the `channels` shape to fill',
+    'the relevant channels; scenes then select which channel each scene',
+    'plays through (scene→channel writes are not yet implemented in this',
+    'tool — see BK-027 phase 2).',
     'Validation happens up-front; if any slot/param is invalid (duplicate',
     'position, unknown block type, unknown param for that block, value out',
     'of range, unknown enum name, channel on a block that doesn\'t have',
-    'channels) the entire call is rejected with nothing sent. Same ack',
-    'caveat as set_param/set_params: wire-acks confirm receipt, not audible',
-    'change.',
+    'channels, conflicting channel+channels, unknown channel letter) the',
+    'entire call is rejected with nothing sent. Same ack caveat as',
+    'set_param/set_params: wire-acks confirm receipt, not audible change.',
   ].join(' '),
   inputSchema: {
     slots: z.array(z.object({
@@ -740,10 +746,16 @@ server.registerTool('apply_preset', {
         'Block name ("amp", "reverb", "compressor", "none", …). Call list_block_types for the full list.',
       ),
       channel: z.union([z.string(), z.number()]).optional().describe(
-        'Optional A/B/C/D (or 0..3). If supplied for amp / drive / reverb / delay, the tool switches that block\'s channel before writing the slot\'s params. Rejected for blocks without channels.',
+        'Optional A/B/C/D (or 0..3). Single-channel shortcut — switches the block to this channel, then writes `params` there. Mutually exclusive with `channels`. Rejected for blocks without channels.',
       ),
       params: z.record(z.string(), z.union([z.number(), z.string()])).optional().describe(
-        'Map of param name → display value within the block, e.g. { gain: 6, bass: 5 }. Omit or leave empty to just place the block without parameters.',
+        'Map of param name → display value within the block, e.g. { gain: 6, bass: 5 }. Writes to the current channel, or to `channel` if supplied. Mutually exclusive with `channels`. Omit to just place the block.',
+      ),
+      channels: z.record(
+        z.string(),
+        z.record(z.string(), z.union([z.number(), z.string()])),
+      ).optional().describe(
+        'Map of channel letter (A/B/C/D, case-insensitive) → params for that channel. Fills multiple channels of the same block in one slot, e.g. { A: { gain: 3 }, D: { gain: 8 } }. Mutually exclusive with `channel` and `params`. Only valid for amp / drive / reverb / delay.',
       ),
     })).min(1).describe('Ordered list of slots to configure'),
   },
@@ -755,6 +767,48 @@ server.registerTool('apply_preset', {
     | { kind: 'channel'; block: string; index: number; bytes: number[] }
     | { kind: 'param'; block: string; paramName: string; resolved: number; key: ParamKey; display: string; bytes: number[] };
   const prepared: PreparedWrite[] = [];
+
+  /**
+   * Resolve a single (paramName, value) pair within a block into a prepared
+   * param write, or throw a path-prefixed error. Shared by the `params` and
+   * `channels.<letter>` code paths so error messages stay consistent.
+   */
+  const buildParamWrite = (
+    at: string,
+    canonicalBlock: string,
+    paramName: string,
+    value: number | string,
+  ): Extract<PreparedWrite, { kind: 'param' }> => {
+    const key = `${canonicalBlock}.${paramName}` as ParamKey;
+    if (!(key in KNOWN_PARAMS)) {
+      const sameBlock = Object.keys(KNOWN_PARAMS).filter((k) => k.startsWith(`${canonicalBlock}.`));
+      throw new Error(
+        `${at}: unknown param "${paramName}" for block "${canonicalBlock}". ` +
+        (sameBlock.length ? `Known params for ${canonicalBlock}: ${sameBlock.join(', ')}.` : `No params registered for ${canonicalBlock} yet.`),
+      );
+    }
+    const param: Param = KNOWN_PARAMS[key];
+    let resolved: number;
+    try {
+      resolved = resolveValue(param, value);
+    } catch (err) {
+      throw new Error(`${at}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    const enumNameFor = (idx: number): string | undefined =>
+      (param.enumValues as Record<number, string> | undefined)?.[idx];
+    const display = param.unit === 'enum'
+      ? `${resolved} (${enumNameFor(resolved) ?? '?'})`
+      : String(resolved);
+    return {
+      kind: 'param',
+      block: canonicalBlock,
+      paramName,
+      resolved,
+      key,
+      display,
+      bytes: buildSetParam(key, resolved),
+    };
+  };
 
   slots.forEach((slot, i) => {
     const at = `slots[${i}] (position ${slot.position}, ${slot.block_type})`;
@@ -776,6 +830,18 @@ server.registerTool('apply_preset', {
       blockName: canonicalBlock,
       bytes: buildSetBlockType(pos, blockTypeValue),
     });
+
+    // Mutual-exclusion between the three param-shape fields. Catching this
+    // up front gives a clear error before we descend into any of the
+    // branch-specific validation below.
+    if (slot.channels !== undefined) {
+      if (slot.channel !== undefined) {
+        throw new Error(`${at}: 'channels' (per-channel params) and 'channel' (single-channel shortcut) are mutually exclusive. Use one or the other.`);
+      }
+      if (slot.params !== undefined) {
+        throw new Error(`${at}: 'channels' (per-channel params) and 'params' (current-channel params) are mutually exclusive. Move params into channels.<A|B|C|D>.<name> or drop channels.`);
+      }
+    }
 
     if (slot.channel !== undefined) {
       if (canonicalBlock === 'none') {
@@ -804,35 +870,49 @@ server.registerTool('apply_preset', {
         throw new Error(`${at}: params supplied but block_type is "none" (empty slot). Remove params or pick a real block type.`);
       }
       for (const [paramName, value] of Object.entries(slot.params)) {
-        const key = `${canonicalBlock}.${paramName}` as ParamKey;
-        if (!(key in KNOWN_PARAMS)) {
-          const sameBlock = Object.keys(KNOWN_PARAMS).filter((k) => k.startsWith(`${canonicalBlock}.`));
-          throw new Error(
-            `${at}: unknown param "${paramName}" for block "${canonicalBlock}". ` +
-            (sameBlock.length ? `Known params for ${canonicalBlock}: ${sameBlock.join(', ')}.` : `No params registered for ${canonicalBlock} yet.`),
+        prepared.push(buildParamWrite(at, canonicalBlock, paramName, value));
+      }
+    }
+
+    if (slot.channels !== undefined) {
+      if (canonicalBlock === 'none') {
+        throw new Error(`${at}: channels supplied but block_type is "none" (empty slot). Remove channels.`);
+      }
+      if (!CHANNEL_BLOCKS.has(canonicalBlock)) {
+        throw new Error(`${at}: block "${canonicalBlock}" doesn't have channels. Drop the channels field (only amp / drive / reverb / delay expose A/B/C/D).`);
+      }
+      // Normalize keys (case-insensitive, detect collisions like A/a in one
+      // object) and validate each is A/B/C/D. Walking A→B→C→D in canonical
+      // order at emit-time keeps the wire sequence predictable regardless
+      // of how the caller ordered the object's keys.
+      const channelEntries = new Map<'A' | 'B' | 'C' | 'D', Record<string, number | string>>();
+      for (const [rawKey, params] of Object.entries(slot.channels)) {
+        const letter = rawKey.trim().toUpperCase();
+        if (letter !== 'A' && letter !== 'B' && letter !== 'C' && letter !== 'D') {
+          throw new Error(`${at} channels.${rawKey}: must be one of A/B/C/D (case-insensitive), got "${rawKey}".`);
+        }
+        if (channelEntries.has(letter)) {
+          throw new Error(`${at} channels.${letter}: duplicated (keys are case-insensitive, so A and a collide).`);
+        }
+        channelEntries.set(letter, params);
+      }
+      for (const letter of ['A', 'B', 'C', 'D'] as const) {
+        const channelParams = channelEntries.get(letter);
+        if (channelParams === undefined) continue;
+        if (Object.keys(channelParams).length === 0) continue;
+        const channelIdx = ['A', 'B', 'C', 'D'].indexOf(letter);
+        const channelKey = `${canonicalBlock}.channel` as ParamKey;
+        prepared.push({
+          kind: 'channel',
+          block: canonicalBlock,
+          index: channelIdx,
+          bytes: buildSetParam(channelKey, channelIdx),
+        });
+        for (const [paramName, value] of Object.entries(channelParams)) {
+          prepared.push(
+            buildParamWrite(`${at} channels.${letter}.${paramName}`, canonicalBlock, paramName, value),
           );
         }
-        const param: Param = KNOWN_PARAMS[key];
-        let resolved: number;
-        try {
-          resolved = resolveValue(param, value);
-        } catch (err) {
-          throw new Error(`${at}: ${err instanceof Error ? err.message : String(err)}`);
-        }
-        const enumNameFor = (idx: number): string | undefined =>
-          (param.enumValues as Record<number, string> | undefined)?.[idx];
-        const display = param.unit === 'enum'
-          ? `${resolved} (${enumNameFor(resolved) ?? '?'})`
-          : String(resolved);
-        prepared.push({
-          kind: 'param',
-          block: canonicalBlock,
-          paramName,
-          resolved,
-          key,
-          display,
-          bytes: buildSetParam(key, resolved),
-        });
       }
     }
   });
