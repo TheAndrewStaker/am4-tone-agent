@@ -11,6 +11,7 @@ import {
   buildSetSceneName,
   buildSwitchPreset,
   buildSwitchScene,
+  isCommandAck,
 } from '../src/protocol/setParam.js';
 import { KNOWN_PARAMS } from '../src/protocol/params.js';
 import { BLOCK_TYPE_VALUES } from '../src/protocol/blockTypes.js';
@@ -209,5 +210,74 @@ for (const c of cases) {
   console.log(`  expected: ${c.expected}`);
   console.log(`  ${ok ? '✓ MATCH' : '✗ MISMATCH'}\n`);
 }
-console.log(`${pass}/${cases.length} cases match.`);
-process.exit(pass === cases.length ? 0 : 1);
+console.log(`${pass}/${cases.length} message-build cases match.`);
+
+// Command-ack predicate — confirmed against both save and rename hardware
+// acks 2026-04-19. Shape: 18-byte frame echoing the outgoing command's
+// addressing bytes with a 4-byte zero payload. See SYSEX-MAP §7.
+function fromHex(s: string): number[] {
+  const clean = s.replace(/\s/g, '');
+  const out: number[] = [];
+  for (let i = 0; i < clean.length; i += 2) out.push(parseInt(clean.slice(i, i + 2), 16));
+  return out;
+}
+
+// Build sent bytes via the existing builders — eliminates hex-typo risk and
+// proves the builders and the predicate agree on wire shape.
+const sentSave = buildSaveToLocation(103);
+const sentRename = buildSetPresetName(103, 'rename-save-test');
+
+// Acks are from 2026-04-19 HW-002b capture (founder paste, verified on hardware).
+const ackSave = fromHex('f0 00 01 74 15 01 00 00 00 00 1b 00 00 00 00 00 0a f7');
+const ackRename = fromHex('f0 00 01 74 15 01 4e 01 0b 00 0c 00 00 00 00 00 59 f7');
+
+const ackCases: {
+  label: string;
+  sent: number[];
+  ack: number[];
+  expect: boolean;
+}[] = [
+  {
+    label: 'save_to_location(Z04) — 18-byte save ack ACCEPTED',
+    sent: sentSave,
+    ack: ackSave,
+    expect: true,
+  },
+  {
+    label: 'set_preset_name(Z04, "rename-save-test") — 18-byte rename ack ACCEPTED',
+    sent: sentRename,
+    ack: ackRename,
+    expect: true,
+  },
+  {
+    label: '64-byte SET_PARAM write-echo — REJECTED (wrong length: 64 ≠ 18)',
+    sent: buildSetParam('amp.gain', 5),
+    ack: fromHex(
+      'f0 00 01 74 15 01 3a 00 0b 00 01 00 00 00 28 00 7f 5f 60 03 78 00 00 00 1f 4d 25 63 01 40 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 67 f7',
+    ),
+    expect: false,
+  },
+  {
+    label: '23-byte USB-MIDI receipt-echo of save — REJECTED (wrong length: 23 ≠ 18)',
+    sent: sentSave,
+    ack: sentSave, // receipt-echo is a verbatim copy of our outgoing bytes
+    expect: false,
+  },
+  {
+    label: 'Mismatched addressing — REJECTED (save ack against a rename sent)',
+    sent: sentRename,
+    ack: ackSave,
+    expect: false,
+  },
+];
+
+let ackPass = 0;
+for (const c of ackCases) {
+  const got = isCommandAck(c.sent, c.ack);
+  const ok = got === c.expect;
+  if (ok) ackPass++;
+  console.log(`${c.label}\n  isCommandAck → ${got} (want ${c.expect})  ${ok ? '✓' : '✗'}\n`);
+}
+console.log(`${ackPass}/${ackCases.length} command-ack predicate cases pass.`);
+
+process.exit(pass === cases.length && ackPass === ackCases.length ? 0 : 1);

@@ -569,6 +569,43 @@ prompt behavior is the founder's call.
 
 ---
 
+## 6g. Command ack shape (save / rename) 🟢
+
+**Confirmed 2026-04-19** on hardware across both save and rename.
+Addressing-only commands — `save_to_location`, `set_preset_name`,
+`set_scene_name` — return an **18-byte** ack that echoes the
+outgoing command's addressing fields with a zero payload:
+
+```
+F0 00 01 74 15 01
+   <pidLow septets> <pidHigh septets> <action septets>
+   00 00 00 00
+   <cksum> F7
+```
+
+Concrete captures:
+
+- Save ack (pidLow=0x0000, pidHigh=0x0000, action=0x001B):
+  `F0 00 01 74 15 01 00 00 00 00 1B 00 00 00 00 00 0A F7`
+- Preset-rename ack (pidLow=0x00CE, pidHigh=0x000B, action=0x000C):
+  `F0 00 01 74 15 01 4E 01 0B 00 0C 00 00 00 00 00 59 F7`
+
+Distinct from the 64-byte SET_PARAM write-echo (§6a, `hdr4=0x0028`
+with a 40-byte param descriptor) and from the 23-byte USB-MIDI
+receipt-echo of our own outgoing bytes. The `isCommandAck(sent,
+resp)` predicate in `src/protocol/setParam.ts` exactly matches this
+shape; 5/5 byte-exact goldens in `verify-msg` (2 positive, 3
+negative including a full SET_PARAM 64-byte frame and an address-
+mismatched ack).
+
+No payload is returned — the ack is a "I received and parsed your
+command" signal, not a state snapshot. If we want stored-preset
+content back, we need a different request (the parked READ response
+format in §13) or the payload bytes inside preset-switch / scene-
+switch acks (§9 decode work, queued as BK-025 / BK-026).
+
+---
+
 ## 6. Byte-Level Templates for Phase 1 Commands 🟡
 
 All payloads below are **Axe-Fx II/AX8-derived guesses** for AM4. Expected

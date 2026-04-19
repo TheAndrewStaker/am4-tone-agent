@@ -49,6 +49,7 @@ import {
   buildSetSceneName,
   buildSwitchPreset,
   buildSwitchScene,
+  isCommandAck,
   isWriteEcho,
 } from '../protocol/setParam.js';
 import {
@@ -131,6 +132,187 @@ function ensureMidi(forceReconnect = false): AM4Connection {
 }
 
 process.on('exit', () => closeMidiSafely(midi));
+
+// -- Channel awareness (P1-012) ---------------------------------------------
+//
+// Channels (A/B/C/D) are the data container for block param values; scenes
+// are selectors that choose which channel each block uses. Two scenes
+// pointing at the same channel will both reflect any write to that channel,
+// confirmed on hardware HW-009 (2026-04-19). See SYSEX-MAP.md §6a and
+// docs/HARDWARE-TASKS.md HW-009 for the full explanation.
+//
+// Shape 1 (transparent reporting) and Shape 2 (explicit `channel` param)
+// are implemented here. Shape 3 (scene-first tool) depends on BK-023
+// decoding the scene-switch ack payload — not in this change.
+//
+// The cache below holds whatever channel the server LAST EXPLICITLY SET
+// for each channel-bearing block. It is not authoritative — a hardware
+// footswitch, hardware knob, or AM4-Edit interaction can move the block
+// to a different channel without our knowledge. The cache is invalidated
+// on `switch_preset` / `switch_scene` / `reconnect_midi` to avoid
+// reporting stale data across those boundaries.
+
+const CHANNEL_BLOCKS = new Set(['amp', 'drive', 'reverb', 'delay']);
+const lastKnownChannel: Partial<Record<string, number>> = {};
+
+function invalidateChannelCache(): void {
+  for (const key of Object.keys(lastKnownChannel)) delete lastKnownChannel[key];
+}
+
+function channelLetter(index: number): 'A' | 'B' | 'C' | 'D' {
+  return (['A', 'B', 'C', 'D'] as const)[index];
+}
+
+/**
+ * Parse a user-supplied channel argument ("A"/"B"/"C"/"D" or 0..3) into
+ * the 0..3 internal index. Case-insensitive on letters.
+ */
+function resolveChannel(input: string | number): number {
+  if (typeof input === 'number') {
+    if (!Number.isInteger(input) || input < 0 || input > 3) {
+      throw new Error(`channel must be 0..3 or A/B/C/D, got ${input}`);
+    }
+    return input;
+  }
+  const letter = input.trim().toUpperCase();
+  const idx = ['A', 'B', 'C', 'D'].indexOf(letter);
+  if (idx < 0) throw new Error(`channel must be A/B/C/D (or 0..3), got "${input}"`);
+  return idx;
+}
+
+/**
+ * Render the channel-context status line appended to every param-write
+ * response. Returns empty string for blocks that don't have channels
+ * (chorus, flanger, phaser, etc. — the secondary effect blocks).
+ *
+ * `justSwitched` is true when the caller explicitly used the `channel`
+ * param on this call and the switch acked; the message is more assertive
+ * in that case because we know the write went to a known channel.
+ */
+function channelStatusLine(block: string, justSwitched: boolean): string {
+  if (!CHANNEL_BLOCKS.has(block)) return '';
+  const idx = lastKnownChannel[block];
+  if (idx === undefined) {
+    return (
+      ` (Wrote to whatever channel ${block} is on — server hasn't tracked a ` +
+      `channel switch this session. Pass \`channel\` to target a specific ` +
+      `A/B/C/D, or note that channels are shared across scenes that point ` +
+      `at the same one.)`
+    );
+  }
+  if (justSwitched) {
+    return ` (Wrote to channel ${channelLetter(idx)}.)`;
+  }
+  return (
+    ` (Wrote to channel ${channelLetter(idx)} — last channel the server ` +
+    `explicitly switched this block to. If the user has moved it via ` +
+    `footswitch / hardware / AM4-Edit, the real channel may differ.)`
+  );
+}
+
+/**
+ * Issue a channel-switch write and wait for the echo. Updates
+ * `lastKnownChannel[block]` on success. Used by set_param / set_params /
+ * apply_preset when the caller passes an explicit `channel`.
+ *
+ * Throws on validation errors (unknown block without a channel register,
+ * out-of-range index). Returns `{ switched: boolean }` — switched=false
+ * means the cache already showed the requested channel, so no wire write
+ * was issued.
+ */
+async function switchBlockChannel(
+  conn: AM4Connection,
+  block: string,
+  channel: string | number,
+): Promise<{ switched: boolean }> {
+  if (!CHANNEL_BLOCKS.has(block)) {
+    throw new Error(
+      `Block "${block}" doesn't expose a channel register (only amp / drive / reverb / delay have channels on AM4). Drop the \`channel\` argument.`,
+    );
+  }
+  const targetIndex = resolveChannel(channel);
+  if (lastKnownChannel[block] === targetIndex) {
+    return { switched: false };
+  }
+  const key = `${block}.channel` as ParamKey;
+  const bytes = buildSetParam(key, targetIndex);
+  const echoPromise = conn.receiveSysExMatching(
+    (resp) => isWriteEcho(bytes, resp),
+    WRITE_ECHO_TIMEOUT_MS,
+  );
+  conn.send(bytes);
+  try {
+    await echoPromise;
+    recordAckOutcome(true);
+    lastKnownChannel[block] = targetIndex;
+    return { switched: true };
+  } catch {
+    recordAckOutcome(false);
+    throw new Error(
+      `Channel switch to ${channelLetter(targetIndex)} for ${block} ` +
+      `didn't ack within ${WRITE_ECHO_TIMEOUT_MS} ms. The subsequent ` +
+      `param write was NOT attempted to avoid writing to the wrong channel. ` +
+      `Check USB/driver status or call reconnect_midi.`,
+    );
+  }
+}
+
+/**
+ * Observer called after every successful `set_param` write. If the write
+ * targeted a `<block>.channel` param, update the cache so the server knows
+ * which channel that block is now on.
+ */
+function observeWrittenParam(block: string, paramName: string, numericValue: number): void {
+  if (paramName === 'channel' && CHANNEL_BLOCKS.has(block)) {
+    const idx = Math.round(numericValue);
+    if (idx >= 0 && idx <= 3) lastKnownChannel[block] = idx;
+  }
+}
+
+/**
+ * Send a command whose ack shape is not yet decoded, wait the standard echo
+ * window, and collect every inbound SysEx frame that arrived. Records the
+ * ack outcome against the stale-handle counter (any inbound = acked, empty
+ * window = ack-less) and returns a formatted capture block plus a reconnect
+ * hint that handlers append to their response text on ack-less.
+ *
+ * Used by tools whose ack shape we can't yet predicate-match against the
+ * sent bytes: save_to_location, set_preset_name, set_scene_name,
+ * switch_preset, switch_scene. Tools with fully-decoded echo shapes
+ * (set_param, set_params, set_block_type, apply_preset) use
+ * `receiveSysExMatching(isWriteEcho, …)` directly and call
+ * `recordAckOutcome` themselves.
+ *
+ * The reconnect hint was missing from the five tools above — a real bug
+ * exposed during HW-002 testing (2026-04-19) where three consecutive
+ * ack-less writes against a dead MIDI transport never triggered the
+ * auto-reconnect because none of them registered their ack-less outcome.
+ */
+async function sendAndCapture(
+  conn: AM4Connection,
+  bytes: number[],
+): Promise<{ captured: number[][]; capturedText: string; hint: string }> {
+  const captured: number[][] = [];
+  const unsubscribe = conn.onMessage((msg) => {
+    if (msg[0] === 0xf0) captured.push([...msg]);
+  });
+  conn.send(bytes);
+  await new Promise<void>((resolve) => setTimeout(resolve, WRITE_ECHO_TIMEOUT_MS));
+  unsubscribe();
+  const acked = captured.length > 0;
+  recordAckOutcome(acked);
+  const capturedText = captured.length === 0
+    ? '  (none)'
+    : captured.map((m, i) => `  [${i}] (${m.length}B) ${toHex(m)}`).join('\n');
+  const hint = acked
+    ? ''
+    : `\nNo inbound SysEx in the ${WRITE_ECHO_TIMEOUT_MS} ms window. If this ` +
+      `keeps happening across writes, the MIDI handle may be stale (AM4-Edit ` +
+      `briefly open? USB replug?). Server auto-reconnects after ` +
+      `${STALE_HANDLE_TIMEOUT_THRESHOLD} consecutive ack-less writes, or call ` +
+      `reconnect_midi to force a fresh handle now.`;
+  return { captured, capturedText, hint };
+}
 
 // -- Helpers ----------------------------------------------------------------
 
@@ -291,6 +473,18 @@ server.registerTool('set_param', {
     'numeric params, pass the user-facing display value (0–10 knob, dB,',
     'ms, %). For enum params, pass the dropdown name ("1959SLP Normal")',
     'or wire index (0).',
+    'CHANNEL/SCENE MODEL — IMPORTANT for user requests that mention scenes:',
+    'Each block (amp/drive/reverb/delay) holds its parameter values in one',
+    'of four channels A/B/C/D. Scenes are selectors — they choose which',
+    'channel each block uses (plus per-block bypass state), they don\'t',
+    'store param values themselves. Two scenes pointing at the same',
+    'channel will both reflect any write to that channel. If the user says',
+    '"change the amp gain on scene 2" they usually mean "on whichever',
+    'channel scene 2 uses for Amp" — pass the `channel` argument to target',
+    'a specific A/B/C/D. Without `channel`, the write goes to whatever',
+    'channel the block is on now, which may be shared across multiple',
+    'scenes. Only amp / drive / reverb / delay have channels; other blocks',
+    '(chorus, flanger, phaser, …) ignore the `channel` argument.',
     'IMPORTANT: the tool cannot currently tell whether a write actually',
     'landed on the audio path. If the target block isn\'t placed in the',
     'active preset, the AM4 still acknowledges the write on the wire but',
@@ -307,13 +501,21 @@ server.registerTool('set_param', {
     value: z.union([z.number(), z.string()]).describe(
       'Display value. Numbers for knobs/dB/ms/%, strings for enum dropdowns.',
     ),
+    channel: z.union([z.string(), z.number()]).optional().describe(
+      'Optional. If supplied, the server first writes the block\'s channel selector to this A/B/C/D (or 0..3), then the param. Only valid for amp / drive / reverb / delay. Omit to write to whichever channel the block is currently on.',
+    ),
   },
-}, async ({ block, name, value }) => {
+}, async ({ block, name, value, channel }) => {
   const key = paramKey(block, name);
   const param: Param = KNOWN_PARAMS[key];
   const resolved = resolveValue(param, value);
   const bytes = buildSetParam(key, resolved);
   const conn = ensureMidi();
+  let channelSwitched = false;
+  if (channel !== undefined) {
+    const result = await switchBlockChannel(conn, block, channel);
+    channelSwitched = result.switched;
+  }
   // Capture every inbound SysEx during the write window so we can report
   // the raw protocol traffic alongside our verdict. This is diagnostic
   // output added in Session 19 to debug false-confirm reports — the
@@ -345,15 +547,18 @@ server.registerTool('set_param', {
     const ack = await echoPromise;
     unsubscribe();
     recordAckOutcome(true);
+    observeWrittenParam(param.block, param.name, resolved);
+    const channelLine = channelStatusLine(param.block, channelSwitched);
     return {
       content: [{
         type: 'text',
         text:
-          `Sent ${key} = ${display}. AM4 wire-acked the write. NOTE: the ack ` +
+          `Sent ${key} = ${display}. AM4 wire-acked the write.${channelLine} NOTE: the ack ` +
           `does NOT confirm an audible change — the AM4 acks writes to absent ` +
           `blocks the same way it acks writes to placed ones. If the user ` +
           `expected a sound change and reports none, the ${param.block} block ` +
-          `is probably not placed in the active preset.\n` +
+          `is probably not placed in the active preset, OR the change landed on a ` +
+          `channel the current scene isn't using.\n` +
           `Sent (${bytes.length}B): ${toHex(bytes)}\n` +
           `Ack (${ack.length}B): ${toHex(ack)}\n` +
           `All inbound SysEx during the ${WRITE_ECHO_TIMEOUT_MS} ms window:\n` +
@@ -408,18 +613,28 @@ server.registerTool('set_params', {
     '(a bad value in one entry rejects the whole call with nothing sent).',
     'Same value rules as set_param: numbers for knobs/dB/ms/%, strings or',
     'wire indices for enum params. Writes are sent in the provided order.',
+    'Each entry accepts an optional per-write `channel` (A/B/C/D or 0..3)',
+    'for amp / drive / reverb / delay — see set_param\'s description for the',
+    'channel/scene model. Different entries in the same batch can target',
+    'different channels: the server switches as needed and reports which',
+    'channel each write landed on.',
     'IMPORTANT: same caveat as set_param — the AM4 acks every write on the',
-    'wire whether or not the target block is placed, so an ack is not a',
-    'confirmation of audible change. If the user expects audible changes',
-    'and reports none, the most likely cause is that one or more target',
-    'blocks are not placed in the active preset.',
+    'wire whether or not the target block is placed or the current scene is',
+    'pointing at the channel you wrote to. An ack is not a confirmation of',
+    'audible change. If the user expects audible changes and reports none,',
+    'the most likely causes are (a) one or more target blocks are not placed',
+    'in the active preset, or (b) the write landed on a channel the active',
+    'scene isn\'t using.',
   ].join(' '),
   inputSchema: {
     writes: z.array(z.object({
       block: z.string().describe('Block name, e.g. "amp", "drive", "reverb", "delay"'),
       name: z.string().describe('Parameter name within the block, e.g. "gain", "type", "mix"'),
       value: z.union([z.number(), z.string()]).describe('Display value'),
-    })).describe('List of (block, name, value) writes to apply in order'),
+      channel: z.union([z.string(), z.number()]).optional().describe(
+        'Optional. A/B/C/D (or 0..3). The server switches the block\'s channel before the write. Only valid for amp/drive/reverb/delay.',
+      ),
+    })).describe('List of (block, name, value, channel?) writes to apply in order'),
   },
 }, async ({ writes }) => {
   if (writes.length === 0) {
@@ -427,7 +642,8 @@ server.registerTool('set_params', {
   }
   // Validate + encode every entry BEFORE sending any MIDI. A bad value in
   // entry 7 would otherwise leave entries 0..6 half-sent; the pre-flight
-  // pass keeps input-validation failures atomic.
+  // pass keeps input-validation failures atomic. Channel indices also
+  // validated here so a bad "E" channel letter rejects the whole batch.
   const prepared = writes.map((w, i) => {
     try {
       const key = paramKey(w.block, w.name);
@@ -439,7 +655,13 @@ server.registerTool('set_params', {
       const display = param.unit === 'enum'
         ? `${resolved} (${enumNameFor(resolved) ?? '?'})`
         : String(resolved);
-      return { key, param, bytes, display };
+      if (w.channel !== undefined) {
+        if (!CHANNEL_BLOCKS.has(param.block)) {
+          throw new Error(`Block "${param.block}" doesn't have channels; drop the \`channel\` argument (only amp/drive/reverb/delay expose A/B/C/D).`);
+        }
+        resolveChannel(w.channel); // throws on invalid input
+      }
+      return { key, param, bytes, display, channel: w.channel };
     } catch (err) {
       throw new Error(`writes[${i}] (${w.block}.${w.name} = ${w.value}): ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -449,8 +671,18 @@ server.registerTool('set_params', {
   let acked = 0;
   let unacked = 0;
   for (let i = 0; i < prepared.length; i++) {
-    const { key, display } = prepared[i];
-    const { bytes } = prepared[i];
+    const { key, param, display, bytes, channel } = prepared[i];
+    let channelSwitched = false;
+    if (channel !== undefined) {
+      try {
+        const result = await switchBlockChannel(conn, param.block, channel);
+        channelSwitched = result.switched;
+      } catch (err) {
+        lines.push(`  ✗ ${key} = ${display} — channel switch failed: ${err instanceof Error ? err.message : String(err)}`);
+        unacked++;
+        continue;
+      }
+    }
     const echoPromise = conn.receiveSysExMatching(
       (resp) => isWriteEcho(bytes, resp),
       WRITE_ECHO_TIMEOUT_MS,
@@ -460,7 +692,9 @@ server.registerTool('set_params', {
       await echoPromise;
       acked++;
       recordAckOutcome(true);
-      lines.push(`  ✓ ${key} = ${display} — wire-acked`);
+      observeWrittenParam(param.block, param.name, resolveValue(param, writes[i].value));
+      const channelLine = channelStatusLine(param.block, channelSwitched);
+      lines.push(`  ✓ ${key} = ${display} — wire-acked.${channelLine}`);
     } catch {
       unacked++;
       recordAckOutcome(false);
@@ -469,7 +703,7 @@ server.registerTool('set_params', {
   }
   const summary =
     unacked === 0
-      ? `Sent all ${prepared.length} writes; AM4 wire-acked each one. Acks do NOT confirm audible change — if the user reports no change on the device, the target blocks are probably not placed in the active preset.`
+      ? `Sent all ${prepared.length} writes; AM4 wire-acked each one. Acks do NOT confirm audible change — if the user reports no change on the device, the target blocks may not be placed in the active preset, or writes may have landed on channels the current scene isn't using (see per-write channel notes).`
       : `Sent ${prepared.length} writes; ${acked} acked, ${unacked} un-acked (un-acked across multiple writes suggests a stale MIDI handle — server auto-reconnects after ${STALE_HANDLE_TIMEOUT_THRESHOLD} consecutive ack-less writes, or call reconnect_midi to force).`;
   return {
     content: [{ type: 'text', text: `${summary}\n${lines.join('\n')}` }],
@@ -584,23 +818,36 @@ server.registerTool('apply_preset', {
     'user is building a tone from scratch or applying a named preset concept',
     '— it replaces a sequence of set_block_type + set_params calls with a',
     'single structured request.',
-    'Shape: { slots: [{ position: 1..4, block_type: "amp"|..., params?: {...} }] }.',
-    'For each slot the tool emits the block-placement write first, then one',
+    'Shape: { slots: [{ position: 1..4, block_type: "amp"|..., channel?: "A"|"B"|"C"|"D", params?: {...} }] }.',
+    'For each slot the tool emits the block-placement write first, then (if',
+    '`channel` is specified) a channel-switch write for that block, then one',
     'set-param write per entry in `params`. Params are keyed by the',
     'parameter name within the block (e.g. { gain: 6, bass: 5 }) — the tool',
     'joins `block_type` + param name internally. Skip `params` to just place',
     'the block.',
+    'CHANNEL/SCENE MODEL: channels (A/B/C/D) hold the param values; scenes',
+    'pick which channel each block uses. `channel` on a slot selects which',
+    'channel the params get written to, for that block only. Only amp / drive',
+    '/ reverb / delay have channels — the argument is rejected for other',
+    'blocks. If the user wants a preset where one slot varies tone across',
+    'scenes, call apply_preset once per channel to fill out that block\'s',
+    'channel values. If the user doesn\'t mention scenes, omit `channel` and',
+    'the writes land on whatever channel each block is currently on.',
     'Validation happens up-front; if any slot/param is invalid (duplicate',
     'position, unknown block type, unknown param for that block, value out',
-    'of range, unknown enum name) the entire call is rejected with nothing',
-    'sent. Same ack caveat as set_param/set_params: wire-acks confirm receipt,',
-    'not audible change.',
+    'of range, unknown enum name, channel on a block that doesn\'t have',
+    'channels) the entire call is rejected with nothing sent. Same ack',
+    'caveat as set_param/set_params: wire-acks confirm receipt, not audible',
+    'change.',
   ].join(' '),
   inputSchema: {
     slots: z.array(z.object({
       position: z.number().int().min(1).max(4).describe('Slot position 1..4 (1 = leftmost)'),
       block_type: z.string().describe(
         'Block name ("amp", "reverb", "compressor", "none", …). Call list_block_types for the full list.',
+      ),
+      channel: z.union([z.string(), z.number()]).optional().describe(
+        'Optional A/B/C/D (or 0..3). If supplied for amp / drive / reverb / delay, the tool switches that block\'s channel before writing the slot\'s params. Rejected for blocks without channels.',
       ),
       params: z.record(z.string(), z.union([z.number(), z.string()])).optional().describe(
         'Map of param name → display value within the block, e.g. { gain: 6, bass: 5 }. Omit or leave empty to just place the block without parameters.',
@@ -612,7 +859,8 @@ server.registerTool('apply_preset', {
   const seenPositions = new Set<number>();
   type PreparedWrite =
     | { kind: 'place'; position: 1 | 2 | 3 | 4; blockName: string; bytes: number[] }
-    | { kind: 'param'; key: ParamKey; display: string; bytes: number[] };
+    | { kind: 'channel'; block: string; index: number; bytes: number[] }
+    | { kind: 'param'; block: string; paramName: string; resolved: number; key: ParamKey; display: string; bytes: number[] };
   const prepared: PreparedWrite[] = [];
 
   slots.forEach((slot, i) => {
@@ -635,6 +883,28 @@ server.registerTool('apply_preset', {
       blockName: canonicalBlock,
       bytes: buildSetBlockType(pos, blockTypeValue),
     });
+
+    if (slot.channel !== undefined) {
+      if (canonicalBlock === 'none') {
+        throw new Error(`${at}: channel supplied but block_type is "none" (empty slot). Remove channel.`);
+      }
+      if (!CHANNEL_BLOCKS.has(canonicalBlock)) {
+        throw new Error(`${at}: block "${canonicalBlock}" doesn't have channels. Drop the channel argument (only amp / drive / reverb / delay expose A/B/C/D).`);
+      }
+      let channelIdx: number;
+      try {
+        channelIdx = resolveChannel(slot.channel);
+      } catch (err) {
+        throw new Error(`${at}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      const channelKey = `${canonicalBlock}.channel` as ParamKey;
+      prepared.push({
+        kind: 'channel',
+        block: canonicalBlock,
+        index: channelIdx,
+        bytes: buildSetParam(channelKey, channelIdx),
+      });
+    }
 
     if (slot.params && Object.keys(slot.params).length > 0) {
       if (canonicalBlock === 'none') {
@@ -663,6 +933,9 @@ server.registerTool('apply_preset', {
           : String(resolved);
         prepared.push({
           kind: 'param',
+          block: canonicalBlock,
+          paramName,
+          resolved,
           key,
           display,
           bytes: buildSetParam(key, resolved),
@@ -682,13 +955,16 @@ server.registerTool('apply_preset', {
       WRITE_ECHO_TIMEOUT_MS,
     );
     conn.send(w.bytes);
-    const label = w.kind === 'place'
-      ? `place slot ${w.position} → ${w.blockName}`
-      : `${w.key} = ${w.display}`;
+    let label: string;
+    if (w.kind === 'place') label = `place slot ${w.position} → ${w.blockName}`;
+    else if (w.kind === 'channel') label = `switch ${w.block} to channel ${channelLetter(w.index)}`;
+    else label = `${w.key} = ${w.display}`;
     try {
       await echoPromise;
       acked++;
       recordAckOutcome(true);
+      if (w.kind === 'channel') lastKnownChannel[w.block] = w.index;
+      if (w.kind === 'param') observeWrittenParam(w.block, w.paramName, w.resolved);
       lines.push(`  ✓ ${label}`);
     } catch {
       unacked++;
@@ -697,12 +973,65 @@ server.registerTool('apply_preset', {
     }
   }
   const header = unacked === 0
-    ? `Applied preset: ${prepared.length} writes, all wire-acked. Acks don't confirm audible change — cross-check on the AM4 if it matters.`
+    ? `Applied preset: ${prepared.length} writes, all wire-acked. Acks don't confirm audible change — cross-check on the AM4 if it matters. Per-slot channel targets are reflected in the channel lines above; params that follow a channel switch landed on that channel.`
     : `Applied preset: ${prepared.length} writes, ${acked} acked, ${unacked} un-acked (server auto-reconnects after ${STALE_HANDLE_TIMEOUT_THRESHOLD} consecutive ack-less writes; or call reconnect_midi).`;
   return {
     content: [{ type: 'text', text: `${header}\n${lines.join('\n')}` }],
   };
 });
+
+/**
+ * Send a command that produces the 18-byte `isCommandAck` shape (save,
+ * preset-rename, scene-rename) and classify the response. Returns:
+ *   - { acked: true, ackBytes } if an isCommandAck frame arrived in the
+ *     window. `ackBytes` is the matching frame.
+ *   - { acked: false, captured } otherwise — `captured` is every inbound
+ *     SysEx we saw, for diagnostic display on failure.
+ *
+ * Calls `recordAckOutcome` with the classification so the stale-handle
+ * counter stays accurate.
+ */
+async function sendCommandAndAwaitAck(
+  conn: AM4Connection,
+  bytes: number[],
+): Promise<
+  | { acked: true; ackBytes: number[]; captured: number[][] }
+  | { acked: false; captured: number[][] }
+> {
+  const captured: number[][] = [];
+  const unsubscribe = conn.onMessage((msg) => {
+    if (msg[0] === 0xf0) captured.push([...msg]);
+  });
+  const ackPromise = conn.receiveSysExMatching(
+    (resp) => isCommandAck(bytes, resp),
+    WRITE_ECHO_TIMEOUT_MS,
+  );
+  conn.send(bytes);
+  try {
+    const ackBytes = await ackPromise;
+    unsubscribe();
+    recordAckOutcome(true);
+    return { acked: true, ackBytes, captured };
+  } catch {
+    unsubscribe();
+    recordAckOutcome(false);
+    return { acked: false, captured };
+  }
+}
+
+function formatAcklessHint(captured: number[][]): string {
+  const capturedBlock = captured.length === 0
+    ? '  (none)'
+    : captured.map((m, i) => `  [${i}] (${m.length}B) ${toHex(m)}`).join('\n');
+  return (
+    `No command-ack within ${WRITE_ECHO_TIMEOUT_MS} ms. ` +
+    `Inbound SysEx during the window:\n${capturedBlock}\n` +
+    `If this keeps happening, the MIDI handle may be stale (AM4-Edit briefly ` +
+    `open? USB replug?). Server auto-reconnects after ` +
+    `${STALE_HANDLE_TIMEOUT_THRESHOLD} consecutive ack-less writes, or call ` +
+    `reconnect_midi to force a fresh handle now.`
+  );
+}
 
 server.registerTool('save_to_location', {
   description: [
@@ -711,15 +1040,16 @@ server.registerTool('save_to_location', {
     'so it survives power-cycling. Location naming is the AM4\'s native',
     'format: bank letter A..Z + sub-index 01..04 (e.g. "A01", "M03", "Z04"),',
     '104 total preset locations across 26 banks.',
+    'CANONICAL FLOW FOR PERSISTING A NAMED PRESET: call set_preset_name first',
+    'to rename the working buffer, then save_to_location to persist. Or use',
+    'the composite save_preset tool, which does both in one call.',
     'WRITE SAFETY (active during reverse-engineering): this tool is hard-',
     'gated to location "Z04" (the designated scratch location). Attempts to',
     'save elsewhere are rejected with a clear error. The gate will be',
-    'relaxed once factory-preset safety classification is in place (backlog',
-    'P1-008).',
-    'The save-command ack shape is not fully decoded — the tool just sends',
-    'the command and reports any inbound SysEx in the 300 ms window for',
-    'diagnostic visibility. Verify the save took effect by loading the',
-    'location on the AM4 and confirming the expected layout / params.',
+    'relaxed once factory-preset safety classification is in place.',
+    'The ack shape is the standard 18-byte command-ack — the tool reports',
+    'success cleanly; if no ack arrives, the raw inbound SysEx is dumped',
+    'for diagnostic visibility.',
   ].join(' '),
   inputSchema: {
     location: z.string().describe(
@@ -732,52 +1062,49 @@ server.registerTool('save_to_location', {
     throw new Error(
       `save_to_location is hard-gated to "${SCRATCH_LOCATION}" during reverse-engineering (got "${location}"). ` +
       `Writing to any other location would clobber factory or user presets. ` +
-      `This restriction will be lifted once factory-preset safety classification ships (backlog P1-008).`,
+      `This restriction will be lifted once factory-preset safety classification ships.`,
     );
   }
   const locationIndex = parseLocationCode(normalized);
   const bytes = buildSaveToLocation(locationIndex);
   const conn = ensureMidi();
-  const captured: number[][] = [];
-  const unsubscribe = conn.onMessage((msg) => {
-    if (msg[0] === 0xf0) captured.push([...msg]);
-  });
-  conn.send(bytes);
-  await new Promise<void>((resolve) => setTimeout(resolve, WRITE_ECHO_TIMEOUT_MS));
-  unsubscribe();
-  const formatCaptured = (): string => {
-    if (captured.length === 0) return '  (none)';
-    return captured.map((m, i) => `  [${i}] (${m.length}B) ${toHex(m)}`).join('\n');
-  };
+  const result = await sendCommandAndAwaitAck(conn, bytes);
+  if (result.acked) {
+    return {
+      content: [{
+        type: 'text',
+        text:
+          `Saved working buffer to ${formatLocationCode(locationIndex)}. AM4 ack received.`,
+      }],
+    };
+  }
   return {
     content: [{
       type: 'text',
       text:
-        `Sent save command for location ${formatLocationCode(locationIndex)} (index ${locationIndex}). ` +
-        `The save-command ack shape isn't fully decoded, so the tool doesn't ` +
-        `assert success — verify by navigating to the location on the AM4 and ` +
-        `confirming the expected layout/params are now there.\n` +
+        `Save to ${formatLocationCode(locationIndex)} sent but no ack received. ` +
+        `Verify on the AM4 (navigate to the location and check the expected ` +
+        `layout / params are present).\n` +
         `Sent (${bytes.length}B): ${toHex(bytes)}\n` +
-        `All inbound SysEx during the ${WRITE_ECHO_TIMEOUT_MS} ms window:\n` +
-        formatCaptured(),
+        formatAcklessHint(result.captured),
     }],
   };
 });
 
 server.registerTool('set_preset_name', {
   description: [
-    'Rename the preset stored at a specific location. Names can be up to',
-    '32 ASCII-printable characters; shorter names are space-padded on the',
-    'wire (AM4 convention). Unlike set_param/apply_preset, this tool',
-    'targets a stored preset location directly — it is the "save a preset',
-    'with a name" complement to save_to_location.',
+    'Rename the AM4\'s current working-buffer preset. Names can be up to 32',
+    'ASCII-printable characters; shorter names are space-padded on the wire',
+    '(AM4 convention).',
+    'SCOPE: writes to the working buffer only. The name does NOT persist',
+    'across preset loads on its own — call save_to_location afterward to',
+    'write the working buffer (including the new name) to a preset location.',
+    'Or use the composite save_preset tool, which does rename + save in one',
+    'call. Confirmed on hardware HW-002 (2026-04-19): rename alone is lost',
+    'when a different preset is loaded, while rename + save_to_location',
+    'persists correctly.',
     'WRITE SAFETY: hard-gated to location "Z04" during reverse-engineering,',
-    'same rules as save_to_location. The gate lifts once factory-preset',
-    'safety classification (P1-008) ships.',
-    'It\'s not yet confirmed whether rename persists on its own or needs',
-    'a subsequent save_to_location call — verify on the AM4 display after',
-    'calling. Scene renames use a separate command and are a follow-up',
-    'session (BK-011).',
+    'same rules as save_to_location.',
   ].join(' '),
   inputSchema: {
     location: z.string().describe(
@@ -793,34 +1120,100 @@ server.registerTool('set_preset_name', {
     throw new Error(
       `set_preset_name is hard-gated to "${SCRATCH_LOCATION}" during reverse-engineering (got "${location}"). ` +
       `Renaming any other location would clobber factory or user preset names. ` +
-      `This restriction will be lifted once factory-preset safety classification ships (backlog P1-008).`,
+      `This restriction will be lifted once factory-preset safety classification ships.`,
     );
   }
   const locationIndex = parseLocationCode(normalized);
   const bytes = buildSetPresetName(locationIndex, name);
   const conn = ensureMidi();
-  const captured: number[][] = [];
-  const unsubscribe = conn.onMessage((msg) => {
-    if (msg[0] === 0xf0) captured.push([...msg]);
-  });
-  conn.send(bytes);
-  await new Promise<void>((resolve) => setTimeout(resolve, WRITE_ECHO_TIMEOUT_MS));
-  unsubscribe();
-  const formatCaptured = (): string => {
-    if (captured.length === 0) return '  (none)';
-    return captured.map((m, i) => `  [${i}] (${m.length}B) ${toHex(m)}`).join('\n');
-  };
+  const result = await sendCommandAndAwaitAck(conn, bytes);
+  if (result.acked) {
+    return {
+      content: [{
+        type: 'text',
+        text:
+          `Renamed working-buffer preset → "${name}". AM4 ack received. ` +
+          `The name is in the working buffer only — call save_to_location to persist.`,
+      }],
+    };
+  }
   return {
     content: [{
       type: 'text',
       text:
-        `Sent rename: location ${formatLocationCode(locationIndex)} → "${name}". The rename-command ` +
-        `ack shape isn't fully decoded; verify by viewing the preset name on the AM4 ` +
-        `or in AM4-Edit. If the name didn't stick, try calling save_to_location ` +
-        `afterward — it's not yet confirmed whether rename persists on its own.\n` +
+        `Rename sent for "${name}" but no ack received. ` +
+        `Verify on the AM4 display or in AM4-Edit.\n` +
         `Sent (${bytes.length}B): ${toHex(bytes)}\n` +
-        `All inbound SysEx during the ${WRITE_ECHO_TIMEOUT_MS} ms window:\n` +
-        formatCaptured(),
+        formatAcklessHint(result.captured),
+    }],
+  };
+});
+
+server.registerTool('save_preset', {
+  description: [
+    'Compose set_preset_name + save_to_location into a single call. The',
+    'canonical flow for persisting a named preset: renames the working',
+    'buffer, then saves it to the target location. Fails cleanly if the',
+    'rename step doesn\'t ack (save is skipped to avoid persisting the',
+    'old name).',
+    'WRITE SAFETY: same Z04 hard-gate as the underlying tools.',
+    'Use this instead of chaining set_preset_name + save_to_location',
+    'unless the user has asked for the two-step flow explicitly.',
+  ].join(' '),
+  inputSchema: {
+    location: z.string().describe(
+      'AM4 preset location. Currently only "Z04" is accepted. Format: bank letter A..Z + sub-index 01..04.',
+    ),
+    name: z.string().max(32).describe(
+      'New preset name, up to 32 ASCII-printable characters.',
+    ),
+  },
+}, async ({ location, name }) => {
+  const normalized = location.trim().toUpperCase();
+  if (normalized !== SCRATCH_LOCATION) {
+    throw new Error(
+      `save_preset is hard-gated to "${SCRATCH_LOCATION}" during reverse-engineering (got "${location}"). ` +
+      `Writing to any other location would clobber factory or user presets.`,
+    );
+  }
+  const locationIndex = parseLocationCode(normalized);
+  const conn = ensureMidi();
+  const renameBytes = buildSetPresetName(locationIndex, name);
+  const renameResult = await sendCommandAndAwaitAck(conn, renameBytes);
+  if (!renameResult.acked) {
+    return {
+      content: [{
+        type: 'text',
+        text:
+          `save_preset aborted: rename didn't ack (save skipped to avoid ` +
+          `persisting the pre-rename name).\n` +
+          `Sent rename (${renameBytes.length}B): ${toHex(renameBytes)}\n` +
+          formatAcklessHint(renameResult.captured),
+      }],
+    };
+  }
+  const saveBytes = buildSaveToLocation(locationIndex);
+  const saveResult = await sendCommandAndAwaitAck(conn, saveBytes);
+  if (saveResult.acked) {
+    return {
+      content: [{
+        type: 'text',
+        text:
+          `Saved "${name}" to ${formatLocationCode(locationIndex)}. ` +
+          `Both rename and save acked.`,
+      }],
+    };
+  }
+  return {
+    content: [{
+      type: 'text',
+      text:
+        `Rename acked, but save to ${formatLocationCode(locationIndex)} didn't ack. ` +
+        `The rename is in the working buffer (will appear in the current preset ` +
+        `view) but may not have persisted. Verify on the AM4 — load a different ` +
+        `location and come back to check.\n` +
+        `Sent save (${saveBytes.length}B): ${toHex(saveBytes)}\n` +
+        formatAcklessHint(saveResult.captured),
     }],
   };
 });
@@ -848,28 +1241,25 @@ server.registerTool('set_scene_name', {
   const sceneIdx = scene_index - 1;
   const bytes = buildSetSceneName(sceneIdx, name);
   const conn = ensureMidi();
-  const captured: number[][] = [];
-  const unsubscribe = conn.onMessage((msg) => {
-    if (msg[0] === 0xf0) captured.push([...msg]);
-  });
-  conn.send(bytes);
-  await new Promise<void>((resolve) => setTimeout(resolve, WRITE_ECHO_TIMEOUT_MS));
-  unsubscribe();
-  const formatCaptured = (): string => {
-    if (captured.length === 0) return '  (none)';
-    return captured.map((m, i) => `  [${i}] (${m.length}B) ${toHex(m)}`).join('\n');
-  };
+  const result = await sendCommandAndAwaitAck(conn, bytes);
+  if (result.acked) {
+    return {
+      content: [{
+        type: 'text',
+        text:
+          `Renamed scene ${scene_index} → "${name}" in the working buffer. AM4 ack ` +
+          `received. Call save_to_location to persist across preset loads.`,
+      }],
+    };
+  }
   return {
     content: [{
       type: 'text',
       text:
-        `Sent scene rename: scene ${scene_index} → "${name}". Writes to the ` +
-        `working buffer only — call save_to_location to persist across ` +
-        `preset loads. The rename-command ack shape isn't fully decoded; ` +
-        `verify on the AM4 display or in AM4-Edit.\n` +
+        `Scene rename sent for scene ${scene_index} → "${name}" but no ack received. ` +
+        `Verify on the AM4 display or in AM4-Edit.\n` +
         `Sent (${bytes.length}B): ${toHex(bytes)}\n` +
-        `All inbound SysEx during the ${WRITE_ECHO_TIMEOUT_MS} ms window:\n` +
-        formatCaptured(),
+        formatAcklessHint(result.captured),
     }],
   };
 });
@@ -897,26 +1287,21 @@ server.registerTool('switch_preset', {
   const locationIndex = parseLocationCode(normalized);
   const bytes = buildSwitchPreset(locationIndex);
   const conn = ensureMidi();
-  const captured: number[][] = [];
-  const unsubscribe = conn.onMessage((msg) => {
-    if (msg[0] === 0xf0) captured.push([...msg]);
-  });
-  conn.send(bytes);
-  await new Promise<void>((resolve) => setTimeout(resolve, WRITE_ECHO_TIMEOUT_MS));
-  unsubscribe();
-  const formatCaptured = (): string => {
-    if (captured.length === 0) return '  (none)';
-    return captured.map((m, i) => `  [${i}] (${m.length}B) ${toHex(m)}`).join('\n');
-  };
+  const { capturedText, hint } = await sendAndCapture(conn, bytes);
+  // A new preset loads a new set of block channels — any cached channel
+  // state from a previous preset is now stale.
+  invalidateChannelCache();
   return {
     content: [{
       type: 'text',
       text:
         `Switched to preset ${formatLocationCode(locationIndex)} (index ${locationIndex}). ` +
-        `Any unsaved working-buffer edits were discarded. Verify on the AM4 display.\n` +
+        `Any unsaved working-buffer edits were discarded. Verify on the AM4 display. ` +
+        `(Channel cache cleared — subsequent param writes will report "unknown channel" ` +
+        `until a channel is explicitly set.)\n` +
         `Sent (${bytes.length}B): ${toHex(bytes)}\n` +
         `All inbound SysEx during the ${WRITE_ECHO_TIMEOUT_MS} ms window:\n` +
-        formatCaptured(),
+        capturedText + hint,
     }],
   };
 });
@@ -938,25 +1323,20 @@ server.registerTool('switch_scene', {
   const sceneIdx = scene_index - 1;
   const bytes = buildSwitchScene(sceneIdx);
   const conn = ensureMidi();
-  const captured: number[][] = [];
-  const unsubscribe = conn.onMessage((msg) => {
-    if (msg[0] === 0xf0) captured.push([...msg]);
-  });
-  conn.send(bytes);
-  await new Promise<void>((resolve) => setTimeout(resolve, WRITE_ECHO_TIMEOUT_MS));
-  unsubscribe();
-  const formatCaptured = (): string => {
-    if (captured.length === 0) return '  (none)';
-    return captured.map((m, i) => `  [${i}] (${m.length}B) ${toHex(m)}`).join('\n');
-  };
+  const { capturedText, hint } = await sendAndCapture(conn, bytes);
+  // Scene switches remap which channel each block uses; any cached channel
+  // state is now invalid until we explicitly set a new channel.
+  invalidateChannelCache();
   return {
     content: [{
       type: 'text',
       text:
-        `Switched to scene ${scene_index}. Verify on the AM4 display.\n` +
+        `Switched to scene ${scene_index}. Verify on the AM4 display. ` +
+        `(Channel cache cleared — the new scene may point each block at a ` +
+        `different channel than scene ${scene_index === 1 ? '2..4' : '1'}.)\n` +
         `Sent (${bytes.length}B): ${toHex(bytes)}\n` +
         `All inbound SysEx during the ${WRITE_ECHO_TIMEOUT_MS} ms window:\n` +
-        formatCaptured(),
+        capturedText + hint,
     }],
   };
 });
@@ -976,14 +1356,16 @@ server.registerTool('reconnect_midi', {
 }, async () => {
   try {
     ensureMidi(true);
+    // Fresh connection = we don't know anything about the hardware state.
+    invalidateChannelCache();
     return {
       content: [{
         type: 'text',
         text:
           'MIDI connection reset. Next tool call will use a fresh port handle. ' +
-          'If writes still don\'t ack after this, the issue is below the server ' +
-          '(AM4 powered off, USB unplugged, driver wedged, or another app holding ' +
-          'the port exclusively).',
+          'Channel cache cleared. If writes still don\'t ack after this, the issue ' +
+          'is below the server (AM4 powered off, USB unplugged, driver wedged, or ' +
+          'another app holding the port exclusively).',
       }],
     };
   } catch (err) {

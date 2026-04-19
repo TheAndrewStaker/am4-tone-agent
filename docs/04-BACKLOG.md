@@ -93,13 +93,70 @@ the device's own store command to persist. See `docs/DECISIONS.md`.
 - ACCEPTANCE: applying a known `AM4Preset` to slot Z04 produces audibly
   the same tone as the IR was authored to describe.
 
-### P1-007 Extract per-block parameter ID space (incremental)
-- For each block type on AM4, capture USB traffic while AM4-Edit
-  manipulates each control.
-- Map parameter IDs to human-readable names (cross-reference the Blocks
-  Guide PDF for semantic labels).
-- Store in `src/knowledge/<block>.ts` as structured TypeScript constants.
-- Incremental — we only need the parameters a given preset actually uses.
+### P1-007 Extract per-block parameter ID space — dev incremental, **complete coverage before public release**
+- **Dev-time (today):** for each block type on AM4, capture USB traffic
+  while AM4-Edit manipulates each control. Map parameter IDs to human-
+  readable names (cross-reference the Blocks Guide PDF for semantic
+  labels). Register in `KNOWN_PARAMS` (`src/protocol/params.ts`),
+  regenerate enums via `gen-cache-enums.ts`. This is incremental —
+  during RE we only add the params a given session needs.
+
+- **Release gate (non-negotiable before public launch; see
+  LAUNCH-POST-OUTLINE.md release gate and P5-009 pre-release
+  ergonomics).** Every `CONFIRMED` block in `CACHE-BLOCKS.md` must
+  have its **full exposed param set** in `KNOWN_PARAMS` before the
+  MCP server ships to non-developer users. Rationale: Claude Desktop
+  treats `list_params` / tool descriptions as authoritative and will
+  *not* invent params beyond them — **but it will happily invent
+  params that *should* exist on a full-size Fractal unit** (mid,
+  treble, presence, master on amp; feedback, mix on delay) when the
+  registry looks sparse. A real user typing "bump the mids" to
+  Claude should get a tone change, not a validation-error round-trip.
+
+- **Coverage bar per block.** The cache (`cache-section3.json` +
+  `cache-section2.json`) enumerates every param record the AM4
+  firmware actually addresses per block. Before release, every
+  record in a confirmed effect block must be either:
+  1. Registered in `KNOWN_PARAMS` with `pidLow/pidHigh/unit/range`
+     populated, name matching the AM4-Edit UI label (or the Blocks
+     Guide label if UI is terse), and at least one capture-verified
+     pidHigh; **or**
+  2. Explicitly documented as **intentionally-excluded** (e.g. an
+     internal routing flag, a modifier-only knob, a cab/mic
+     selector that belongs under a separate tool surface) with a
+     one-line rationale in `CACHE-DUMP.md`.
+  No param record may be silently omitted — the audit is mechanical
+  (every cache record maps to either a registry entry or an excluded
+  row).
+
+- **Coverage audit tool.** Add `scripts/audit-param-coverage.ts`
+  that iterates `cache-section2.json` + `cache-section3.json`, joins
+  against `KNOWN_PARAMS`, and prints per-block:
+  `{ block, totalCacheRecords, registered, explicitlyExcluded,
+  uncovered }`. Release-gate is `uncovered === 0` for every
+  `CONFIRMED` block. Wire into `npm run preflight` behind a
+  `PRERELEASE=1` flag so it's opt-in during dev but fails CI at
+  tag time.
+
+- **Hallucination mitigation in tool descriptions (short-term, ship
+  alongside ongoing coverage work).** Add a compact "what params
+  exist per block" cheat-sheet into the `apply_preset` and
+  `set_param` tool descriptions, regenerated from `KNOWN_PARAMS`
+  at server start so it never drifts. Format:
+  `amp: gain, bass, level, channel, type | delay: time, channel,
+  type | reverb: mix, channel, type | …`. Keeps the description
+  under the MCP description budget while eliminating the "LLM
+  assumes mid/treble/presence exist" failure mode observed in
+  HW-002 testing (2026-04-18). This is a two-way win: it helps now
+  (before coverage is complete, it tells Claude to stay within
+  what's registered) and after release (gives Claude a scanable
+  reference so it doesn't have to call `list_params` before every
+  write).
+
+- **Priority.** Coverage work runs in parallel with Phase 2/3/4;
+  not a blocker for in-house iteration. Becomes a hard blocker at
+  the v1.0 release tag. The cheat-sheet sub-item is short enough
+  to land this cycle.
 
 ### P1-008 Factory preset safety-classification + release-time write gate
 - **Baseline classification work:**
@@ -213,6 +270,207 @@ the device's own store command to persist. See `docs/DECISIONS.md`.
 - Reverse-engineering the scrambled chunk bodies is off the MVP critical
   path per the 2026-04-14 architecture decision.
 - Reopen only if the puppet-the-device path proves insufficient.
+
+### P1-010 Bulk param registration from cache (fulfills P1-007 coverage gate)
+- **Context.** P1-007 sets the coverage bar; P1-010 is the concrete
+  path to get there without 400 one-off captures. Session 15 proved
+  **wire `pidHigh` == cache record `id`** for Amp/Drive/Reverb/Delay,
+  and the 11 blocks confirmed in Session 18 all held to the same
+  positional pidLow↔cache-block mapping. That means the cache
+  (`samples/captured/decoded/cache-section2.json` +
+  `cache-section3.json`) already contains `pidLow / pidHigh /
+  kind / displayMin / displayMax / step / enumValues` for every
+  addressable param across every confirmed block — ~200–350
+  user-facing params once scene-snapshot / modifier / internal
+  routing rows are filtered out. We just haven't harvested it.
+
+- **Deliverable.** `scripts/gen-params-from-cache.ts` emits
+  `src/protocol/cacheParams.ts` (generated, parallel to the
+  existing `cacheEnums.ts`) containing a full `KNOWN_PARAMS`-shape
+  entry per addressable cache record. `params.ts` imports from both
+  `cacheEnums` (types) and `cacheParams` (the bulk registry),
+  retaining manually-registered out-of-band params
+  (`amp.channel` at `pidHigh=0x07D2`, `amp.level` at
+  `pidHigh=0x0000`, any others we discover) as overrides.
+
+- **Session breakdown (~4 Claude sessions + 1 founder capture
+  session):**
+  1. **Session A — Generator script.** `gen-params-from-cache.ts`:
+     walks each CONFIRMED cache block, joins against a block-name
+     table, filters non-addressable records (heuristic: record kind
+     `float` with `displayMin != displayMax`; skip scene/routing
+     sub-blocks 15/16; skip modifier-template block 0), and emits
+     one `KNOWN_PARAMS` entry per surviving record.
+  2. **Session B — Name mapping.** Per-block manual table mapping
+     cache record `id` → UI label, sourced from the Blocks Guide
+     PDF (`docs/manuals/Fractal-Audio-Blocks-Guide.txt`) and
+     verified against AM4-Edit's own labels where the PDF is
+     ambiguous. 15 blocks × ~10–30 records each = tractable. Stored
+     as `src/protocol/paramNames.ts` so regeneration doesn't clobber
+     hand-edited names.
+  3. **Session C — Unit inference + filter hardening.** Heuristics:
+     `min=0 max=10 step∈{0.01, 0.1}` → `knob_0_10`;
+     `min=-∞ max=+∞ step=0.1` and param name contains "db"/"level"
+     → `db`; `max ∈ {2000, 4000, 8000}` and name contains "time" →
+     `ms`; `max=100 min=0 step=1` and name contains "mix"/"level"/
+     "depth" → `percent`; `kind=enum` → `enum` with values from
+     `cacheEnums`. Fall back to `float_raw` for unknown units so
+     nothing breaks; audit script flags these for review.
+  4. **Session D — Spot-check capture sweep (founder hardware
+     time).** For each of the 15 confirmed blocks, pick 5 params
+     spanning the block's record range (first, last, three mid).
+     Founder clicks the control in AM4-Edit with USBPcap running;
+     I decode and diff against the auto-generated entry. Total ~75
+     captures, ~1–2 hours of founder time. Pass criterion: every
+     captured pidHigh matches the cache-derived value; unit + range
+     are correct. Failures are logged per-block and trigger a
+     per-param fallback for that block only.
+  5. **Session E — Audit wiring + cleanup.** Run the P1-007
+     coverage audit script. `uncovered` should drop from
+     hundreds → zero for every CONFIRMED block. Fix the residuals
+     (mark intentionally-excluded in `CACHE-DUMP.md` or catch in the
+     spot-check). Regenerate the `apply_preset` / `set_param` tool
+     cheat-sheet from the new registry. Preflight green.
+
+- **Risks + mitigations:**
+  - **pidHigh==id could break for an unverified block.** The
+    Session-D spot-check is the guard; if any block's spot-check
+    fails, we fall back to per-param captures for that block only
+    (~30 min per block, bounded).
+  - **Name ambiguity between Blocks Guide and AM4-Edit UI.** Pick
+    the UI label when they disagree — user-facing consistency
+    matters more than PDF fidelity. Flag mismatches in a review
+    log so future RE sessions can rationalize.
+  - **Non-addressable records leak into the registry.** Filter is
+    heuristic, not provable. If a user-facing tool call writes to
+    a non-addressable record, the AM4 silently absorbs it — same
+    class as the absorb/apply discriminator problem (BK-008) and
+    equally benign. Audit pass can tighten the filter based on
+    observed silent absorbs.
+
+- **Relation to other items:**
+  - **P1-007** — this IS the coverage path; closing P1-010 closes
+    P1-007's release gate.
+  - **P1-008** — coverage makes the tiered write gate meaningful.
+    Shipping factory-safety with only 17 addressable params would
+    feel half-finished. Run P1-010 before P1-008 lands in a
+    release.
+  - **P5-009 item 6** — the hallucination-prevention cheat-sheet
+    is generated from the bulk registry. Better registry → better
+    cheat-sheet.
+  - **BK-014 (Axe-Fx II XL+)** — same bulk approach will apply if
+    Axe-Fx II's editor exposes a comparable metadata cache. The
+    generator script is the template for a future
+    `gen-params-from-cache` per device family.
+
+- **When to schedule.** After the current hardware-test queue
+  (HW-006/007/008) clears and before P1-008 implementation begins.
+  Depends on nothing outstanding — cache is parsed, block roles
+  are confirmed, the generator just needs writing.
+
+### P1-012 Channel-aware param writes (release-critical UX)
+- **Context.** HW-009 (2026-04-19) confirmed that `set_param` /
+  `set_params` / `apply_preset` write to **whichever channel is
+  active for that block right now**. Scenes select channels +
+  bypass state; channels hold the param values. Two scenes that
+  reference the same channel will both reflect any write to that
+  channel — a moving-target footgun when the user expects "change
+  the tone on scene 2 only" but unintentionally edits channel A
+  which scenes 1 and 2 both use. Tool-level awareness is needed
+  before this ships to non-developer users; without it, a
+  guitarist asking for a tweak on one scene can silently break
+  another.
+
+- **The model (from CLAUDE.md's terminology table, now
+  load-bearing).**
+  ```
+  Preset ─── 4 slots × 1 block each
+              │
+              ├── Block (amp / drive / reverb / …)
+              │     │
+              │     └── 4 channels A/B/C/D (the data: gain, bass, …)
+              │
+              └── 4 scenes (selectors: per-block bypass + channel pointer)
+  ```
+  A write to `amp.gain` targets the channel the Amp block is
+  currently on. `amp.channel` is already a decoded register
+  (pidHigh `0x07D2`, Session 08) — we just haven't been using it
+  as a precondition of every param write.
+
+- **Three candidate UX shapes (pick one before implementation).**
+  1. **Implicit + transparent.** Every write response says "wrote
+     amp.gain=8 to **channel A**" (by reading the current channel
+     from the working buffer first, or inferring from a decoded
+     scene-switch ack). No new params; Claude Desktop knows what
+     channel it's on and can reason from there. Lowest friction,
+     highest trust in the read-current-channel mechanism.
+  2. **Explicit channel param, optional.** `set_param({ block,
+     param, value, channel? })` — omit for "current channel,"
+     specify to force a switch first. Two wire transactions when
+     specified (channel select + param write). More control,
+     more tokens per call.
+  3. **Scene-first mental model.** `set_param_in_scene({ scene,
+     block, param, value })` that internally looks up scene →
+     channel mapping and writes the right channel. Most intuitive
+     for users thinking in scene terms; requires decoding BK-025
+     (scene-switch ack) first to know scene → channel bindings.
+     Highest value, highest cost.
+
+  Recommendation: **ship (1) first** (transparent current-channel
+  reporting), then layer (2) on top once the explicit-channel
+  use-case is proven. (3) depends on BK-025 and can follow.
+
+- **Deliverables (for shape 1 — minimum viable).**
+  1. `read_block_channel(block)` internal helper — not an MCP
+     tool — that SET_PARAMs the amp/drive/reverb/delay channel
+     register to itself (or does a minimal read via any
+     working read primitive we have) and returns the current
+     channel index. Cache the result per block per MCP session;
+     invalidate on `switch_preset` / `switch_scene` / explicit
+     `amp.channel` write.
+  2. Every set_param-family tool response appends
+     `Wrote to channel X.` (or "Wrote to the currently-active
+     channel (index N);" if channel A/B/C/D naming isn't
+     available for the block yet).
+  3. Tool descriptions (`set_param`, `set_params`, `apply_preset`)
+     add a standalone paragraph: *"Param writes target the
+     channel (A/B/C/D) currently active for the block. Channels
+     are shared across scenes — a write on one scene affects
+     every scene that references the same channel. Use
+     `switch_scene` first if the user is asking for a
+     scene-specific change; use `set_param` on
+     `<block>.channel` first if they want to edit a different
+     channel's values without switching scenes."*
+  4. `apply_preset` extended description: "Builds across the
+     active channel only. To build a preset that varies tone
+     across scenes, set channels per-slot and call
+     `apply_preset` once per channel."
+
+- **Release gate (adds to LAUNCH-POST-OUTLINE.md).** Before v1.0:
+  - [ ] Every param-writing tool response surfaces which channel
+    was targeted.
+  - [ ] Every param-writing tool description explains the channel/
+    scene model in plain English.
+  - [ ] Smoke test: a fresh Claude Desktop session asked "change
+    the tone on scene 2 without affecting scene 1" produces a
+    sequence that first checks what channel scene 2 uses, then
+    either switches the Amp block to a dedicated channel for
+    scene 2 or warns the user that channels are shared.
+
+- **Relation to other items.**
+  - **BK-025** — decoding the scene-switch ack payload gives us
+    scene → channel mappings directly from the device; unlocks
+    UX shape (3) above.
+  - **HW-009** — the observation that prompted this item.
+  - **Session 08** — already decoded `amp.channel` write; we
+    have the wire primitive, just haven't wired it into tool UX.
+
+- **When to schedule.** Ship-now-batch adjacent. Tool-description
+  updates (deliverable 3) are a 15-minute edit and should land
+  with the save/rename description cleanup. The channel-read
+  helper + response-text extension (deliverables 1–2) depend on
+  deciding whether we have a working read primitive or need to
+  probe one; could bundle with BK-025 decode work.
 
 ---
 
@@ -380,10 +638,15 @@ primary in conversational tone-building requests.
   3. **Summarize + confirm** — present a single table: song → preset
      location → new preset name → block summary. User confirms once
      for the whole batch.
-  4. **Apply + save + name** — for each song, run `apply_preset` +
-     `save_to_location` + `set_preset_name` in order. Fail-fast: halt
-     on the first write that doesn't wire-ack and return partial
-     progress (which locations landed, which didn't).
+  4. **Apply + save + name** — once BK-028 ships, the batch is a
+     single `build_and_save_presets({ presets: [...], force: true })`
+     call carrying all N preset specs. Before BK-028 lands, it's N ×
+     (`apply_preset` + `save_preset`) MCP calls, which the setlist
+     workflow still works with but pays the full per-call LLM-
+     latency overhead (~50–85 s for 16 presets — flag in the
+     confirmation summary so the user expects the wait). Fail-fast:
+     halt on the first write that doesn't wire-ack and return
+     partial progress (which locations landed, which didn't).
   5. **Audition (optional)** — `load_location` each saved preset in
      turn so the user hears the result. Skippable per the latency
      budget — a 16-preset audition is ~16 × (load + wait).
@@ -546,6 +809,15 @@ without installing Node, a C++ toolchain, or editing JSON by hand. See
   5. Guardrail on `save_to_slot` — the Z04-only gate is P1-008's job to
      relax; confirm the error message points users at the right escape
      hatch once that ships.
+  6. **Param coverage before release** — see P1-007. `KNOWN_PARAMS`
+     must cover every param record in `CACHE-BLOCKS.md` for every
+     `CONFIRMED` block before v1.0, and the `apply_preset` /
+     `set_param` tool descriptions must ship the regenerated-at-
+     startup param cheat-sheet. Without both, Claude Desktop
+     hallucinates full-size-Fractal params (mid/treble/presence on
+     amp, feedback/mix on delay) and the UX regresses to
+     validation-error ping-pong. Observed 2026-04-18 during HW-002
+     testing.
 
 ### P5-010 License and trademark hygiene
 - MIT or Apache-2.0 LICENSE file at the repo root.
@@ -712,25 +984,21 @@ reconnect_midi as a manual escape hatch.
 - **Unlock:** additive edits, "what's in slot 2?" queries, apply_preset
   can diff before writing instead of clobbering.
 
-### BK-010 Scene support in `apply_preset` — ⏳ partial (switch decoded, per-scene payload still open)
-- **Context:** AM4 has 4 scenes per preset for per-scene bypass +
-  channel assignment. "Make this louder for the solo" is natural.
-- **Decoded (Session 20 + Session 21):** scene-switch command —
-  `pidLow=0x00CE / pidHigh=0x000D`, u32 LE scene index 0..3. MCP tool
-  `switch_scene(scene_index)` shipped; hardware-test queued as HW-006.
-  Scene-rename also shipped (BK-011). Scene-to-scene transitions now
-  usable end-to-end.
-- **Still open for BK-010's real goal:** extending `apply_preset` IR
-  to carry per-scene bypass + channel state. The `apply_preset` shape
-  should accept `scenes: [{ index: 1..4, bypass?: [...], channels?: {...} }]`
-  and emit the correct write sequence. The per-scene bypass/channel
-  commands are NOT decoded — we know scene index changes via switch,
-  but the underlying "this block is bypassed in scene N" writes haven't
-  been captured. Capture of AM4-Edit toggling bypass-per-scene is the
-  next protocol step.
-- **Prereqs:** per-block channel pidHighs need one capture each to
-  confirm (we extrapolated from amp.channel in Session 08 but only
-  amp is verified).
+### BK-010 Scene support in `apply_preset` — ⏳ partial → **superseded by BK-027**
+- **Status:** BK-010's goal (extending `apply_preset` to carry per-
+  scene bypass + channel state) is now scoped in full as **BK-027
+  Kitchen-sink `apply_preset`** below. BK-027 phase 2 is BK-010's
+  deliverable; the prerequisite captures are queued as **HW-011**
+  (scene→channel + scene→bypass writes).
+- **Decoded (Session 20 + Session 21, still load-bearing):**
+  scene-switch command — `pidLow=0x00CE / pidHigh=0x000D`, u32 LE
+  scene index 0..3. MCP tool `switch_scene(scene_index)` and
+  `set_scene_name(scene_index, name)` both shipped. These continue
+  to work as narrow tools independent of BK-027.
+- **What remains before BK-027 phase 2 can ship:** HW-011's two
+  capture passes (scene→channel + scene→bypass), their decode into
+  `buildSetSceneChannel` / `buildSetSceneBypass`, and byte-exact
+  goldens. Reference in BK-027 for the handler wiring.
 
 ### BK-014 Axe-Fx II XL+ support (first expansion — founder owns one)
 - **Context:** Founder owns an Axe-Fx II XL+ alongside the AM4. It's an
@@ -1382,3 +1650,355 @@ Skip until explicit user demand materializes.
   workflow are stable enough to package.
 - **Dependency:** BK-012 (package split) and BK-023 (registry format
   shared across devices).
+
+### BK-025 Decode scene-switch ack payload (scene → channel mappings)
+- **Context.** Every `switch_scene` call produces a 64-byte
+  write-echo whose 40-byte payload varies per scene in a structured
+  way. HW-006 (2026-04-19) captured all four scenes and showed byte 24
+  constant at `0x1F` (suspected block-placement bitmask: 4 blocks ×
+  1 bit = 5 bits = 0b11111) and bytes 20–23 / 25–26 varying per scene.
+  Almost certainly encodes per-block bypass + channel pointers
+  (which channel each block uses on that scene). Decoding it unlocks
+  scene-first UX in P1-012 (Shape 3 tool: `set_param_in_scene` maps
+  scene → channel internally) AND gives us a read-back path for scene
+  state without depending on the unsolved READ response format
+  (STATE.md "deferred").
+
+- **Captured scene-switch ack payloads (bytes 15+ of the 64-byte ack):**
+  ```
+  Scene 1:  00 00 00 00 00 00 00 00 00 0C 00 00 …  (mostly zero — baseline)
+  Scene 2:  00 40 00 00 00 05 2E 55 2A 1F 0C 20 …
+  Scene 3:  01 00 00 00 00 05 2E 54 2A 1F 4C 40 …
+  Scene 4:  01 40 00 00 00 00 00 01 00 1F 4C 60 …
+  ```
+  - Bytes 15–17: septet-packed scene index
+    (0 / 0x80 / 0x100 / 0x180 → `00 00`, `00 40`, `01 00`, `01 40`).
+  - Byte 24: `0x1F` on scenes 2–4, `0x00` on scene 1 — hypothesis
+    that it's a block-placement bitmask that only populates once
+    the scene diverges from defaults. If so, scene 1 baseline has
+    zero for this byte because the scene hasn't been individually
+    configured (it inherits from preset defaults).
+  - Bytes 20–23 and 25–26: the interesting ones. Likely per-block
+    bypass + channel state encoded as nibbles or packed bits.
+
+- **Deliverables.**
+  1. New capture campaign (HW-011 to be queued) — construct a preset
+     with **known** bypass/channel state per scene (e.g. scene 2:
+     Amp bypassed + Drive on channel B; scene 3: all blocks active
+     on channel A). Switch through all four scenes; capture acks;
+     diff against the known ground-truth. Should let us pin each
+     varying byte to a specific (block, attribute) pair.
+  2. `parseSceneAck(bytes)` in `src/protocol/sceneAck.ts` that
+     returns `{ sceneIndex, blocks: [{ block, bypass, channel }] }`.
+     Byte-exact goldens in `verify-msg` (4 scenes × N ground-truth
+     presets).
+  3. Wire into the `switch_scene` MCP tool response — after the
+     ack, include `scene ${N} state: amp=A bypass, drive=B, reverb=C,
+     delay=A` in the response text. This lets Claude know the
+     channel mapping without a separate read.
+
+- **Risks.** Payload may not cleanly encode channel — could be
+  modifier state or scene-level param override values instead.
+  If so, we'll need a different read path to get scene → channel
+  mappings. Fallback: maintain server-side state via explicit
+  channel writes (P1-012 Shape 1 as-is).
+
+- **When to schedule.** Next protocol-RE session after P1-012 ships
+  enough state tracking to be useful. Lightweight — 4 existing
+  captures already in hand, need ~4 more with known ground-truth
+  to disambiguate.
+
+### BK-026 Decode preset-switch ack payload (preset state snapshot)
+- **Context.** Every `switch_preset` call produces a 64-byte
+  write-echo whose 40-byte payload differs per preset. HW-007
+  (2026-04-19) captured A01 / B03 / M02 / Z04 with varying byte
+  signatures, and sparse presets (A01, Z04 "Clean Machine") had
+  mostly-zero payloads while richer factory presets (M02) carried
+  distinctive non-zero bytes. Likely encodes enough of the preset's
+  layout + active scene to let us read back a loaded preset's
+  skeleton without a full dump.
+
+- **Captured preset-switch ack payloads (bytes 15+ of the 64-byte ack):**
+  ```
+  A01 (idx 0):   00 00 00 00 00 00 00 00 00 0C 00 00 00 00 …
+  B03 (idx 6):   03 00 18 04 00 66 34 6E 1E 4D 40 03 18 …
+  M02 (idx 49):  18 40 08 44 15 12 25 73 1F 0D 07 10 00 …
+  Z04 (idx 103): 33 40 19 64 10 00 01 00 1F 4C 26 03 18 …
+  ```
+  - Bytes 15–17: septet-packed location index (A01=0x00, B03=0x06,
+    M02=0x31, Z04=0x67 — matches the outgoing float32-packed index).
+  - Bytes 18–28: vary richly per preset. Likely encodes block
+    layout (which blocks in which slots) and possibly active scene
+    + a few parameter values.
+
+- **Deliverables.**
+  1. Capture a small corpus of **known-content** presets (we already
+     control Z04 via `apply_preset`; capture a sparse preset, a
+     full-chain preset, and 2–3 factory presets whose content we
+     inspect via the AM4 display).
+  2. `parsePresetAck(bytes)` — returns
+     `{ locationIndex, blockLayout: ['amp'|'none',…], activeScene? }`.
+  3. Wire into the `switch_preset` MCP tool response.
+
+- **Deprioritized vs BK-025.** Scene-switch payload is richer in
+  immediate UX value (scene-first tools); preset-switch is more a
+  read-back convenience. Do BK-025 first, transfer the decoding
+  technique to BK-026.
+
+- **When to schedule.** After BK-025 ships — same methodology,
+  likely half the effort because we have a template by then.
+
+### BK-027 Kitchen-sink `apply_preset` (blocks × channels × scenes, one call)
+- **Context.** Session 22 conversation produced a realistic user prompt
+  the tool stack currently can't satisfy in one call: *"make a preset
+  with a clean scene, a crunch scene, a rhythm scene, and a solo
+  scene; amp channels A+B use the same type with different gains for
+  clean/crunch; channels C+D use another amp type with different gains
+  for rhythm/solo."* Today that needs:
+  1. `apply_preset` to place Amp,
+  2. a `set_params` with 8 channel-scoped writes to fill A/B/C/D,
+  3. four **missing** scene→channel writes (blocked on HW-011),
+  4. four `set_scene_name` calls,
+  5. `save_preset`.
+  5+ MCP round-trips and a non-trivial sequencing problem for Claude.
+  The founder's 2026-04-19 call was clear: grow `apply_preset` into
+  a kitchen-sink "here's my whole preset" tool so Claude can plan
+  once, send once. Keep the small tools (`set_param`,
+  `set_block_type`, `set_scene_name`, etc.) for surgical edits;
+  this is the counterpart for "build a complete preset."
+
+- **Proposed shape (input schema):**
+  ```typescript
+  apply_preset({
+    // Block layout + per-channel params for each slot
+    slots: [
+      {
+        position: 1,
+        block_type: "amp",
+        // Optional. Per-channel param values (A/B/C/D). Only valid
+        // for amp / drive / reverb / delay. If omitted, no channel
+        // values are written (preserves whatever's there already).
+        channels: {
+          A: { type: "Deluxe Verb Normal", gain: 3 },
+          B: { type: "Deluxe Verb Normal", gain: 6 },
+          C: { type: "1959SLP Normal", gain: 5 },
+          D: { type: "1959SLP Normal", gain: 8 },
+        },
+        // Back-compat shortcut. Equivalent to `channels: { <active>: {...} }`
+        // — writes to whatever channel the block is currently on.
+        params?: { gain: 6, bass: 5 },
+        // Back-compat shortcut. Equivalent to `channels: { <passed>: params }`
+        // — switches to the specified channel first, writes params there.
+        channel?: "A" | "B" | "C" | "D",
+      },
+      { position: 2, block_type: "reverb", channels: { A: { mix: 30 } } },
+    ],
+    // Per-scene configuration. Omit to leave scenes at defaults.
+    // channels / bypass depend on HW-011 / BK-010 decodes.
+    scenes?: [
+      {
+        index: 1,
+        name?: "clean",
+        // scene → channel pointer per block. HW-011 / BK-010 decode.
+        channels?: { amp: "A", drive: "A", reverb: "A", delay: "A" },
+        // scene → bypass flag per block. HW-011 decode.
+        bypass?: { amp: false, drive: true, reverb: false, delay: false },
+      },
+      { index: 2, name: "crunch", channels: { amp: "B" } },
+      { index: 3, name: "rhythm", channels: { amp: "C" } },
+      { index: 4, name: "solo",   channels: { amp: "D" } },
+    ],
+  })
+  ```
+  The tool does **not** save. Chain with `save_preset(location, name)`
+  to persist. (Founder's 2026-04-19 call: keep `save_preset` lean as
+  rename + save; don't grow it into a combined "build + save."
+  Working buffer vs stored preset is a meaningful boundary.)
+
+- **Execution order inside the handler.** Preserves current
+  apply_preset semantics and adds scenes + multi-channel config:
+  1. Validation pass (atomic): all slot blocks, all channel letters,
+     all scene indices, all scene→block references must exist.
+     Kitchen-sink means the rejection messages need to be precise —
+     path-like *"slots[0].channels.B.type: unknown amp type "foo""*
+     not just "invalid input."
+  2. Block placement writes (one per slot with a non-"none" type).
+  3. Per-slot channel param writes: for each slot that supplies
+     `channels`, walk the A→B→C→D order, switch channel, write
+     params. Skip missing channels (e.g. `channels: { A: {...} }`
+     only touches channel A).
+  4. Per-scene writes (blocked on HW-011 decodes): for each scene
+     that supplies `channels` or `bypass`, emit the appropriate
+     scene-channel / scene-bypass writes.
+  5. Scene name writes (if `scenes[i].name` supplied) via the
+     existing rename command.
+  6. Return a per-write ack summary plus channel-status lines.
+
+- **Dependencies + phasing.**
+  - **Ship-now ready:** `slots[i].channels` (per-channel param
+    values). Uses the existing channel-switch + SET_PARAM primitives
+    we landed this session. No new decodes needed.
+  - **Blocked on HW-011 / BK-010:** `scenes[i].channels` (scene →
+    block channel pointers) and `scenes[i].bypass` (scene → block
+    bypass flags).
+  - **Already available:** `scenes[i].name` uses `set_scene_name`;
+    `slots[i].params` and `slots[i].channel` already work.
+  - Recommended phasing: land `slots[i].channels` first as a
+    backwards-compatible extension of today's apply_preset (parallel
+    to `slots[i].params` / `slots[i].channel`), then layer
+    `scenes[]` support when HW-011 decodes land. Each phase is
+    useful on its own — a preset with full per-channel values but
+    default scene assignments still sounds correct when the user
+    only cares about one scene at a time.
+
+- **Why not grow `save_preset` too?** Two reasons.
+  1. **Separation of concerns.** `apply_preset` operates on the
+     working buffer; `save_preset` persists the working buffer.
+     Conflating them muddles the "is this change reversible?"
+     question. Today a user can apply_preset, experiment, and
+     `switch_preset A01` to discard. Fold save in and that escape
+     hatch disappears.
+  2. **Tool-description token budget.** Every MCP tool description
+     is shown to Claude every session. A do-everything tool needs
+     a description that covers every use case, which costs tokens
+     on every conversation. Two focused tools have two focused
+     descriptions and compose naturally.
+  Keep `save_preset(location, name)` as the rename-then-save
+  composite it already is.
+
+- **When to schedule.** Phase 1 (slot-channels, no scenes): land
+  alongside or just after HW-010 round-trip testing of the session-
+  22 changes. Phase 2 (scenes): after HW-011 captures and BK-010
+  decode. Both phases are tractable in 1 session each.
+
+- **Relation to other items.**
+  - **BK-010 Scene support in apply_preset** — this IS the closure
+    of BK-010. BK-010 can be marked "superseded by BK-027" when
+    phase 2 lands.
+  - **HW-011** — prerequisite for phase 2.
+  - **P1-012 Channel awareness** — phase 1 extends the per-write
+    channel mechanism to per-channel batches, building on the
+    same cache + switch primitives.
+  - **P5-009 item 4 (nice-to-have sugar `set_block_channels`)** —
+    redundant once BK-027 phase 1 ships; delete that sugar idea
+    or fold it as an alias that forwards to apply_preset.
+
+### BK-028 Bulk preset build-and-save (unblocks P4-002 setlist workflow)
+- **Context.** Session 22 conversation raised the realistic scenario
+  of a user asking Claude to build and save 10 presets in one prompt
+  (e.g. *"build my gig setlist"*). With the granular tool surface
+  that requires 20 MCP calls (10 × apply_preset + 10 × save_preset),
+  and the math is ugly:
+  - Per preset with full kitchen-sink shape: ~60–90 wire writes @
+    ~50 ms each = **3–4.5 s of wire time per preset**.
+  - × 10 presets = **30–45 s of wire**.
+  - Plus 20 × MCP round-trips with LLM latency between each call
+    (Claude has to generate the next call after reading the previous
+    response) = another **20–40 s** of LLM overhead.
+  - Total: **~50–85 s** for a 10-preset batch. CLAUDE.md's perf
+    budget caps "avoid altogether" at 5 s. This is 10× that.
+  A single bulk tool with one MCP round-trip eliminates the LLM-
+  latency-between-calls overhead entirely (the per-preset wire time
+  is still there, but that's unavoidable). Brings the total to
+  ~30–45 s — still long, but one operation the user is warned about
+  upfront instead of 20 interleaved tool calls.
+
+- **Proposed shape.**
+  ```typescript
+  build_and_save_presets({
+    presets: [
+      {
+        location: "W01",
+        name: "Opener clean",
+        slots: [ /* same shape as BK-027 apply_preset.slots */ ],
+        scenes: [ /* same shape as BK-027 apply_preset.scenes */ ],
+      },
+      { location: "W02", name: "Ballad drive", slots: [...], scenes: [...] },
+      // … up to ~26 entries (one per bank the session targets; bounded
+      // by AM4's 104 preset locations minus whatever's write-gated)
+    ],
+    // Force tier from P1-008 write gate. true = overwrite
+    // non-empty targets with auto-backup; false = refuse non-empty.
+    // Applies to every preset in the batch; per-preset override
+    // possible via presets[i].force if needed (deferred until
+    // someone actually wants mixed-force batches).
+    force?: boolean,
+  })
+  ```
+
+- **Execution order inside the handler.**
+  1. **Validation pass (atomic).** All preset specs validated
+     end-to-end before ANY wire writes: every block name, channel
+     letter, param name/value, scene index, location code, and the
+     P1-008 gate tier per target location. Any failure rejects the
+     entire batch with nothing sent. Error paths include the
+     `presets[i]` index so Claude can fix the offending preset
+     without rebuilding the whole payload.
+  2. **Pre-flight backup (P1-008 integration).** For any target
+     location marked "user preset" or "factory preset" that's being
+     overwritten under `force=true`, take a timestamped backup
+     BEFORE any writes in that preset's sequence. Backup path
+     recorded in the final response for user reference.
+  3. **Per-preset execution, sequential.** For each preset in
+     order: apply_preset (working buffer) → save_preset(location,
+     name). Track ack status per preset. On first un-acked save,
+     stop the batch (don't leave the user with an unpredictable
+     half-written setlist).
+  4. **Status summary at the end.** Return per-preset status:
+     `{ location, name, status: "saved" | "backup_taken_then_saved"
+     | "skipped_gate" | "failed_mid_sequence", writes: N, errors?: [...] }`.
+     Plus a batch-level summary line Claude can parrot back to the
+     user: *"Built 7 of 10 presets (W01–W07). W08 failed during
+     scene writes; W09–W10 not attempted. Backups from forced
+     overwrites: W03 → backups/2026-04-19-W03-overdrive.syx."*
+
+- **Progress reporting gap.** MCP doesn't stream intermediate
+  progress; the client blocks until the tool returns. For a
+  45-second call this means Claude Desktop shows a spinner with no
+  milestone visibility. Mitigations:
+  - **Claude-side warning** (required): Claude tells the user
+    upfront *"I'll build 10 presets, this will take about a minute."*
+    Tool description explicitly instructs this behavior.
+  - **stderr heartbeat** (optional): the tool logs
+    `building preset 3/10 (W03 "Ballad drive")…` to stderr per
+    preset. Doesn't reach Claude Desktop's UI but shows up in
+    logs for debugging long-runs.
+  - **Phased variant** (future, if needed): split into
+    `plan_preset_batch` (validate + return plan with estimated
+    time) → user confirms → `execute_preset_batch(plan_id)`.
+    More MCP roundtrips but explicit confirmation of the big
+    operation. Probably overkill for MVP.
+
+- **Error handling — mid-batch failures.**
+  - Validation errors (pre-flight): whole batch rejected, nothing
+    sent, Claude gets a structured list of fix-ups.
+  - Wire-level errors (mid-batch): stop on first un-acked save,
+    report what succeeded. Don't leave the user guessing whether
+    W05 was partially saved — either it acked or we bailed.
+  - Working buffer state after failure: uncertain, since
+    apply_preset leaves the working buffer at the last built preset.
+    Tool response flags this so Claude can warn the user
+    *"your working buffer now reflects W07's layout — navigate
+    away and back to a saved preset if you want a clean slate."*
+
+- **Relation to other items.**
+  - **P4-002 Gig setlist workflow** — this is the primitive P4-002
+    consumes. P4-002's 16-song research→W-Z-assignment→batch-save
+    flow becomes a single `build_and_save_presets` call after all
+    the research is done.
+  - **P1-008 Factory preset safety** — `force` param and backup
+    semantics piggyback on P1-008's tier model. BK-028 can't ship
+    before P1-008 (the gate enforcement is P1-008's job).
+  - **BK-027 Kitchen-sink apply_preset** — this tool's `presets[i]`
+    shape is literally BK-027's shape + `{ location, name }`. Land
+    BK-027 first (phase 1 is ready today); BK-028 is a thin
+    batch-and-save wrapper on top.
+  - **BK-029 (potential future)** — a read-only `plan_preset_batch`
+    companion for very long batches, if the no-progress problem
+    becomes real in practice.
+
+- **When to schedule.** After BK-027 phase 1 (kitchen-sink apply
+  landed) and P1-008 (write gate). Both are prerequisites. Not
+  urgent on its own — the 20-tool-calls workflow works today, just
+  slowly. Becomes urgent when a user first tries a real setlist
+  build and the latency stings.

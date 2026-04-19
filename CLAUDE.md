@@ -161,6 +161,27 @@ says > 1 s, redesign before implementing.
   against misreading septet-encoded pidHighs as little-endian bytes
   (the class of bug that hit Session 08 — see SYSEX-MAP.md §6a note).
 
+## Living documentation — update before declaring a session complete
+
+Certain docs must stay current because future sessions (human and
+Claude) consult them as source of truth. When the underlying thing
+changes, the doc must change in the same session — not as a followup.
+Cheaper than discovering drift later.
+
+| Doc | Update when… |
+|---|---|
+| `docs/STATE.md` | A substantive session happens. Always — it's the session-start orientation doc. Update "single next action" and any relevant "recent breakthroughs" entry. |
+| `docs/PROMPT-COVERAGE.md` | A new MCP tool ships, a protocol decode lands, or founder testing surfaces a new user prompt pattern. Flip ⚠ → ✅ when the blocker clears; flip ❌ → ⚠ when a research item gets a concrete decode plan; add new rows for unanticipated prompts. |
+| `docs/HARDWARE-TASKS.md` | A HW-NNN item completes (mark ✅ + capture outcome), or a new hardware action is identified that Claude can't perform alone (append HW-NNN with step-by-step instructions). |
+| `docs/04-BACKLOG.md` | A new backlog item is identified, an existing item ships / re-scopes / is superseded, or a cross-reference between items is worth recording. |
+| `docs/SYSEX-MAP.md` | A new protocol decode is confirmed against captured bytes. Include the concrete capture reference and byte-exact example. |
+| `docs/SESSIONS.md` | A session produces a substantive finding worth a chronological entry (decodes, major tool changes, hardware-verified behavior). STATE.md is the summary; SESSIONS.md is the log. |
+
+**Session-wrap check.** Before declaring work complete, walk the table
+above and update whichever rows apply to what changed. A one-line
+reply at session end naming which docs were updated helps the founder
+verify nothing was missed.
+
 ## Do Not
 - Do not use AM4-Edit as a dependency or requirement
 - Do not hardcode preset-location values — always use the A01–Z04 naming

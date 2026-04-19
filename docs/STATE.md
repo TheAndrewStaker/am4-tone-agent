@@ -526,6 +526,8 @@ authoritative in `CLAUDE.md` and `DECISIONS.md` — not duplicated here.
 - `docs/REFERENCES.md` — local PDFs + factory bank + community sources.
 - `docs/BLOCK-PARAMS.md` — AM4 block types and effect types ground truth.
 - `docs/04-BACKLOG.md` — phased work item list.
+- `docs/PROMPT-COVERAGE.md` — living table of user prompt patterns → minimum tool-call path + status. Release-gate ready (every row ✅ or deliberately-accepted ⚠, zero ❌). Update when tools ship / decodes land / new prompt patterns surface. See CLAUDE.md "Living documentation" section for exact triggers.
+- `docs/HARDWARE-TASKS.md` — founder-owed physical actions (captures, round-trips). Check at session start; append HW-NNN when Claude identifies a hardware action it can't perform itself.
 - `scripts/probe.ts` — read-only device probe.
 - `scripts/sniff.ts` — bidirectional MIDI proxy (superseded by USBPcap).
 - `scripts/diff-syx.ts` — byte-level diff of two `.syx` files.

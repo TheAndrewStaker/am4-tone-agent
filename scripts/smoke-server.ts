@@ -93,11 +93,15 @@ async function main(): Promise<void> {
     'list_params',
     'lookup_lineage',
     'reconnect_midi',
+    'save_preset',
     'save_to_location',
     'set_block_type',
     'set_param',
     'set_params',
     'set_preset_name',
+    'set_scene_name',
+    'switch_preset',
+    'switch_scene',
   ];
   for (const exp of expected) {
     if (!names.includes(exp)) throw new Error(`missing tool: ${exp}`);

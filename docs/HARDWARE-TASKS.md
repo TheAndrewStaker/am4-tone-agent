@@ -10,7 +10,7 @@
 > **research-only for now** — no active hardware tasks queued until the
 > Fractal line is cleared.
 >
-> Last updated: 2026-04-18
+> Last updated: 2026-04-19
 
 ## Status key
 
@@ -53,45 +53,114 @@ Claude picks up from there and moves the item to ⏳ or ✅.
 - **If the pidHighs differ across writes:** we're in the "pidHigh per
   scene" world instead — `buildSwitchScene` needs a different shape.
 
-### HW-002 — Test `set_preset_name` persistence on Z04 🔜
+### HW-002 — Test `set_preset_name` persistence on Z04 ✅
 
-- **For:** STATE.md follow-up; unblocks finishing BK-011 (naming)
-- **Why:** the rename command is byte-correct against the captured wire
-  (Session 19g) but we don't know if the rename alone persists, or
-  whether it writes the working buffer only and needs a `save_to_slot`
-  after.
+- **Tested 2026-04-19** (after ack-tracking fix; see below).
+- **Outcome #2 confirmed: rename writes the working buffer only.** The
+  new name appeared on the display immediately but was gone after
+  navigating away and back. `set_preset_name` on its own is not a
+  persistent rename — a subsequent `save_to_location` is required.
+- **Side finding — rename ack shape decoded (Session 22).** The
+  successful rename produced an 18-byte inbound echo:
+  `F0 00 01 74 15 01 4E 01 0B 00 0C 00 00 00 00 00 59 F7`.
+  Envelope + function `0x01` + pidLow `0x00CE` + pidHigh `0x000B` +
+  action `0x000C` + 4-byte zero payload + checksum. Same addressing
+  as the outgoing command; 4-byte zero payload is the success signal.
+  Worth adding a golden and tightening the ack predicate for rename
+  in a follow-up session; HW-002b below validates the save-after-
+  rename flow before we invest in a more specific `isRenameAck`.
+- **Side finding — ack-tracking bug discovered and fixed.** The
+  first three rename attempts during this test hit a dead MIDI
+  transport and returned zero inbound SysEx. Auto-reconnect never
+  fired because `set_preset_name` and `save_to_location` didn't
+  register their ack-less outcomes with `recordAckOutcome` and their
+  response text didn't hint at `reconnect_midi`. Fixed by factoring
+  all five capture-window tools (save, rename preset, rename scene,
+  switch preset, switch scene) through a shared `sendAndCapture`
+  helper; ack outcomes now count against the stale-handle threshold
+  uniformly and every ack-less response surfaces the reconnect
+  escape hatch. Preflight green.
+
+### HW-002b — Verify `save_to_location` after `set_preset_name` persists the rename ✅
+
+- **Tested 2026-04-19.** Name "rename-save-test" set via
+  `set_preset_name Z04`, then `save_to_location Z04` called
+  immediately after. Navigated A01 → Z04 on the AM4; the new name
+  was still showing. Two-step `rename → save` is the canonical flow
+  for persisting named presets.
+- **Confirmed command-ack shape (both save and rename).** 18 bytes,
+  identical structure across both tools:
+  ```
+  F0 00 01 74 15 01 <pidLow septets> <pidHigh septets>
+  <action septets> 00 00 00 00 <checksum> F7
+  ```
+  - Rename ack: `F0 00 01 74 15 01 4E 01 0B 00 0C 00 00 00 00 00 59 F7`
+  - Save ack:   `F0 00 01 74 15 01 00 00 00 00 1B 00 00 00 00 00 0A F7`
+  - Addressing bytes (pidLow / pidHigh / action) echo the outgoing
+    command verbatim. Payload field (4 bytes) is zero = success.
+    Differs from SET_PARAM's 64-byte / 40-byte-payload echo — a
+    distinct "command ack" shape for addressing-only commands.
+  - Ready to back a dedicated `isCommandAck(sent, resp)` predicate
+    so `sendAndCapture` can report structured status ("acked" /
+    "no response" / "unexpected inbound") instead of dumping raw
+    hex to the caller.
+- **Next step:** ship the structured ack path + a composite
+  `save_preset(location, name)` tool that fires both commands
+  internally — removes the two-round-trip overhead from Claude's
+  side. Tracked in this session's follow-ups.
+
+- **Original test plan** (kept for audit trail):
+- **For:** HW-002 follow-up; decides whether P1-008's save path needs
+  a separate "save with name" variant or whether a plain
+  `save_to_location` captures whatever's in the working buffer
+  (including the renamed preset title).
+- **Why:** HW-002 proved rename alone is working-buffer-only. Before
+  we build a combined `save_preset(location, name)` convenience tool,
+  we need to know whether the natural two-call sequence (rename
+  first, save second) already works. If it does, the convenience tool
+  is pure DX sugar. If it doesn't, `save_to_location`'s payload
+  doesn't carry the working-buffer name and a real protocol change
+  is needed.
 - **Steps:**
-  1. Restart Claude Desktop (picks up `set_preset_name`; 9 tools now).
-  2. Build a preset on **Z04** via `apply_preset`.
-  3. Ask Claude *"rename Z04 to <something distinctive>"*.
-  4. On the AM4 hardware unit, navigate away from Z04 (load A01), then
+  1. Restart Claude Desktop (picks up the ack-tracking fix shipped
+     2026-04-19).
+  2. Load Z04 on the AM4. Build a preset via `apply_preset` if Z04
+     is empty.
+  3. Ask Claude *"rename Z04 to 'HW002B-TEST'"*. Confirm the name
+     shows on the display.
+  4. Ask Claude *"save this preset to Z04"* (calls `save_to_location`).
+  5. On the AM4 hardware: navigate away from Z04 (load A01), then
      navigate back to Z04.
 - **Report which outcome you see:**
-  - Name changed on display immediately and **persists** through
-    navigation → rename is atomic. Best case.
-  - Name changed on display but **reverts** after navigation → rename
-    only writes the working buffer; we add a combined `save_preset`
-    tool that does `save_to_slot` + `set_preset_name` in one call.
-  - Name didn't change at all → we missed a pidHigh / payload
-    convention; re-examine the capture.
+  - Name `HW002B-TEST` persists through the navigation → `save_to_
+    location` captures the working-buffer name. Add a convenience
+    `save_preset(location, name)` tool that does both in order;
+    close BK-011 naming.
+  - Name reverts to whatever was stored pre-rename → `save_to_
+    location` doesn't carry the name. Need to decode a distinct
+    "save with name" command or find a payload flag we're missing
+    in the save command. Capture an AM4-Edit "save-as-named"
+    interaction and diff against `session-18-save-preset-z04.pcapng`.
+  - Anything weirder (name partially persists, blocks lost, etc.) →
+    paste the tool-response `diagnostic_inbound_sysex` from both
+    calls; we'll decode from there.
 
-### HW-003 — Round-trip a built preset via Z04 (save + reload) 🔜
+### HW-003 — Round-trip a built preset via Z04 (save + reload) ✅
 
-- **For:** Phase 1 wrap — confirms `save_to_slot` actually persists
-- **Why:** save-ack shape was not decoded (Session 19f), so a hardware
-  reload is the only way to verify the save actually landed.
-- **Steps:**
-  1. Restart Claude Desktop (picks up `save_to_slot`; 8 tools).
-  2. Ask Claude *"build a clean preset with compressor, amp, delay,
-     reverb"* (or similar).
-  3. Ask *"save this to Z04"*. Tool should wire-ack.
-  4. On the AM4: navigate to **A01**, then back to **Z04**. Saved
-     layout + params should reappear.
-  5. Negative test: *"save this to A05"* → expect clean rejection
-     ("hard-gated to Z04 per CLAUDE.md write-safety rules").
-- **If the save doesn't persist:** paste back the inbound-SysEx log
-  from the tool response. We'll diff it against AM4-Edit's save
-  traffic in `session-18-save-preset-z04.pcapng`.
+- **Tested 2026-04-19.** `apply_preset` built a 4-block chain
+  (Optical Compressor → Deluxe Verb Normal amp → Analog Stereo
+  Delay → Deluxe Spring reverb, 13 writes). `save_to_location Z04`
+  acked. Preset named "Clean Machine" via `set_preset_name` + a
+  follow-up `save_to_location`. Negative test (save to `A05`) was
+  cleanly rejected with the Z04-gated error — user-facing copy
+  matches the backlog reference.
+- **Three-call dance observed.** Claude-Desktop-side did
+  `save_to_location` → `set_preset_name` → `save_to_location`
+  again, because it realized after the rename that names are
+  working-buffer-only. The composite `save_preset(location, name)`
+  tool (ship-now item #4) would have collapsed this to one call
+  and avoided the redundant first save. Justifies prioritizing #4
+  above pure description polish.
 
 ### HW-004 — Capture scene renames for scenes 2, 3, 4 ✅
 
@@ -144,67 +213,193 @@ Claude picks up from there and moves the item to ⏳ or ✅.
   noise. Report the isolated frames (`parse-capture` handles the
   separation).
 
-### HW-006 — Hardware-test `switch_scene` 🔜
+### HW-006 — Hardware-test `switch_scene` ✅
 
-- **For:** Session 21 new tool — verify the `switch_scene` MCP tool
-  actually moves the AM4 through all four scenes
-- **Why:** byte-exact goldens match the wire, but the device's
-  interpretation of the write (does the LED / display update?) is
-  a separate question that only hardware confirms.
+- **Tested 2026-04-19.** All four scene switches (2→3→4→1) visible on
+  the AM4 display.
+- **New decode lead — scene-switch ack carries per-scene state.** Each
+  switch returned the full 64-byte write-echo (hdr4=0x0028, 40-byte
+  payload) which differs between scenes in a structured way:
+  ```
+  Scene 1:  …00 00 00 00 00 00 00 00 00 0C 00 00 00 00 00…  (baseline)
+  Scene 2:  …00 40 00 00 00 05 2E 55 2A 1F 0C 20 00 00 00…
+  Scene 3:  …01 00 00 00 00 05 2E 54 2A 1F 4C 40 00 00 00…
+  Scene 4:  …01 40 00 00 00 00 00 01 00 1F 4C 60 00 00 00…
+  ```
+  Bytes 15–17 encode the scene index (Fractal's septet packing,
+  0 / 0x80 / 0x100 / 0x180 → `00 00`, `00 40`, `01 00`, `01 40`).
+  Byte 24 is `0x1F` for scenes 2–4 (block-placement bitmask? 4 blocks
+  placed = 0b11111 = 0x1F across 5 bits). Bytes 20–23 and 25–26 vary
+  per scene — probably per-block bypass/channel state. Decode
+  queued as **BK-025**; cracking it would let us read back scene
+  state without needing the opaque READ response shape (still
+  deferred since Session 18).
+
+### HW-007 — Hardware-test `switch_preset` ✅
+
+- **Tested 2026-04-19.** All four targeted locations (A01 / B03 / M02
+  / Z04) loaded correctly on the AM4 display. Float32 encoding handles
+  the full 0..103 index range with no edge-case issues.
+- **New decode lead — preset-switch ack carries preset state.** 64-byte
+  write-echo payload varies per preset, with bytes 15–17 encoding the
+  location index (`00 00 00` / `03 00` / `18 40` / `33 40` for
+  A01/B03/M02/Z04) and a richer payload region (18–28) than scene
+  switches. Sparse presets (A01 / Z04 "Clean Machine") carry mostly
+  zeros; mid-bank factory presets (M02) have richer bytes
+  (`12 25 73 1F`, etc.). Likely encodes block layout + active scene
+  + some param snapshot. Decode queued as **BK-026**; same
+  motivation as BK-025 — a protocol read-back path that doesn't
+  depend on the unsolved READ response format.
+- **CRITICAL new protocol finding — param writes are scene-scoped.**
+  During the destructive-test phase the user (on scene 2) called
+  `set_param amp.gain 3.00` and the write produced a normal wire-ack
+  but **no audible change**. Same user (now on scene 1) repeated
+  the identical write and the gain did change. The two wire
+  exchanges were **byte-identical** — same sent bytes, same 64-byte
+  ack. Implications:
+  1. The AM4 accepts and acks every SET_PARAM write regardless of
+     scene, but only applies it to the currently-active scene's
+     context. Non-active scenes silently retain their prior value.
+  2. `isWriteEcho` matching is **not** a "param landed" confirmation
+     when the user isn't on scene 1 — it's just "message was
+     parsed." This is distinct from the absorb/apply problem
+     (BK-008, block-not-placed) — it's a third failure mode.
+  3. Every `set_param` / `set_params` / `apply_preset` call should
+     either know the current scene, warn when not on scene 1, or
+     accept a `scene_index` param that auto-switches first. Tool-
+     level UX decision needed before release.
+  4. Re-examining the ack: same bytes for scene 2 (no-op) and scene
+     1 (applied) means the ack payload does **not** carry the
+     applied value, so we can't use it to detect which scene's
+     context received the write. We'd need a switch_scene +
+     re-read flow, or to decode the scene-state bytes in the
+     switch_scene ack (BK-025) to confirm per-scene values.
+- **Follow-up queued: HW-009** below — a dedicated capture sweep that
+  confirms the scene-scoped-write finding with paired writes on
+  multiple scenes, to rule out the alternative hypothesis ("it was
+  actually the scene change that reset the block, not the write
+  that was ignored"). Until verified, treat this as **strongly
+  suspected, not confirmed**.
+
+### HW-008 — Hardware-test `set_scene_name` persistence ✅
+
+- **Tested 2026-04-19.** Renamed scenes 2/3/4 to "verse"/"chorus"/
+  "solo" (scene 1 left at default), then `save_to_location Z04`.
+  Names persisted across preset switch. **Naming stack complete:**
+  set_preset_name + set_scene_name + save_to_location is the
+  canonical sequence for a fully-named persisted preset. BK-011
+  closed.
+
+### HW-009 — Verify the scene-scoped param write finding (HW-007 follow-up) ✅
+
+- **Tested 2026-04-19 — original hypothesis DISPROVEN; true finding
+  is channel-scoped writes.**
+- **Sequence A (on scene 2):** `set_param amp.gain 8` → amp.gain
+  became 8 on scene 2. Switched to scene 1 — **scene 1 also showed
+  amp.gain=8**.
+- **Sequence B (on scene 1):** `set_param amp.gain 5` → amp.gain
+  became 5 on scene 1. Switched to scene 2 — **scene 2 also showed
+  amp.gain=5**.
+- **Interpretation (matches Fractal's model).** Param writes target
+  the **channel** (A/B/C/D) that's active for that block right now,
+  not the scene. Scenes are selectors — they choose which channel
+  each block uses + per-block bypass state, but they don't store
+  param values themselves. When two scenes reference the same
+  channel, a write on one scene is visible on the other because
+  both are looking at the same channel's data.
+- **Re-interpreting HW-007.** The original "no audible change on
+  scene 2" observation was probably NOT a silent write — the write
+  went to the active channel fine, but scene 2 may have had the
+  amp block bypassed, masking the audible effect. Without a
+  rigorous bypass/channel check during HW-007 we can't prove
+  that for certain, but the channel-scoped model is consistent
+  with all HW-009 observations and with Fractal's documented scene
+  semantics. Safe to drop the scene-scoped-write theory.
+- **Release-critical UX implication.** Every param-writing tool
+  (`set_param`, `set_params`, `apply_preset`) writes to "whichever
+  channel is active right now" — a moving target. Without channel
+  awareness, a user asking Claude to tweak a tone can inadvertently
+  modify channel A across multiple scenes. Tool-UX redesign
+  tracked in **P1-012 Channel-aware param writes** (see backlog).
+- **Kept for reference — retained test steps:**
+
+- **For:** confirming the HW-007 observation that `set_param` writes
+  apply only to the active scene's context. If true, every param-
+  writing tool needs scene awareness — see P1-011 below for the UX
+  implications.
+- **Why:** HW-007's single-sequence observation could have an
+  alternative explanation (e.g. switching scenes reset the block
+  because scene 2 had the amp bypassed; scene 1 didn't). A paired
+  capture sequence disambiguates.
 - **Steps:**
-  1. Restart Claude Desktop (picks up `switch_scene`; 14 tools now).
-  2. Load any preset on the AM4 (Z04 is fine).
-  3. Ask Claude *"switch to scene 2"*. Watch the AM4 scene indicator.
-  4. Repeat for scenes 3, 4, 1.
-- **Report which outcome you see:**
-  - All four scene switches visible on the AM4 display → ✅ done.
-  - Some scenes work but not others → pidHigh map wrong for the
-    failing ones; report which.
-  - Nothing visible → the write lands on a different register than
-    the visual scene indicator; decode incomplete.
+  1. Load Z04 ("Clean Machine" from HW-003) on the AM4 hardware.
+  2. Switch to scene 2. Note the amp.gain value on the display.
+  3. Ask Claude *"set amp.gain to 8"*. Record the ack hex and
+     whether the display updated.
+  4. Switch to scene 1 **without restarting the conversation**.
+     Observe the amp.gain value on the display — is it the original
+     Z04 gain, or does scene 1 carry its own value?
+  5. Repeat step 3 on scene 1 (set gain to 8). Record whether the
+     display updates.
+  6. Switch back to scene 2. Observe amp.gain — is it still the
+     original Z04 value, or did scene 2 inherit the scene-1 write?
+- **Outcomes:**
+  - Scene 2's display didn't change from the write, scene 1's did,
+    and scene 2 still shows its original value after the round-trip
+    → **scene-scoped writes confirmed**. Every `set_param` needs
+    scene awareness. P1-011 becomes a release blocker.
+  - Scene 2's display DID change but we misread it earlier → revert
+    HW-007's note, write applies globally.
+  - Something weirder (e.g. the write applies to both scenes after
+    a switch) → paste the full sequence of tool-response hex and
+    we'll decode.
 
-### HW-007 — Hardware-test `switch_preset` 🔜
+### HW-011 — Capture scene→channel and scene→bypass assignments (BK-010 + BK-027) 🔜
 
-- **For:** Session 21 new tool — verify `switch_preset` loads the
-  target location into the working buffer, including edge locations
-- **Why:** goldens cover locations 0 (A01) and 1 (A02); Z04 (index
-  103) and mid-range banks (e.g. M02) are untested. Float encoding
-  should handle them identically, but worth confirming.
-- **Steps:**
-  1. Restart Claude Desktop.
-  2. On the AM4, load some distinctive preset (e.g. A01).
-  3. Ask Claude *"switch to preset B03"*. AM4 display should switch.
-  4. Ask *"switch to Z04"* (edge case — index 103).
-  5. Ask *"switch to M02"* (mid-range bank).
-  6. Return to A01.
-- **Destructive test (optional):** make an unsaved change (e.g.
-  `set_param amp.gain 8`), then `switch_preset A01`. Confirm the
-  unsaved edit is gone when you reload Z04.
-- **Report:** any locations that failed to load, or where the AM4
-  display disagreed with the asked location.
+- **For:** the two remaining undecoded scene-level writes — (a) "scene N
+  points Amp at channel X" and (b) "scene N bypasses block Y." Once
+  decoded, BK-027's kitchen-sink `apply_preset` can finish the full
+  preset model end-to-end (including the multi-scene / multi-channel
+  example in the session 22 conversation).
+- **Why this is the critical gap.** The tools today can build block
+  layout (`apply_preset`), fill channel values (`set_params` with per-
+  write channel), switch scenes, and rename scenes. What they *cannot*
+  do: tell a scene which channel each block should use, or which blocks
+  to bypass on that scene. Without those writes, a preset's four scenes
+  all inherit whatever defaults the preset was initialized with —
+  usually all-channel-A, no bypass — so the per-channel tone variations
+  you went to the trouble of configuring never actually play.
 
-### HW-008 — Hardware-test `set_scene_name` persistence 🔜
-
-- **For:** BK-011 (scene naming) — same persistence question we asked
-  for preset rename (HW-002)
-- **Why:** `set_scene_name` writes to the working buffer. Unknown
-  whether subsequent `save_to_location` persists the scene names with
-  the preset, or whether they're transient.
-- **Steps:**
-  1. Restart Claude Desktop (picks up `set_scene_name`).
-  2. Build a preset on Z04 (`apply_preset`).
-  3. Ask Claude *"rename scene 2 to 'verse', scene 3 to 'chorus', scene 4 to 'solo'"*.
-  4. Check names on the AM4 display (navigate to each scene).
-  5. Call `save_to_location Z04`.
-  6. Load a different preset (A01), then return to Z04.
-- **Report which outcome you see:**
-  - Scene names persist through save + preset switch → ✅ naming
-    stack complete, BK-011 fully closed.
-  - Scene names show before save but are blank after preset switch →
-    save doesn't capture scene names; need a separate "save scene
-    names" command to decode.
-  - Scene names don't even show immediately after rename → likely
-    pidHigh or payload bug we missed; report what you saw.
+- **Steps (two captures in one session):**
+  1. **Scene-channel capture.** Load Z04 on the AM4. Open AM4-Edit's
+     scene editor. Pick scene 2 and change its Amp-block channel from
+     **A** to **B** (via whatever UI the editor exposes — dropdown or
+     per-scene channel selector). Save as
+     `samples/captured/session-23-scene-2-amp-channel-b.pcapng`.
+  2. Repeat for scene 3 Amp → C, scene 4 Amp → D (three captures total
+     — scenes 2/3/4, each with a distinct non-default channel). Save
+     as `session-23-scene-{3,4}-amp-channel-{c,d}.pcapng`.
+  3. **Scene-bypass capture.** Still on scene 2, toggle Amp's bypass
+     from active → bypassed. Save as
+     `samples/captured/session-23-scene-2-amp-bypass.pcapng`.
+  4. Repeat for Drive (scene 3 drive bypass) and Reverb (scene 4
+     reverb bypass) — 3 bypass captures so we can confirm the command
+     generalizes across blocks.
+- **Expected decode output:**
+  - Scene-channel write: most likely `SET_FLOAT_PARAM` at
+    `pidLow=0x00CE` with a `pidHigh` that encodes (scene index,
+    block slot). Byte-exact goldens per capture. `buildSetSceneChannel
+    (sceneIndex, block, channelIndex)` in `src/protocol/setParam.ts`.
+  - Scene-bypass write: similar shape, different action/pidHigh. May
+    turn out to be the same register as scene-channel with a bit flag
+    difference. `buildSetSceneBypass(sceneIndex, block, bypassed)`.
+- **Also captured for free during this session:** the 64-byte
+  write-echo payload for each change, which feeds **BK-025**
+  (scene-state read-back) by giving us known-ground-truth scene
+  states to diff against.
+- **Scope:** AM4 only (Axe-Fx II / other gear protocols handled
+  separately). Session completes in one hardware pass — ~15 min of
+  clicking + capture.
 
 ---
 

@@ -119,6 +119,36 @@ export function isWriteEcho(write: number[], response: number[]): boolean {
 }
 
 /**
+ * Predicate for `receiveSysExMatching` that accepts the AM4's "command ack"
+ * — the 18-byte frame returned after successful addressing-only commands
+ * (`save_to_location`, `set_preset_name`, `set_scene_name`). Shape
+ * confirmed 2026-04-19 across both save and rename on hardware:
+ *
+ *   F0 00 01 74 15 01 <pidLow septets> <pidHigh septets>
+ *                     <action septets> 00 00 00 00 <cksum> F7
+ *
+ * Addressing bytes (pidLow/pidHigh/action) echo the outgoing command
+ * verbatim. hdr4 (bytes 12..13) is zero — no payload; the remaining two
+ * bytes at 14..15 are also zero. This is a distinct shape from the
+ * 64-byte SET_PARAM write-echo (hdr4 = 0x0028, 40-byte payload) and the
+ * 23-byte USB-MIDI receipt-echo of our own bytes.
+ *
+ * Used by save/rename tools to report a clean "ack received" status
+ * instead of dumping the raw frame to Claude for hex inspection.
+ */
+export function isCommandAck(write: number[], response: number[]): boolean {
+  if (response.length !== 18) return false;
+  if (response[0] !== SYSEX_START || response[17] !== SYSEX_END) return false;
+  // Envelope + function byte (bytes 0..5) must match the outgoing write.
+  for (let i = 0; i < 6; i++) if (response[i] !== write[i]) return false;
+  // pidLow (6..7), pidHigh (8..9), action (10..11) echo the outgoing write.
+  for (let i = 6; i < 12; i++) if (response[i] !== write[i]) return false;
+  // hdr4 + trailing zero pad (12..15) all zero — 0-byte payload.
+  for (let i = 12; i < 16; i++) if (response[i] !== 0x00) return false;
+  return true;
+}
+
+/**
  * Block-placement register: pidLow that addresses the "which block occupies
  * slot N" state. The AM4 exposes 4 slots (positions 1..4 in the signal
  * chain) at pidHigh = 0x000F, 0x0010, 0x0011, 0x0012 respectively. Writing

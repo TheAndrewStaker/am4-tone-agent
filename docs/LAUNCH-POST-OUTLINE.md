@@ -37,6 +37,12 @@ outreach, or the full polish list below.
 - [ ] P5-005 — signed build does not trip SmartScreen on a fresh Windows 11 install
 - [ ] P5-007 — auto-update polling pointed at GitHub Releases API
 
+**Protocol + agent UX:**
+- [ ] P1-007 — `KNOWN_PARAMS` covers every param record in every `CONFIRMED` block in `CACHE-BLOCKS.md`, or each omission is explicitly documented in `CACHE-DUMP.md` as intentionally-excluded. `scripts/audit-param-coverage.ts` reports `uncovered === 0` per confirmed block.
+- [ ] P1-007 — `apply_preset` / `set_param` tool descriptions embed the compact per-block param cheat-sheet (regenerated from `KNOWN_PARAMS` at server start). Smoke test: ask a fresh Claude Desktop session to "build a cleanish tone" and confirm it picks params from the actual registry, not a hallucinated full-size-Fractal set.
+- [ ] P1-008 — Z04-only write gate replaced with the three-tier factory / user / empty model; `force=true` + auto-backup wiring landed; `backup_location` / `restore_location` / `restore_factory` tools registered.
+- [ ] **Prompt coverage audit.** Walk `docs/PROMPT-COVERAGE.md` — every row should be ✅ OR its ⚠ status should be deliberately accepted (documented post-MVP, not a blocker). No ❌ rows at release. Rows are the authoritative list of user prompt patterns the product claims to handle; each ⚠/❌ transitively references a backlog item that IS gated by this release list.
+
 **Legal + outreach:**
 - [ ] Fractal conversation held (see `docs/FRACTAL-OUTREACH.md`). Their response (or no-response-after-N-days) logged in `DECISIONS.md`.
 - [ ] Trademark pass: README non-endorsement language, project name defensible under descriptive fair use.
