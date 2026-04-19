@@ -6,6 +6,58 @@ file is the chronological trail that reference is built from.
 
 ---
 
+## 2026-04-19 — Session 23 — Tool-response trim + unified ack helper
+
+**Goal:** reduce per-tool-call response size in Claude Desktop and unify
+the ack-handling helpers. No protocol work, no hardware captures — this
+is the lowest-cost release-readiness win now that ack predicates are
+stable.
+
+### What changed
+
+- **`sendCommandAndAwaitAck` → `sendAndAwaitAck(conn, bytes, predicate)`**
+  generalized to take the ack predicate. One helper for every tool that
+  awaits an inbound SysEx ack, regardless of whether the device returns
+  the 18-byte `isCommandAck` shape (save / rename) or the 64-byte
+  `isWriteEcho` shape (param writes / block placement / scene switch /
+  preset switch).
+- **`switch_preset` + `switch_scene` now use `isWriteEcho` matching.**
+  Per HW-006 / HW-007 the device ack for both is the standard 64-byte
+  write-echo. Previously these two tools routed through the legacy
+  `sendAndCapture` helper that time-boxed a passive wait and dumped
+  every inbound frame to Claude — tens of raw hex bytes per call. With
+  predicate-based matching the happy path is a one-sentence verdict;
+  hex is preserved on failure for diagnostics.
+- **`sendAndCapture` deleted.** Zero remaining callers once the two
+  switch tools moved.
+- **`set_param` + `set_block_type` success responses trimmed.** Dropped
+  the Session-19-era "Sent/Ack/All inbound SysEx" hex blocks on the
+  happy path. The blocks were added to debug false-confirm reports;
+  after Session 18's echo predicate landed and Session 19's ack-triage
+  conclusions settled, they were noise. Ack-less paths still include
+  the diagnostic dump because that's when the hex actually helps.
+
+### Effect
+
+Every successful `set_param` call now returns ~280 chars of text
+instead of ~800+. `switch_preset` / `switch_scene` drop from ~150–300
+chars of raw hex per call to a single verdict sentence. Over a
+conversation with 10–20 param writes plus scene/preset switches this
+trims Claude Desktop's per-turn token overhead meaningfully — most of
+what Claude needs from these tools is "did it ack?", which the new
+text answers directly.
+
+### Testing
+
+- `npm run preflight` green (33/33 verify-msg, 16/16 verify-pack,
+  8/8 verify-echo, smoke-server all 15 tools).
+- No hardware test this session — the predicate-match paths are already
+  exercised by the existing `isWriteEcho` goldens for scene switch and
+  preset switch (Session 21), and `isCommandAck` was already in use
+  for save / rename. The generalization is mechanical.
+
+---
+
 ## 2026-04-18 — Session 21 — Scene-switch confirmation, scene-rename map, preset-switch decoded
 
 **Goal:** close three Phase 1 open questions with the hardware captures

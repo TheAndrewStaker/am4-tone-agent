@@ -5,14 +5,25 @@
 > hardware tasks (USB captures, round-trip tests, reference dumps) live
 > in **`docs/HARDWARE-TASKS.md`** — check that file alongside this one at
 > session start.
-> Last updated: **2026-04-18** (Session 21 — scene-switch confirmed,
-> scene-rename pidHigh map (`0x37 + sceneIndex`), preset-switch decoded
-> as `SET_FLOAT_PARAM` at `pidLow=0xCE / pidHigh=0x0A` with float32
+> Last updated: **2026-04-19** (Session 23 — tool-response trim +
+> unified ack helper. `sendCommandAndAwaitAck` generalized to
+> `sendAndAwaitAck(conn, bytes, predicate)`; `switch_preset` /
+> `switch_scene` moved from the passive-capture path to predicate-based
+> `isWriteEcho` matching (their ack shape per HW-006/HW-007); `set_param`
+> and `set_block_type` success responses trimmed of the Session-19-era
+> Sent/Ack/All-inbound hex dumps. Dead `sendAndCapture` helper deleted.
+> No hardware work, no new captures — release-readiness / Claude-Desktop
+> token-efficiency only. Preflight green (33/33 verify-msg, 16/16
+> verify-pack, 8/8 verify-echo, smoke-server 15 tools). No change to
+> tool count; no protocol change.)
+> Prior context (Session 21): scene-switch confirmed, scene-rename
+> pidHigh map (`0x37 + sceneIndex`), preset-switch decoded as
+> `SET_FLOAT_PARAM` at `pidLow=0xCE / pidHigh=0x0A` with float32
 > location index (differs from u32 semantics of scene-switch / save /
 > rename). Three new MCP tools landed: `set_scene_name`, `switch_preset`,
 > `switch_scene`. Server now exposes 14 tools. 33/33 verify-msg goldens,
 > preflight green. Three new round-trip hardware tests queued —
-> HW-006/007/008.)
+> HW-006/007/008.
 > Prior context (Session 20 (cont)): P3-007 lineage
 > dictionaries shipped. `scripts/extract-lineage.ts` parses the wiki scrape
 > + Blocks Guide PDF into `src/knowledge/{amp,drive,reverb,delay,
@@ -69,20 +80,26 @@ float32. One open question remains before the IR can cover full presets:
 
 ## The single next action
 
-### Hardware-test the 3 new tools from Session 21 (HW-006 / HW-007 / HW-008)
+### Capture the two undecoded scene-level writes (HW-011)
 
-Session 21 decoded scene-switch confirmation, scene-rename map, and
-preset-switch — server now exposes 14 tools including `switch_scene`,
-`switch_preset`, and `set_scene_name`. The wire bytes are byte-exact
-against goldens, but the device's behavior on the writes is only
-confirmable by watching the AM4 display. Queue details are in
-`docs/HARDWARE-TASKS.md`.
+HW-006 / HW-007 / HW-008 from Session 21 all closed green on hardware
+(scene switch, preset switch, scene-name persistence). Session 22
+decoded both the save ack and the rename ack into the 18-byte
+`isCommandAck` shape; Session 23 trimmed response sizes and unified
+the ack helper. The remaining Phase 1 gap is the per-scene writes
+that make multi-scene tones actually play as intended:
 
-Summary for Claude Desktop (restart required to pick up 14 tools):
+1. **Scene → channel assignment.** "Scene 2 uses the Amp block's
+   channel B." Without this write, all four scenes default to channel
+   A and the per-channel tones you configured never select.
+2. **Scene → bypass state.** "Scene 3 bypasses the Drive block."
+   Without this write, bypass state is global to the preset, not per
+   scene.
 
-- **HW-006 `switch_scene`** — ask *"switch to scene 2, then 3, then 4, then 1"*. Confirm the AM4 scene indicator moves each time.
-- **HW-007 `switch_preset`** — ask *"switch to B03"*, *"switch to Z04"*, *"switch to M02"*. Confirm the AM4 preset display matches.
-- **HW-008 `set_scene_name`** — ask *"rename scene 2 to 'verse', scene 3 to 'chorus', scene 4 to 'solo'"*, then `save_to_location Z04`, then load A01 and back to Z04. Confirm the names persist across preset switches.
+Queued in detail as **HW-011** — three scene-channel captures + three
+scene-bypass captures in one hardware session (~15 min). Closes BK-010
+and unlocks BK-027 phase 2 (kitchen-sink `apply_preset` with per-slot
+channel + scene arrays).
 
 Hardware-test follow-ups (deferred from prior sessions, still outstanding):
 
@@ -256,6 +273,23 @@ index table (only index 8 has been wire-verified).
 
 Older breakthroughs (sessions 04–08, 10–14) are archived in `SESSIONS.md`.
 Sessions 15–19 (current) are kept here for fast orientation.
+
+00000000. **Session 23 — tool-response trim + unified ack helper.**
+          `sendCommandAndAwaitAck` generalized to
+          `sendAndAwaitAck(conn, bytes, predicate)` so every tool that
+          awaits an inbound SysEx ack uses one helper regardless of
+          ack shape (`isCommandAck` for 18-byte addressing acks,
+          `isWriteEcho` for 64-byte param / placement / switch acks).
+          `switch_preset` and `switch_scene` moved off the passive-
+          capture path onto predicate-based matching — their ack is
+          the standard `isWriteEcho` shape per HW-006/HW-007 — so
+          their happy-path response is now a single verdict line
+          instead of a raw-hex dump. `set_param` and `set_block_type`
+          success responses trimmed of the Session-19-era Sent/Ack/
+          All-inbound hex blocks (obsolete once the echo predicate
+          stabilized). Ack-less paths still carry diagnostic hex.
+          Dead `sendAndCapture` helper deleted. No protocol change,
+          no hardware work, no tool-count change. Preflight green.
 
 0000000. **Session 20 (cont) — P3-007 Model Lineage Dictionary shipped.**
          `scripts/extract-lineage.ts` parses `docs/wiki/*.md` + `docs/

@@ -269,50 +269,6 @@ function observeWrittenParam(block: string, paramName: string, numericValue: num
   }
 }
 
-/**
- * Send a command whose ack shape is not yet decoded, wait the standard echo
- * window, and collect every inbound SysEx frame that arrived. Records the
- * ack outcome against the stale-handle counter (any inbound = acked, empty
- * window = ack-less) and returns a formatted capture block plus a reconnect
- * hint that handlers append to their response text on ack-less.
- *
- * Used by tools whose ack shape we can't yet predicate-match against the
- * sent bytes: save_to_location, set_preset_name, set_scene_name,
- * switch_preset, switch_scene. Tools with fully-decoded echo shapes
- * (set_param, set_params, set_block_type, apply_preset) use
- * `receiveSysExMatching(isWriteEcho, …)` directly and call
- * `recordAckOutcome` themselves.
- *
- * The reconnect hint was missing from the five tools above — a real bug
- * exposed during HW-002 testing (2026-04-19) where three consecutive
- * ack-less writes against a dead MIDI transport never triggered the
- * auto-reconnect because none of them registered their ack-less outcome.
- */
-async function sendAndCapture(
-  conn: AM4Connection,
-  bytes: number[],
-): Promise<{ captured: number[][]; capturedText: string; hint: string }> {
-  const captured: number[][] = [];
-  const unsubscribe = conn.onMessage((msg) => {
-    if (msg[0] === 0xf0) captured.push([...msg]);
-  });
-  conn.send(bytes);
-  await new Promise<void>((resolve) => setTimeout(resolve, WRITE_ECHO_TIMEOUT_MS));
-  unsubscribe();
-  const acked = captured.length > 0;
-  recordAckOutcome(acked);
-  const capturedText = captured.length === 0
-    ? '  (none)'
-    : captured.map((m, i) => `  [${i}] (${m.length}B) ${toHex(m)}`).join('\n');
-  const hint = acked
-    ? ''
-    : `\nNo inbound SysEx in the ${WRITE_ECHO_TIMEOUT_MS} ms window. If this ` +
-      `keeps happening across writes, the MIDI handle may be stale (AM4-Edit ` +
-      `briefly open? USB replug?). Server auto-reconnects after ` +
-      `${STALE_HANDLE_TIMEOUT_THRESHOLD} consecutive ack-less writes, or call ` +
-      `reconnect_midi to force a fresh handle now.`;
-  return { captured, capturedText, hint };
-}
 
 // -- Helpers ----------------------------------------------------------------
 
@@ -516,22 +472,6 @@ server.registerTool('set_param', {
     const result = await switchBlockChannel(conn, block, channel);
     channelSwitched = result.switched;
   }
-  // Capture every inbound SysEx during the write window so we can report
-  // the raw protocol traffic alongside our verdict. This is diagnostic
-  // output added in Session 19 to debug false-confirm reports — the
-  // matched echo alone isn't enough to tell apply from absorb if the
-  // `isWriteEcho` predicate is still too loose.
-  const captured: number[][] = [];
-  const unsubscribe = conn.onMessage((msg) => {
-    if (msg[0] === 0xf0) captured.push([...msg]);
-  });
-  // Register the echo listener BEFORE sending so a fast device response
-  // can't race ahead of us.
-  const echoPromise = conn.receiveSysExMatching(
-    (resp) => isWriteEcho(bytes, resp),
-    WRITE_ECHO_TIMEOUT_MS,
-  );
-  conn.send(bytes);
   const enumNameFor = (idx: number): string | undefined => {
     const vals = param.enumValues as Record<number, string> | undefined;
     return vals?.[idx];
@@ -539,51 +479,31 @@ server.registerTool('set_param', {
   const display = param.unit === 'enum'
     ? `${resolved} (${enumNameFor(resolved) ?? '?'})`
     : String(resolved);
-  const formatCaptured = (): string => {
-    if (captured.length === 0) return '  (none)';
-    return captured.map((m, i) => `  [${i}] (${m.length}B) ${toHex(m)}`).join('\n');
-  };
-  try {
-    const ack = await echoPromise;
-    unsubscribe();
-    recordAckOutcome(true);
+  const result = await sendAndAwaitAck(conn, bytes, isWriteEcho);
+  if (result.acked) {
     observeWrittenParam(param.block, param.name, resolved);
     const channelLine = channelStatusLine(param.block, channelSwitched);
     return {
       content: [{
         type: 'text',
         text:
-          `Sent ${key} = ${display}. AM4 wire-acked the write.${channelLine} NOTE: the ack ` +
-          `does NOT confirm an audible change — the AM4 acks writes to absent ` +
-          `blocks the same way it acks writes to placed ones. If the user ` +
-          `expected a sound change and reports none, the ${param.block} block ` +
-          `is probably not placed in the active preset, OR the change landed on a ` +
-          `channel the current scene isn't using.\n` +
-          `Sent (${bytes.length}B): ${toHex(bytes)}\n` +
-          `Ack (${ack.length}B): ${toHex(ack)}\n` +
-          `All inbound SysEx during the ${WRITE_ECHO_TIMEOUT_MS} ms window:\n` +
-          formatCaptured(),
-      }],
-    };
-  } catch {
-    unsubscribe();
-    recordAckOutcome(false);
-    return {
-      content: [{
-        type: 'text',
-        text:
-          `Sent ${key} = ${display}. No ack within ${WRITE_ECHO_TIMEOUT_MS} ms — ` +
-          `this is unusual (the AM4 normally acks every write). If this persists ` +
-          `across several writes, the MIDI handle may be stale (e.g. AM4-Edit ` +
-          `was briefly open) — the server auto-reconnects after ` +
-          `${STALE_HANDLE_TIMEOUT_THRESHOLD} consecutive ack-less writes, or ` +
-          `you can call reconnect_midi to force it now.\n` +
-          `Sent (${bytes.length}B): ${toHex(bytes)}\n` +
-          `All inbound SysEx during the ${WRITE_ECHO_TIMEOUT_MS} ms window:\n` +
-          formatCaptured(),
+          `Sent ${key} = ${display}. AM4 wire-acked the write.${channelLine} NOTE: the ack does NOT ` +
+          `confirm an audible change — if the user expected a sound change and reports none, the ` +
+          `${param.block} block may not be placed in the active preset, or the write landed on a ` +
+          `channel the current scene isn't using.`,
       }],
     };
   }
+  return {
+    content: [{
+      type: 'text',
+      text:
+        `Sent ${key} = ${display}. No ack within ${WRITE_ECHO_TIMEOUT_MS} ms — this is unusual ` +
+        `(the AM4 normally acks every write).\n` +
+        `Sent (${bytes.length}B): ${toHex(bytes)}\n` +
+        formatAcklessHint(result.captured),
+    }],
+  };
 });
 
 server.registerTool('list_params', {
@@ -741,56 +661,29 @@ server.registerTool('set_block_type', {
   }
   const pos = position as 1 | 2 | 3 | 4;
   const bytes = buildSetBlockType(pos, value);
-  const conn = ensureMidi();
-  const captured: number[][] = [];
-  const unsubscribe = conn.onMessage((msg) => {
-    if (msg[0] === 0xf0) captured.push([...msg]);
-  });
-  const echoPromise = conn.receiveSysExMatching(
-    (resp) => isWriteEcho(bytes, resp),
-    WRITE_ECHO_TIMEOUT_MS,
-  );
-  conn.send(bytes);
   const displayName = BLOCK_NAMES_BY_VALUE[value] ?? `0x${value.toString(16)}`;
-  const formatCaptured = (): string => {
-    if (captured.length === 0) return '  (none)';
-    return captured.map((m, i) => `  [${i}] (${m.length}B) ${toHex(m)}`).join('\n');
-  };
-  try {
-    const ack = await echoPromise;
-    unsubscribe();
-    recordAckOutcome(true);
+  const conn = ensureMidi();
+  const result = await sendAndAwaitAck(conn, bytes, isWriteEcho);
+  if (result.acked) {
     return {
       content: [{
         type: 'text',
         text:
           `Placed ${displayName} in slot ${pos}. AM4 wire-acked the change. ` +
-          `NOTE: the ack does NOT confirm the block-slot layout actually ` +
-          `updated on the device — cross-check on the AM4 if it matters.\n` +
-          `Sent (${bytes.length}B): ${toHex(bytes)}\n` +
-          `Ack (${ack.length}B): ${toHex(ack)}\n` +
-          `All inbound SysEx during the ${WRITE_ECHO_TIMEOUT_MS} ms window:\n` +
-          formatCaptured(),
-      }],
-    };
-  } catch {
-    unsubscribe();
-    recordAckOutcome(false);
-    return {
-      content: [{
-        type: 'text',
-        text:
-          `Sent block placement (slot ${pos} → ${displayName}). No ack within ` +
-          `${WRITE_ECHO_TIMEOUT_MS} ms — this is unusual. If this keeps happening, ` +
-          `the MIDI handle may be stale; server auto-reconnects after ` +
-          `${STALE_HANDLE_TIMEOUT_THRESHOLD} consecutive ack-less writes, or ` +
-          `call reconnect_midi to force.\n` +
-          `Sent (${bytes.length}B): ${toHex(bytes)}\n` +
-          `All inbound SysEx during the ${WRITE_ECHO_TIMEOUT_MS} ms window:\n` +
-          formatCaptured(),
+          `Cross-check on the AM4 if the layout matters.`,
       }],
     };
   }
+  return {
+    content: [{
+      type: 'text',
+      text:
+        `Sent block placement (slot ${pos} → ${displayName}). No ack within ` +
+        `${WRITE_ECHO_TIMEOUT_MS} ms — this is unusual.\n` +
+        `Sent (${bytes.length}B): ${toHex(bytes)}\n` +
+        formatAcklessHint(result.captured),
+    }],
+  };
 });
 
 server.registerTool('list_block_types', {
@@ -981,19 +874,21 @@ server.registerTool('apply_preset', {
 });
 
 /**
- * Send a command that produces the 18-byte `isCommandAck` shape (save,
- * preset-rename, scene-rename) and classify the response. Returns:
- *   - { acked: true, ackBytes } if an isCommandAck frame arrived in the
- *     window. `ackBytes` is the matching frame.
+ * Send a command and wait for the expected ack frame. `predicate` is the
+ * shape matcher — `isCommandAck` for 18-byte addressing-only acks (save,
+ * rename), `isWriteEcho` for the 64-byte SET_PARAM/placement/scene-switch
+ * echo. Returns:
+ *   - { acked: true, ackBytes } if a matching frame arrived in the window.
  *   - { acked: false, captured } otherwise — `captured` is every inbound
  *     SysEx we saw, for diagnostic display on failure.
  *
  * Calls `recordAckOutcome` with the classification so the stale-handle
  * counter stays accurate.
  */
-async function sendCommandAndAwaitAck(
+async function sendAndAwaitAck(
   conn: AM4Connection,
   bytes: number[],
+  predicate: (write: number[], response: number[]) => boolean,
 ): Promise<
   | { acked: true; ackBytes: number[]; captured: number[][] }
   | { acked: false; captured: number[][] }
@@ -1003,7 +898,7 @@ async function sendCommandAndAwaitAck(
     if (msg[0] === 0xf0) captured.push([...msg]);
   });
   const ackPromise = conn.receiveSysExMatching(
-    (resp) => isCommandAck(bytes, resp),
+    (resp) => predicate(bytes, resp),
     WRITE_ECHO_TIMEOUT_MS,
   );
   conn.send(bytes);
@@ -1068,7 +963,7 @@ server.registerTool('save_to_location', {
   const locationIndex = parseLocationCode(normalized);
   const bytes = buildSaveToLocation(locationIndex);
   const conn = ensureMidi();
-  const result = await sendCommandAndAwaitAck(conn, bytes);
+  const result = await sendAndAwaitAck(conn, bytes, isCommandAck);
   if (result.acked) {
     return {
       content: [{
@@ -1126,7 +1021,7 @@ server.registerTool('set_preset_name', {
   const locationIndex = parseLocationCode(normalized);
   const bytes = buildSetPresetName(locationIndex, name);
   const conn = ensureMidi();
-  const result = await sendCommandAndAwaitAck(conn, bytes);
+  const result = await sendAndAwaitAck(conn, bytes, isCommandAck);
   if (result.acked) {
     return {
       content: [{
@@ -1179,7 +1074,7 @@ server.registerTool('save_preset', {
   const locationIndex = parseLocationCode(normalized);
   const conn = ensureMidi();
   const renameBytes = buildSetPresetName(locationIndex, name);
-  const renameResult = await sendCommandAndAwaitAck(conn, renameBytes);
+  const renameResult = await sendAndAwaitAck(conn, renameBytes, isCommandAck);
   if (!renameResult.acked) {
     return {
       content: [{
@@ -1193,7 +1088,7 @@ server.registerTool('save_preset', {
     };
   }
   const saveBytes = buildSaveToLocation(locationIndex);
-  const saveResult = await sendCommandAndAwaitAck(conn, saveBytes);
+  const saveResult = await sendAndAwaitAck(conn, saveBytes, isCommandAck);
   if (saveResult.acked) {
     return {
       content: [{
@@ -1241,7 +1136,7 @@ server.registerTool('set_scene_name', {
   const sceneIdx = scene_index - 1;
   const bytes = buildSetSceneName(sceneIdx, name);
   const conn = ensureMidi();
-  const result = await sendCommandAndAwaitAck(conn, bytes);
+  const result = await sendAndAwaitAck(conn, bytes, isCommandAck);
   if (result.acked) {
     return {
       content: [{
@@ -1287,21 +1182,29 @@ server.registerTool('switch_preset', {
   const locationIndex = parseLocationCode(normalized);
   const bytes = buildSwitchPreset(locationIndex);
   const conn = ensureMidi();
-  const { capturedText, hint } = await sendAndCapture(conn, bytes);
+  const result = await sendAndAwaitAck(conn, bytes, isWriteEcho);
   // A new preset loads a new set of block channels — any cached channel
   // state from a previous preset is now stale.
   invalidateChannelCache();
+  if (result.acked) {
+    return {
+      content: [{
+        type: 'text',
+        text:
+          `Switched to preset ${formatLocationCode(locationIndex)}. ` +
+          `Any unsaved working-buffer edits were discarded. ` +
+          `(Channel cache cleared — param writes will report "unknown channel" until a channel is explicitly set.)`,
+      }],
+    };
+  }
   return {
     content: [{
       type: 'text',
       text:
-        `Switched to preset ${formatLocationCode(locationIndex)} (index ${locationIndex}). ` +
-        `Any unsaved working-buffer edits were discarded. Verify on the AM4 display. ` +
-        `(Channel cache cleared — subsequent param writes will report "unknown channel" ` +
-        `until a channel is explicitly set.)\n` +
+        `Preset switch to ${formatLocationCode(locationIndex)} sent but no ack received. ` +
+        `Verify on the AM4 display.\n` +
         `Sent (${bytes.length}B): ${toHex(bytes)}\n` +
-        `All inbound SysEx during the ${WRITE_ECHO_TIMEOUT_MS} ms window:\n` +
-        capturedText + hint,
+        formatAcklessHint(result.captured),
     }],
   };
 });
@@ -1323,20 +1226,28 @@ server.registerTool('switch_scene', {
   const sceneIdx = scene_index - 1;
   const bytes = buildSwitchScene(sceneIdx);
   const conn = ensureMidi();
-  const { capturedText, hint } = await sendAndCapture(conn, bytes);
+  const result = await sendAndAwaitAck(conn, bytes, isWriteEcho);
   // Scene switches remap which channel each block uses; any cached channel
   // state is now invalid until we explicitly set a new channel.
   invalidateChannelCache();
+  if (result.acked) {
+    return {
+      content: [{
+        type: 'text',
+        text:
+          `Switched to scene ${scene_index}. ` +
+          `(Channel cache cleared — the new scene may point each block at a different channel.)`,
+      }],
+    };
+  }
   return {
     content: [{
       type: 'text',
       text:
-        `Switched to scene ${scene_index}. Verify on the AM4 display. ` +
-        `(Channel cache cleared — the new scene may point each block at a ` +
-        `different channel than scene ${scene_index === 1 ? '2..4' : '1'}.)\n` +
+        `Scene switch to ${scene_index} sent but no ack received. ` +
+        `Verify on the AM4 display.\n` +
         `Sent (${bytes.length}B): ${toHex(bytes)}\n` +
-        `All inbound SysEx during the ${WRITE_ECHO_TIMEOUT_MS} ms window:\n` +
-        capturedText + hint,
+        formatAcklessHint(result.captured),
     }],
   };
 });
