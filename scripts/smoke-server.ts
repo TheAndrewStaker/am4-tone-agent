@@ -90,6 +90,7 @@ async function main(): Promise<void> {
     'apply_preset',
     'list_block_types',
     'list_enum_values',
+    'list_midi_ports',
     'list_params',
     'lookup_lineage',
     'reconnect_midi',
@@ -107,6 +108,20 @@ async function main(): Promise<void> {
     if (!names.includes(exp)) throw new Error(`missing tool: ${exp}`);
   }
   console.log(`✓ all ${expected.length} expected tools registered`);
+
+  // Exercise list_midi_ports — enumerates ports but doesn't open the AM4.
+  // Runs green regardless of whether an AM4 is actually connected; we're
+  // asserting the tool is wired up and returns structured port info.
+  const portsResp = await request('tools/call', {
+    name: 'list_midi_ports',
+    arguments: {},
+  });
+  if (portsResp.error) throw new Error(`list_midi_ports error: ${portsResp.error.message}`);
+  const portsText = (portsResp.result as { content: { text: string }[] }).content[0].text;
+  if (!portsText.includes('Inputs') || !portsText.includes('Outputs')) {
+    throw new Error(`list_midi_ports missing Inputs/Outputs sections:\n${portsText}`);
+  }
+  console.log(`✓ list_midi_ports call returned port enumeration`);
 
   // Exercise list_params — doesn't touch MIDI.
   const callResp = await request('tools/call', {

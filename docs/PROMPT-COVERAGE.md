@@ -115,7 +115,8 @@ LLM-generation per link).
 |---|---|---|---|---|
 | *"Reconnect the AM4"* | 1 × `reconnect_midi` | 0 | ~100 ms | ✅ |
 | *"Writes aren't working anymore"* | `reconnect_midi` → retry | 0 + retry | varies | ✅ Auto-reconnect after 2 consecutive ack-less writes also built in |
-| *"The AM4 isn't connected"* | Clear error message from any tool call | 0 | ~100 ms | ⚠ P5-009 item 2 (graceful "AM4 not found" — currently produces a stack-trace-adjacent error) |
+| *"The AM4 isn't connected"* | Clear error message from any tool call | 0 | ~100 ms | ✅ Shipped Session 25 — error lists common causes (USB / driver / AM4-Edit exclusivity) and points at `list_midi_ports` + `reconnect_midi` |
+| *"What MIDI devices does the server see?"* / *"Is the AM4 visible?"* | 1 × `list_midi_ports` | 0 | ~10 ms | ✅ Shipped Session 25 — enumerates every MIDI input/output without opening the AM4 connection |
 
 ---
 

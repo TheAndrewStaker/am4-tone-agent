@@ -792,14 +792,19 @@ without installing Node, a C++ toolchain, or editing JSON by hand. See
   even if all protocol/packaging work is done. Drawn from Claude Desktop's
   session-19 feedback.
 - **Items:**
-  1. `list_midi_ports` MCP tool — list every MIDI port the server sees,
-     directional, with names, so users can pick one by name and we can
-     diagnose "AM4 not found" reports remotely.
-  2. Graceful "AM4 not connected" error — first tool call should return
-     a clear message (USB? driver? port auto-detect missed the device?)
-     instead of a stack trace. List the ports actually seen and point at
-     the `midi_port_name` override (P5-008) as the escape hatch. Extend
-     the honesty already present in wire-ack language.
+  1. ✅ **Shipped Session 25.** `list_midi_ports` MCP tool enumerates
+     every input/output the server sees, tagging AM4-looking ports
+     ("am4" / "fractal" substring). Connection-free — doesn't open the
+     AM4, safe to call mid-session. Verdict line surfaces the
+     common failure modes (both visible / one visible / none visible).
+     Implementation: `listMidiPorts()` helper in `src/protocol/midi.ts`,
+     tool handler in `src/server/index.ts`, smoke-server assertion.
+  2. ✅ **Shipped Session 25.** `connectAM4()` "AM4 not found" error
+     rewritten: lists common causes (power/USB/driver/AM4-Edit
+     exclusivity), shows visible ports for diagnostics, and directs
+     users to `list_midi_ports` + `reconnect_midi` as the recovery
+     path. No more stack traces on the first tool call when the AM4
+     isn't connected.
   3. Startup-banner log of detected ports to stderr (already present,
      just confirm it matches what `list_midi_ports` would return).
   4. README with install paths per client (Claude Desktop double-click,

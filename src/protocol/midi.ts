@@ -39,6 +39,55 @@ function findPortByName(
   return -1;
 }
 
+export interface MidiPortInfo {
+  index: number;
+  name: string;
+  direction: 'input' | 'output';
+  looksLikeAM4: boolean;
+}
+
+const AM4_PORT_NEEDLES = ['am4', 'fractal'];
+
+function enumeratePorts(
+  port: Input | Output,
+  direction: 'input' | 'output',
+): MidiPortInfo[] {
+  const out: MidiPortInfo[] = [];
+  for (let i = 0; i < port.getPortCount(); i++) {
+    const name = port.getPortName(i);
+    const lower = name.toLowerCase();
+    out.push({
+      index: i,
+      name,
+      direction,
+      looksLikeAM4: AM4_PORT_NEEDLES.some((n) => lower.includes(n)),
+    });
+  }
+  return out;
+}
+
+/**
+ * List every MIDI input and output the OS exposes, without opening the
+ * AM4 connection. Used by the `list_midi_ports` MCP tool and by the
+ * "AM4 not found" error path for diagnostics.
+ *
+ * Opens and immediately releases short-lived node-midi handles so a
+ * subsequent `connectAM4()` still sees a clean state.
+ */
+export function listMidiPorts(): { inputs: MidiPortInfo[]; outputs: MidiPortInfo[] } {
+  const input = new midi.Input();
+  const output = new midi.Output();
+  try {
+    return {
+      inputs: enumeratePorts(input, 'input'),
+      outputs: enumeratePorts(output, 'output'),
+    };
+  } finally {
+    input.closePort();
+    output.closePort();
+  }
+}
+
 export function connectAM4(): AM4Connection {
   const input = new midi.Input();
   const output = new midi.Output();
@@ -51,10 +100,22 @@ export function connectAM4(): AM4Connection {
     for (let i = 0; i < input.getPortCount(); i++) ins.push(`  [${i}] ${input.getPortName(i)}`);
     const outs: string[] = [];
     for (let i = 0; i < output.getPortCount(); i++) outs.push(`  [${i}] ${output.getPortName(i)}`);
+    const noPorts = ins.length === 0 && outs.length === 0;
+    // Caller receives this as the error message surfaced by the MCP tool.
+    // Keep it actionable: list what we DID see, name the common causes, and
+    // point at the list_midi_ports tool for re-checking after the user fixes
+    // the underlying issue.
     throw new Error(
-      'AM4 not found in MIDI device list. Check USB driver / power.\n' +
-      'Inputs:\n' + ins.join('\n') + '\n' +
-      'Outputs:\n' + outs.join('\n'),
+      'AM4 not found in the MIDI device list. Common causes:\n' +
+      '  - AM4 is powered off or not connected by USB\n' +
+      '  - AM4 USB driver not installed (https://www.fractalaudio.com/am4-downloads/)\n' +
+      '  - Another app has the AM4 open exclusively (close AM4-Edit)\n' +
+      (noPorts
+        ? '\nNo MIDI ports of any kind are visible to the server — this usually means the driver is missing.\n'
+        : '\nMIDI ports the server can see (none matched "am4" / "fractal"):\n' +
+          'Inputs:\n' + (ins.length ? ins.join('\n') : '  (none)') + '\n' +
+          'Outputs:\n' + (outs.length ? outs.join('\n') : '  (none)') + '\n') +
+      '\nOnce the AM4 is visible, call the `list_midi_ports` MCP tool to confirm the server sees it, then retry. Use `reconnect_midi` to force a fresh handle.',
     );
   }
 

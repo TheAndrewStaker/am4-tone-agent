@@ -59,7 +59,12 @@ import {
   type BlockTypeName,
 } from '../protocol/blockTypes.js';
 import { formatLocationCode, parseLocationCode } from '../protocol/locations.js';
-import { connectAM4, type AM4Connection, toHex } from '../protocol/midi.js';
+import {
+  connectAM4,
+  listMidiPorts,
+  type AM4Connection,
+  toHex,
+} from '../protocol/midi.js';
 
 /**
  * Max time we wait for the device to echo a WRITE after we send it. The
@@ -1328,6 +1333,44 @@ server.registerTool('switch_scene', {
         `Verify on the AM4 display.\n` +
         `Sent (${bytes.length}B): ${toHex(bytes)}\n` +
         formatAcklessHint(result.captured),
+    }],
+  };
+});
+
+server.registerTool('list_midi_ports', {
+  description: [
+    'List every MIDI port the server can see on this machine, for both',
+    'inputs and outputs, tagged with which ones look like the AM4 (name',
+    'contains "am4" or "fractal"). Safe to call at any time — does not',
+    'open the AM4 connection or interfere with an in-progress session.',
+    'Use when a user reports "AM4 not connected" to diagnose whether the',
+    'device is visible at all, whether the driver is installed, or whether',
+    'another app is holding the port. If the AM4 shows up here but writes',
+    'still fail, call reconnect_midi to force a fresh handle.',
+  ].join(' '),
+  inputSchema: {},
+}, async () => {
+  const { inputs, outputs } = listMidiPorts();
+  const format = (port: { index: number; name: string; looksLikeAM4: boolean }): string =>
+    `  [${port.index}] ${port.name}${port.looksLikeAM4 ? '  ← looks like the AM4' : ''}`;
+  const am4Input = inputs.find((p) => p.looksLikeAM4);
+  const am4Output = outputs.find((p) => p.looksLikeAM4);
+  const verdict = am4Input && am4Output
+    ? 'AM4 input + output both visible. The server will connect to these on the next tool call.'
+    : am4Input || am4Output
+      ? 'Only one of AM4 input/output is visible. The AM4 needs both directions — check the USB cable and driver.'
+      : inputs.length === 0 && outputs.length === 0
+        ? 'No MIDI ports of any kind are visible. This usually means no MIDI driver is installed.'
+        : 'AM4 not visible. Check USB cable, power, and that the AM4 driver is installed (https://www.fractalaudio.com/am4-downloads/). Also close AM4-Edit if it\'s running — it grabs the port exclusively.';
+  return {
+    content: [{
+      type: 'text',
+      text:
+        `${verdict}\n\n` +
+        `Inputs (${inputs.length}):\n` +
+        (inputs.length ? inputs.map(format).join('\n') : '  (none)') +
+        `\n\nOutputs (${outputs.length}):\n` +
+        (outputs.length ? outputs.map(format).join('\n') : '  (none)'),
     }],
   };
 });

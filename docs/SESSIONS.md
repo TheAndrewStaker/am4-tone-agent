@@ -6,6 +6,82 @@ file is the chronological trail that reference is built from.
 
 ---
 
+## 2026-04-19 — Session 25 — P5-009 release-polish (list_midi_ports + graceful AM4-not-found)
+
+**Goal:** close the first two P5-009 pre-release ergonomics items —
+(1) a way for users (or Claude) to see every MIDI port the server can
+see without opening the AM4, and (2) a friendly "AM4 not connected"
+error that names the likely cause instead of throwing a stack trace
+on the first tool call.
+
+### `list_midi_ports` MCP tool
+
+`src/protocol/midi.ts` gains a connection-free `listMidiPorts()` that
+opens short-lived `new midi.Input()` / `new midi.Output()` handles
+purely to enumerate port names, then closes them. Each port is tagged
+with `direction` and `looksLikeAM4` (substring match on "am4" /
+"fractal"). Tool handler in `src/server/index.ts` composes a verdict
+line + per-direction listings:
+
+```
+AM4 input + output both visible. The server will connect to these on the next tool call.
+
+Inputs (1):
+  [0] AM4  ← looks like the AM4
+
+Outputs (1):
+  [0] AM4  ← looks like the AM4
+```
+
+Three distinct verdict states:
+
+- Both directions visible → "AM4 input + output both visible."
+- One direction visible → "Only one of AM4 input/output is visible"
+  (driver likely half-installed).
+- Zero MIDI ports of any kind → "No MIDI ports of any kind are
+  visible" (driver missing).
+- Ports present but none match → "AM4 not visible. Check USB
+  cable, power, and driver. Also close AM4-Edit."
+
+Safe to call mid-session — doesn't touch the cached AM4 connection
+or the stale-handle counter. The smoke-server assertion is
+environment-independent: it confirms the tool is wired up and
+returns `Inputs` / `Outputs` sections.
+
+### Graceful "AM4 not connected" error
+
+`connectAM4()`'s throw path previously listed raw port tables with
+no explanation. Rewritten to lead with three common causes (power /
+USB, driver not installed, AM4-Edit port exclusivity), then show
+whatever ports *are* visible (with a noPorts branch for the
+no-driver case), then point the user at `list_midi_ports` +
+`reconnect_midi` as the recovery path.
+
+### Tool count
+
+15 → 16. No protocol change, no golden change (neither new surface
+touches a wire message). Preflight green (33/33 verify-msg, 16/16
+verify-pack, 8/8 verify-echo, smoke-server 16 tools).
+
+### Files touched
+
+- `src/protocol/midi.ts` — added `MidiPortInfo`, `listMidiPorts()`,
+  rewrote the not-found error body.
+- `src/server/index.ts` — registered `list_midi_ports` tool.
+- `scripts/smoke-server.ts` — added `list_midi_ports` to expected
+  tool list + an Inputs/Outputs-structure assertion.
+- `docs/STATE.md`, `docs/04-BACKLOG.md` — marked P5-009 items 1 & 2
+  as shipped; updated last-session banner.
+
+### What's not done
+
+P5-009 items 3 (startup-banner audit), 4 (README), 5 (Z04-gate
+error-message audit after P1-008 lands), and 6 (param-coverage
+cheat-sheet) are still open. HW-011 (scene-channel / scene-bypass
+captures) still blocks BK-027 phase 2.
+
+---
+
 ## 2026-04-19 — Session 24 — BK-027 phase 1 (kitchen-sink `apply_preset`)
 
 **Goal:** let Claude build a multi-channel preset in one MCP call. The
