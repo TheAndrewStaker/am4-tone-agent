@@ -102,6 +102,11 @@ export const CACHE_PARAMS = {
     unit: 'enum', displayMin: 0, displayMax: 78,
     enumValues: REVERB_TYPES_VALUES,
   },
+  'reverb.time': {
+    block: 'reverb', name: 'time',
+    pidLow: 0x0042, pidHigh: 0x000b,
+    unit: 'seconds', displayMin: 0.1, displayMax: 100,
+  },
   'reverb.predelay': {
     block: 'reverb', name: 'predelay',
     pidLow: 0x0042, pidHigh: 0x0010,
@@ -134,6 +139,16 @@ export const CACHE_PARAMS = {
     unit: 'enum', displayMin: 0, displayMax: 19,
     enumValues: CHORUS_TYPES_VALUES,
   },
+  'chorus.rate': {
+    block: 'chorus', name: 'rate',
+    pidLow: 0x004e, pidHigh: 0x000c,
+    unit: 'hz', displayMin: 0.1, displayMax: 10,
+  },
+  'chorus.depth': {
+    block: 'chorus', name: 'depth',
+    pidLow: 0x004e, pidHigh: 0x000e,
+    unit: 'percent', displayMin: 0, displayMax: 100,
+  },
   'flanger.mix': {
     block: 'flanger', name: 'mix',
     pidLow: 0x0052, pidHigh: 0x0001,
@@ -145,6 +160,16 @@ export const CACHE_PARAMS = {
     unit: 'enum', displayMin: 0, displayMax: 31,
     enumValues: FLANGER_TYPES_VALUES,
   },
+  'flanger.rate': {
+    block: 'flanger', name: 'rate',
+    pidLow: 0x0052, pidHigh: 0x000b,
+    unit: 'hz', displayMin: 0.05, displayMax: 10,
+  },
+  'flanger.depth': {
+    block: 'flanger', name: 'depth',
+    pidLow: 0x0052, pidHigh: 0x000d,
+    unit: 'percent', displayMin: 0, displayMax: 100,
+  },
   'phaser.mix': {
     block: 'phaser', name: 'mix',
     pidLow: 0x005a, pidHigh: 0x0001,
@@ -155,6 +180,11 @@ export const CACHE_PARAMS = {
     pidLow: 0x005a, pidHigh: 0x000a,
     unit: 'enum', displayMin: 0, displayMax: 16,
     enumValues: PHASER_TYPES_VALUES,
+  },
+  'phaser.rate': {
+    block: 'phaser', name: 'rate',
+    pidLow: 0x005a, pidHigh: 0x000c,
+    unit: 'hz', displayMin: 0.1, displayMax: 10,
   },
   'wah.type': {
     block: 'wah', name: 'type',
@@ -190,6 +220,11 @@ export const CACHE_PARAMS = {
     unit: 'enum', displayMin: 0, displayMax: 17,
     enumValues: FILTER_TYPES_VALUES,
   },
+  'filter.freq': {
+    block: 'filter', name: 'freq',
+    pidLow: 0x0072, pidHigh: 0x000b,
+    unit: 'hz', displayMin: 20, displayMax: 20000,
+  },
   'tremolo.mix': {
     block: 'tremolo', name: 'mix',
     pidLow: 0x006a, pidHigh: 0x0001,
@@ -200,6 +235,16 @@ export const CACHE_PARAMS = {
     pidLow: 0x006a, pidHigh: 0x000a,
     unit: 'enum', displayMin: 0, displayMax: 6,
     enumValues: TREMOLO_TYPES_VALUES,
+  },
+  'tremolo.rate': {
+    block: 'tremolo', name: 'rate',
+    pidLow: 0x006a, pidHigh: 0x000c,
+    unit: 'hz', displayMin: 0.2, displayMax: 20,
+  },
+  'tremolo.depth': {
+    block: 'tremolo', name: 'depth',
+    pidLow: 0x006a, pidHigh: 0x000d,
+    unit: 'percent', displayMin: 0, displayMax: 100,
   },
   'enhancer.mix': {
     block: 'enhancer', name: 'mix',

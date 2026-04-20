@@ -5,11 +5,24 @@
 > hardware tasks (USB captures, round-trip tests, reference dumps) live
 > in **`docs/HARDWARE-TASKS.md`** — check that file alongside this one at
 > session start.
-> Last updated: **2026-04-20** (Session 26 — P1-010 Session B major
-> pass: 15 new params across 11 blocks. Param registry now at 35
-> hand-authored entries (up from 20 at Session-25 close), covering
-> the major controls for every block type within the existing 5-unit
-> system. Additions: (1) **Amp tone stack** — `amp.mid/treble/
+> Last updated: **2026-04-20** (Session 26 cont — Unit-type extension:
+> 9 more params unlocked. Added `hz` and `seconds` units to the
+> `Unit` union (display = internal, scale 1 — semantic labels matter
+> so tool descriptions don't misread 3 Hz as 3 dB). Extended
+> `paramNames.ts` with an object-form entry `{ name, unit?,
+> displayMin?, displayMax? }` so cache-c=1 ambiguity (could be
+> dB/Hz/seconds/count) gets resolved per-param. Generator honors
+> overrides with fallback to inference. New params: `reverb.time`
+> (seconds, 0.1..100), `chorus.rate`/`flanger.rate`/`phaser.rate`/
+> `tremolo.rate` (hz), `filter.freq` (hz, 20..20000),
+> `chorus.depth`/`flanger.depth`/`tremolo.depth` (percent). Registry
+> now at 44 hand-authored entries (up from 35 earlier in this
+> session). verify-cache-params 44/44, list_params catalog 50 lines
+> (was 41). Preflight all green.)
+> Prior context (Session 26 — P1-010 Session B major pass): 15 new
+> params across 11 blocks. Param registry went from 20 to 35
+> entries covering the major controls for every block type within
+> the existing 5-unit system. Additions: (1) **Amp tone stack** — `amp.mid/treble/
 > presence` (AM4 Owner's Manual line 1563). (2) **Drive controls** —
 > `drive.tone/level/mix` (AM4 Owner's Manual line 1330: "Page Right
 > and dial in Drive, Tone, and Level"). (3) **Reverb predelay** —
@@ -338,14 +351,17 @@ sub-block 1 = Delay (89 recs, id=10 enum × 29), sub-block 9 = Drive
 ## Decoded parameters and unit conventions
 
 Live source of truth: `src/protocol/params.ts` (`KNOWN_PARAMS` + `Unit`
-union). **35 hand-authored params** (up from 20 at Session 25 close —
-Session 26 P1-010 Session B added amp tone stack, drive tone/level/mix,
-reverb predelay, and universal Mix across 8 effect blocks) across 15
-confirmed blocks, using 5 unit conventions (`knob_0_10`, `db`,
-`percent`, `ms`, `enum`). `pidLow` = block ID, `pidHigh` = parameter
-index within block; address is preset-independent. `CACHE_PARAMS`
-mirrors every cache-derivable entry (verify-cache-params = 35/35
-byte-match against KNOWN_PARAMS).
+union). **44 hand-authored params** (up from 20 at Session 25 close —
+Session 26 added amp tone stack, drive tone/level/mix, reverb
+predelay + time, universal Mix across 8 effect blocks, LFO rates for
+chorus/flanger/phaser/tremolo, filter freq, and modulation depths)
+across 15 confirmed blocks, using **7 unit conventions** (`knob_0_10`,
+`db`, `hz`, `seconds`, `percent`, `ms`, `enum` — `hz` and `seconds`
+added in Session 26 cont for raw-passthrough semantic labeling).
+`pidLow` = block ID, `pidHigh` = parameter index within block;
+address is preset-independent. `CACHE_PARAMS` mirrors every
+cache-derivable entry (verify-cache-params = 44/44 byte-match against
+KNOWN_PARAMS).
 All 15 confirmed block enums (Amp 248 / Drive 78 / Reverb 79 /
 Delay 29 / Chorus 20 / Flanger 32 / Phaser 17 / Wah 9 / Compressor 19 /
 GEQ 18 / Filter 18 / Tremolo 7 / Enhancer 3 / Gate 4 / Volume-Pan 2)
@@ -656,7 +672,7 @@ Session 08 highlights (still load-bearing):
 - Preset dump format (`0x77/0x78/0x79`) + slot addressing — **🟢 confirmed**.
 - `0x01` SET_PARAM message format + value encoding — **🟢 fully decoded**.
 - Parameter ID structure — **🟢 (Session 06, preset-independent)**.
-- 23 hand-authored params / 15 confirmed blocks / 5 units — **🟢 in `params.ts`** (Session 25 cont 5: tone-stack completion).
+- 44 hand-authored params / 15 confirmed blocks / 7 units — **🟢 in `params.ts`** (Session 26: P1-010 Session B + Unit-type extension).
 - Channel A/B/C/D addressing — **🟢 (Session 08: Amp `pidHigh=0x07D2`,
   float32 index 0..3; other blocks' channel pidHigh unverified)**.
 - Drive Type enum table — **🟡 only `8 → TS808` known**.

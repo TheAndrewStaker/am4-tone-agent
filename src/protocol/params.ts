@@ -34,11 +34,18 @@ import {
  *
  *   knob_0_10 — UI 0–10, internal ÷10 (gain-style knobs)
  *   db        — UI dB, internal raw dB
+ *   hz        — UI Hz (raw passthrough), for LFO rates + filter cutoffs
+ *   seconds   — UI seconds (raw passthrough), for reverb time etc.
  *   percent   — UI 0–100%, internal ÷100
  *   ms        — UI milliseconds, internal seconds (÷1000)
  *   enum      — UI dropdown name, internal int-as-float (per-param table)
+ *
+ * Note: `db`, `hz`, and `seconds` all pass display=internal (scale 1).
+ * They're distinct unit tags so tool descriptions can label values
+ * accurately — Claude interprets "set rate to 3" as 3 Hz when it sees
+ * `unit: 'hz'`, not 3 dB. The semantic label matters for LLM correctness.
  */
-export type Unit = 'knob_0_10' | 'db' | 'percent' | 'ms' | 'enum';
+export type Unit = 'knob_0_10' | 'db' | 'hz' | 'seconds' | 'percent' | 'ms' | 'enum';
 
 export interface Param extends ParamId {
   block: string;
@@ -53,6 +60,8 @@ export interface Param extends ParamId {
 const DISPLAY_TO_INTERNAL: Record<Exclude<Unit, 'enum'>, number> = {
   knob_0_10: 10,
   db: 1,
+  hz: 1,
+  seconds: 1,
   percent: 100,
   ms: 1000,
 };
@@ -210,6 +219,13 @@ export const KNOWN_PARAMS = {
     pidLow: 0x0042, pidHigh: 0x0001,
     unit: 'percent', displayMin: 0, displayMax: 100,
   },
+  'reverb.time': {
+    // Blocks Guide §Reverb Basic Page: decay time, 0.1..100 seconds.
+    // Uses 'seconds' unit (display = internal, scale 1).
+    block: 'reverb', name: 'time',
+    pidLow: 0x0042, pidHigh: 0x000b,
+    unit: 'seconds', displayMin: 0.1, displayMax: 100,
+  },
   'reverb.predelay': {
     // Blocks Guide §Reverb Basic Page: "Predelay — Adds extra delay
     // before the reverb starts." Cache 0x10 (0..0.25s × 1000 = 0..250 ms).
@@ -271,6 +287,10 @@ export const KNOWN_PARAMS = {
   // Wah/GEQ/Gate/Volume-Pan (AM4 manual p. 34: "Effects with no mix,
   // such as Wah, GEQ, etc., will show 'NA'"). Pending Session D
   // hardware spot-check.
+  // Modulation-block LFO rates + depths (Session 26 Unit-extension pass).
+  // Rate uses the 'hz' unit (raw passthrough, c=1 in cache). Depth is a
+  // standard percent knob. Blocks Guide §Chorus/Flanger/Phaser document
+  // all three as Basic Page controls across these blocks.
   'chorus.mix': {
     block: 'chorus', name: 'mix',
     pidLow: 0x004e, pidHigh: 0x0001,
@@ -281,6 +301,16 @@ export const KNOWN_PARAMS = {
     pidLow: 0x004e, pidHigh: 0x000a,
     unit: 'enum', displayMin: 0, displayMax: 19,
     enumValues: CHORUS_TYPES_VALUES,
+  },
+  'chorus.rate': {
+    block: 'chorus', name: 'rate',
+    pidLow: 0x004e, pidHigh: 0x000c,
+    unit: 'hz', displayMin: 0.1, displayMax: 10,
+  },
+  'chorus.depth': {
+    block: 'chorus', name: 'depth',
+    pidLow: 0x004e, pidHigh: 0x000e,
+    unit: 'percent', displayMin: 0, displayMax: 100,
   },
   'flanger.mix': {
     block: 'flanger', name: 'mix',
@@ -293,6 +323,16 @@ export const KNOWN_PARAMS = {
     unit: 'enum', displayMin: 0, displayMax: 31,
     enumValues: FLANGER_TYPES_VALUES,
   },
+  'flanger.rate': {
+    block: 'flanger', name: 'rate',
+    pidLow: 0x0052, pidHigh: 0x000b,
+    unit: 'hz', displayMin: 0.05, displayMax: 10,
+  },
+  'flanger.depth': {
+    block: 'flanger', name: 'depth',
+    pidLow: 0x0052, pidHigh: 0x000d,
+    unit: 'percent', displayMin: 0, displayMax: 100,
+  },
   'phaser.mix': {
     block: 'phaser', name: 'mix',
     pidLow: 0x005a, pidHigh: 0x0001,
@@ -303,6 +343,11 @@ export const KNOWN_PARAMS = {
     pidLow: 0x005a, pidHigh: 0x000a,
     unit: 'enum', displayMin: 0, displayMax: 16,
     enumValues: PHASER_TYPES_VALUES,
+  },
+  'phaser.rate': {
+    block: 'phaser', name: 'rate',
+    pidLow: 0x005a, pidHigh: 0x000c,
+    unit: 'hz', displayMin: 0.1, displayMax: 10,
   },
   'wah.type': {
     block: 'wah', name: 'type',
@@ -342,6 +387,13 @@ export const KNOWN_PARAMS = {
     unit: 'enum', displayMin: 0, displayMax: 17,
     enumValues: FILTER_TYPES_VALUES,
   },
+  'filter.freq': {
+    // Blocks Guide §Filter: Frequency is the filter cutoff. 20..20000 Hz,
+    // c=1 raw (uses 'hz' unit).
+    block: 'filter', name: 'freq',
+    pidLow: 0x0072, pidHigh: 0x000b,
+    unit: 'hz', displayMin: 20, displayMax: 20000,
+  },
   'tremolo.mix': {
     block: 'tremolo', name: 'mix',
     pidLow: 0x006a, pidHigh: 0x0001,
@@ -352,6 +404,16 @@ export const KNOWN_PARAMS = {
     pidLow: 0x006a, pidHigh: 0x000a,
     unit: 'enum', displayMin: 0, displayMax: 6,
     enumValues: TREMOLO_TYPES_VALUES,
+  },
+  'tremolo.rate': {
+    block: 'tremolo', name: 'rate',
+    pidLow: 0x006a, pidHigh: 0x000c,
+    unit: 'hz', displayMin: 0.2, displayMax: 20,
+  },
+  'tremolo.depth': {
+    block: 'tremolo', name: 'depth',
+    pidLow: 0x006a, pidHigh: 0x000d,
+    unit: 'percent', displayMin: 0, displayMax: 100,
   },
   'enhancer.mix': {
     block: 'enhancer', name: 'mix',

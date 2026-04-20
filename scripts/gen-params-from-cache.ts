@@ -38,7 +38,28 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { PARAM_NAMES } from '../src/protocol/paramNames.js';
+import { PARAM_NAMES, type ParamNameEntry } from '../src/protocol/paramNames.js';
+import type { Unit } from '../src/protocol/params.js';
+
+/**
+ * Normalize a PARAM_NAMES entry to `{ name, unit?, displayMin?,
+ * displayMax? }`. String form is sugar for `{ name }` with inference
+ * doing the rest.
+ */
+function resolveEntry(entry: ParamNameEntry): {
+  name: string;
+  unitOverride?: Unit;
+  displayMinOverride?: number;
+  displayMaxOverride?: number;
+} {
+  if (typeof entry === 'string') return { name: entry };
+  return {
+    name: entry.name,
+    unitOverride: entry.unit,
+    displayMinOverride: entry.displayMin,
+    displayMaxOverride: entry.displayMax,
+  };
+}
 
 interface CacheRec {
   offset: number;
@@ -96,10 +117,8 @@ function recsFor(spec: BlockSpec): CacheRec[] {
   return src.filter((r) => r.block === spec.cacheBlock && r.kind !== 'blockHeader').sort((a, b) => a.id - b.id);
 }
 
-type InferredUnit = 'knob_0_10' | 'percent' | 'ms' | 'db' | 'enum';
-
 interface InferredParam {
-  unit: InferredUnit;
+  unit: Unit;
   displayMin: number;
   displayMax: number;
   enumImport?: string;
@@ -107,8 +126,11 @@ interface InferredParam {
 
 /**
  * Infer display scale from the cache's (a, b, c) triple. Returns
- * `undefined` for records whose scale doesn't fit our five known
- * unit families — the generator skips those and reports them.
+ * `undefined` for records whose scale doesn't fit our known unit
+ * families — the generator skips those and reports them. The paramNames
+ * object-form can override `unit` / `displayMin` / `displayMax` when
+ * cache signature is ambiguous (most commonly c=1, which structurally
+ * can be dB, Hz, seconds, semitones, or raw count).
  */
 function inferUnit(rec: CacheRec, spec: BlockSpec): InferredParam | undefined {
   if (rec.kind === 'enum') {
@@ -134,9 +156,9 @@ function inferUnit(rec: CacheRec, spec: BlockSpec): InferredParam | undefined {
       // but the hand-authored KNOWN_PARAMS allows 0; be permissive.
       return { unit: 'ms', displayMin: 0, displayMax: Math.round(b * 1000) };
     case 1:
-      // Raw 1:1 scale — probably dB or count. We tag it 'db' because
-      // the only known c=1 knobs today are level/output-dB. Session B
-      // will audit and reclassify as needed.
+      // Raw 1:1 scale — default to dB. Ambiguous (could be Hz, seconds,
+      // semitones, or raw count); caller can override via the paramNames
+      // object-form `{ name, unit: 'hz' }` etc.
       return { unit: 'db', displayMin: a, displayMax: b };
     default:
       return undefined;
@@ -149,7 +171,7 @@ interface GeneratedEntry {
   paramName: string;
   pidLow: number;
   pidHigh: number;
-  unit: InferredUnit;
+  unit: Unit;
   displayMin: number;
   displayMax: number;
   enumImport?: string;
@@ -163,8 +185,9 @@ function generate(): { entries: GeneratedEntry[]; usedEnums: Set<string>; warnin
     const names = PARAM_NAMES[spec.blockName] ?? {};
     const recs = recsFor(spec);
     for (const rec of recs) {
-      const paramName = names[rec.id];
-      if (!paramName) continue;
+      const rawEntry = names[rec.id];
+      if (!rawEntry) continue;
+      const { name: paramName, unitOverride, displayMinOverride, displayMaxOverride } = resolveEntry(rawEntry);
       const inferred = inferUnit(rec, spec);
       if (!inferred) {
         warnings.push(
@@ -173,6 +196,9 @@ function generate(): { entries: GeneratedEntry[]; usedEnums: Set<string>; warnin
         );
         continue;
       }
+      const unit = unitOverride ?? inferred.unit;
+      const displayMin = displayMinOverride ?? inferred.displayMin;
+      const displayMax = displayMaxOverride ?? inferred.displayMax;
       if (inferred.enumImport) usedEnums.add(inferred.enumImport);
       entries.push({
         key: `${spec.blockName}.${paramName}`,
@@ -180,7 +206,10 @@ function generate(): { entries: GeneratedEntry[]; usedEnums: Set<string>; warnin
         paramName,
         pidLow: spec.pidLow,
         pidHigh: rec.id,
-        ...inferred,
+        unit,
+        displayMin,
+        displayMax,
+        enumImport: inferred.enumImport,
       });
     }
   }
