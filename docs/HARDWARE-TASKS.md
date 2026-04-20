@@ -5,10 +5,19 @@
 > this file when hardware work is required and cannot perform it alone.
 > Check this file at the start of each session.
 >
-> **Active focus:** AM4 and Axe-Fx II XL+ (founder-owned, Wave 1 RE).
-> Other owned gear (RC-505 MKII, VE-500, SPD-SX, JD-Xi) is
-> **research-only for now** — no active hardware tasks queued until the
-> Fractal line is cleared.
+> **Active focus:** AM4, Axe-Fx II XL+, and ASM Hydrasynth Explorer
+> (founder-owned, Wave 1 RE). Device priority order for Wave 1:
+> **AM4 → Axe-Fx II → Hydrasynth Explorer**. Hydrasynth needs
+> minimal hardware-RE work — its MIDI CC chart is fully published
+> (manual pp. 94–96) so most validation is "does the CC land on the
+> expected engine parameter" rather than capture-based decode. See
+> BK-031 in 04-BACKLOG.md for the Hydrasynth support plan.
+>
+> Other owned gear (RC-505 MKII, VE-500, SPD-SX) is **research-only
+> for now** — no active hardware tasks queued until the Wave 1 devices
+> are cleared. The JD-Xi (BK-020) has been demoted from the founder's
+> collection (replaced by the Hydrasynth Explorer) and is now a
+> community-support item with no founder-hardware validation.
 >
 > Last updated: 2026-04-19
 

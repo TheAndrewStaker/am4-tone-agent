@@ -823,10 +823,21 @@ without installing Node, a C++ toolchain, or editing JSON by hand. See
      M outputs". Mirrors what `list_midi_ports` would return at
      server-start time, so a Claude Desktop user sees the server's
      view of the USB state in the MCP log before the first tool call.
-  4. README with install paths per client (Claude Desktop double-click,
-     Claude Code `claude mcp add`, raw JSON config) and a "confirm it
-     works" smoke flow ("ask Claude to place a compressor, watch AM4
-     display update").
+  4. ✅ **Shipped Session 25 (cont 3).** `README.md` at the repo root
+     covers: what you can ask Claude to do today, requirements (AM4
+     driver, Node 18+, VS Build Tools, Claude client), install +
+     preflight + write-test, three connection paths (Claude Desktop
+     JSON config incl. the Microsoft Store sandboxed-path note,
+     Claude Code `claude mcp add`, raw MCP client over stdio), a
+     three-step "confirm it works" smoke flow ending with *"Place a
+     compressor in slot 1 and set the level to 6"* (watches the AM4
+     display update), a tool cheat-sheet table for all 16 tools,
+     safety-default summary (Z04 gate, write-echo verification,
+     read-only probe), project layout, and cross-links to CLAUDE.md,
+     MCP-SETUP.md, STATE.md, SYSEX-MAP.md, SESSIONS.md, backlog,
+     CONTRIBUTING.md, SECURITY.md, NOTICE, LICENSE. Opens with the
+     Fractal trademark disclaimer, which also closes P5-010's
+     README-disclaimer pending item below.
   5. Guardrail on `save_to_slot` — the Z04-only gate is P1-008's job to
      relax; confirm the error message points users at the right escape
      hatch once that ships.
@@ -853,9 +864,11 @@ without installing Node, a C++ toolchain, or editing JSON by hand. See
 - ✅ **Shipped Session 25 (cont 2).** `CONTRIBUTING.md` (minimal
   licensing note + preflight instructions) and `SECURITY.md`
   (vulnerability contact + scope).
-- 🔜 **Pending.** README disclaimer — requires the README itself
-  (tracked in P5-009 #4). The NOTICE file carries the trademark
-  statement in the meantime.
+- ✅ **Shipped Session 25 (cont 3).** README disclaimer landed
+  alongside the README itself (P5-009 #4) — an "Unaffiliated
+  community tool" block directly under the title names the Fractal
+  Audio / AM4 trademarks and points at `NOTICE` for the full
+  statement.
 - 🔜 **Pending.** Branding / package-name review for implicit
   endorsement cues — superseded by **BK-029** (project rename)
   below. Block public distribution on BK-029.
@@ -2052,14 +2065,24 @@ Skip until explicit user demand materializes.
   non-trademark-adjacent project name is the cleaner defense for a
   public release — removes the trademark question instead of just
   disclaiming it.
-- **Candidate.** Working idea: **"Conversational Presets"**
-  (package name `conversational-presets` or similar). Generic,
-  describes the product (natural-language ↔ audio presets), and
-  has no implicit tie to any manufacturer. That matters now that
-  the roadmap already covers multi-device (Fractal Wave 1 BK-014/
-  015, Roland/Boss Wave 2 BK-016..020) — a device-neutral project
-  name is better aligned with the direction the code is already
-  going.
+- **Decided (2026-04-19):** **"MCP MIDI Tools"**
+  (package name `mcp-midi-tools`). Chosen after evaluating
+  "Conversational Presets" (narrower than the roadmap — the
+  Hydrasynth Explorer has *patches*, not presets, and a loop
+  station has loops), "Tone Tools" (guitar-centric — a synth
+  user says "patch," not "tone"), and the goofy "MCP MIDI Music
+  Tools / MMMT."
+  - "MCP" is an explicit, forum-searchable qualifier (surfaces
+    the project on Fractal Forum / Hydrasynth Discord / Gearspace
+    when users search for "Claude MCP <device>").
+  - "MIDI Tools" accurately describes what it is — a tool layer
+    over MIDI, not a product brand. Stays honest if the roadmap
+    ever includes non-MIDI protocols (unlikely, but the name
+    doesn't close that door awkwardly).
+  - Requires a credible general-MIDI layer to earn the
+    generality — see **BK-030** below. The rename should land
+    *after* BK-030 primitives ship so the name isn't
+    aspirational.
 - **Scope of the rename (one pass, before any public push):**
   - `package.json` `"name"` field.
   - Repo name on GitHub (the origin remote URL changes; all old
@@ -2087,10 +2110,9 @@ Skip until explicit user demand materializes.
   filenames, protocol decodes, etc. Only the *project* name
   changes; the device it controls keeps its real name.
 - **Blockers:**
-  - Final name choice (founder decision). Options on the table:
-    `conversational-presets`, `toneagent` (device-neutral),
-    `presetsmith`, something else entirely. Needs to be
-    decided before the rename pass, not negotiated during it.
+  - ✅ Name decided: **MCP MIDI Tools** (2026-04-19).
+  - BK-030 general-MIDI primitives need to ship first so the new
+    name is backed by real generality, not aspirational.
   - Whether to do a `git mv` to a new repo name on GitHub or
     create a new repo and re-push history. `git mv` at the
     repo level is just a GitHub-side rename and auto-redirects
@@ -2107,3 +2129,253 @@ Skip until explicit user demand materializes.
   - Renaming the current MCP tool set (`apply_preset`,
     `save_to_location`, etc.) — tool names are device-neutral
     already.
+
+### BK-030 General-MIDI primitive tools (earns the "MCP MIDI Tools" name)
+
+- **Context.** The current 16 tools are almost all AM4-specific
+  wrappers. `list_midi_ports` enumeration is already generic (it
+  walks every node-midi port), but its "verdict" string tags AM4
+  ports only. `reconnect_midi` calls `connectAM4()` directly. To
+  justify renaming the project to **MCP MIDI Tools** (BK-029),
+  there needs to be a real general-MIDI layer that works against
+  any MIDI device the user plugs in — not just AM4. Without it,
+  the name over-promises.
+- **Why now.** Two roadmap signals force this forward:
+  1. The founder's next device (Hydrasynth Explorer, BK-031) is
+     addressable *today* via stock CC and NRPN — zero device-
+     specific protocol RE needed. A general `send_cc` /
+     `send_nrpn` tool set would let Claude drive the Hydrasynth
+     on day one, before any Hydrasynth-specific wrappers exist.
+  2. BK-014 (Axe-Fx II XL+) will want the port-selection
+     generalization anyway. Landing the primitives first means
+     Axe-Fx II work drops into a multi-device-shaped codebase
+     instead of forcing a retrofit halfway through.
+- **Deliverable — 7 new/generalized tools:**
+  - `list_midi_ports` (generalize): drop the AM4-specific tag;
+    return every input/output with raw port name. Optional
+    `pattern` param for callers that want tagging (future
+    device packages pass their own pattern). Connection-free.
+  - `reconnect_midi` (generalize): accept a `port` identifier
+    (name substring or exact). Current AM4 path stays as the
+    default when no port is given, for backwards compat with
+    existing tool descriptions.
+  - `send_cc(port, channel, cc, value)` — one-shot Control
+    Change. 0..127 each, no device-side assumption. Works on
+    any CC-responsive device.
+  - `send_note(port, channel, note, velocity, duration_ms?)` —
+    send a Note On + (after duration) a Note Off. Triggers
+    pads (SPD-SX), plays synths (Hydrasynth, JD-Xi), drives
+    any MIDI-note-responsive gear. `duration_ms` default ~500.
+  - `send_program_change(port, channel, program, bank_msb?,
+    bank_lsb?)` — PC with optional bank-select prefix. Flips
+    patches on anything PC-responsive (Hydrasynth's bank
+    select scheme documented in its manual p. 83; Fractal,
+    Roland, and Boss all support this too).
+  - `send_nrpn(port, channel, msb, lsb, value, high_res?)` —
+    14-bit capable Non-Registered Parameter Number. Unlocks
+    the Hydrasynth's deeper engine controls immediately (the
+    Hydrasynth's NRPN mode addresses the same params as its CC
+    chart at higher resolution; enabled via "MIDI Param TX/RX
+    = NRPN" on the device).
+  - `send_sysex(port, bytes[])` — raw SysEx. Power-user escape
+    hatch; validates F0 / F7 framing but nothing else. Useful
+    for ad-hoc RE sessions (sending captured frames to see what
+    happens) and for device-specific one-offs that don't yet
+    have a wrapper. Explicit tool description warns users this
+    can brick a device if mis-used.
+- **Implementation notes:**
+  - Connection registry: a small map `{ portName → { in, out,
+    staleCounter } }` replacing the single cached AM4 handle.
+    Each tool takes a `port` argument; `connectAM4()` becomes
+    `connect(portPattern)` with the AM4 pattern as one caller.
+  - Stale-handle auto-reconnect (BK-013 heuristic) is generic
+    MIDI behavior — applies per-port in the registry. No rewrite
+    needed, just per-port bookkeeping.
+  - Ack-less outcomes from `send_*` primitives feed the same
+    stale-counter. Unlike AM4 tools, generic primitives don't
+    *require* an ack to succeed — a `send_cc` call with no echo
+    is normal, not an error. So the primitives don't participate
+    in the "missing ack → warn user" pattern that AM4 tools use.
+  - Primitives live in a new `src/protocol/generic/` directory
+    so they're obviously portable. When BK-012 splits into
+    packages, these become `packages/midi-core/`.
+- **Session breakdown:**
+  1. **Session A — Registry + generalized list/reconnect.**
+     Refactor the connection layer to a port-keyed registry.
+     Generalize `list_midi_ports` (drop the hard-coded tag,
+     keep a visible "Port includes 'am4' — tagged as AM4" in
+     the returned metadata so existing AM4 tool flows stay
+     intelligible). Generalize `reconnect_midi` to accept a
+     port argument, default to AM4. Smoke-server picks up
+     the new arg shape.
+  2. **Session B — Send primitives (cc, note, program_change,
+     nrpn, sysex).** Five new MCP tools. Zod-validate every
+     input. Smoke-server coverage for each (happy path +
+     out-of-range rejection). No hardware needed — validation-
+     layer assertions only. Tool count: 16 → 21.
+  3. **Session C — Docs + examples.** Tool descriptions
+     explicit about MIDI semantics (channel is 0-indexed
+     internally but the tool takes 1-indexed to match musician
+     conventions; document this once, consistently). Add a
+     short "general MIDI quick-start" section to the README
+     with one example per primitive, targeting a non-AM4
+     device so readers see the generality immediately.
+- **Dependencies + relation to other items:**
+  - **BK-029** — blocker. Rename lands after this ships so the
+    new name isn't aspirational.
+  - **BK-012** — big win. The protocol split becomes cleaner
+    because `src/protocol/generic/` is obviously the future
+    `midi-core` package boundary.
+  - **BK-031 (Hydrasynth)** — consumes BK-030 immediately.
+    The Hydrasynth's entire CC/NRPN-addressable surface is
+    usable through `send_cc` / `send_nrpn` on day one, before
+    a single Hydrasynth-specific tool exists. That makes
+    BK-031's early sessions mostly about schema wrappers
+    ("set_hydrasynth_filter_cutoff" as sugar around
+    `send_cc(port, channel, 74, value)`), not protocol RE.
+  - **BK-014 (Axe-Fx II)** — benefits. Axe-Fx work can use
+    `reconnect_midi` with a different port pattern without
+    forcing `connectAxeFx()` to diverge from `connectAM4()`
+    at the wrapper layer.
+  - **BK-017 to BK-020 (Roland/Boss)** — unblocked for basic
+    control. Any Roland device with a published CC chart is
+    controllable through `send_cc` before a device-specific
+    package exists. The device package then becomes schema
+    sugar, not raw-protocol work.
+- **When to schedule.** Ahead of BK-029 (rename) and BK-014
+  (Axe-Fx II). Estimated 2–3 Claude sessions, no hardware
+  dependency.
+- **Non-goals:**
+  - Sequenced / timed playback (`play_pattern`, clock transport
+    control). Interesting but out of scope for primitive tools
+    — belongs in a higher-level "performance" tool set, TBD.
+  - MIDI input capture / listening. The MCP tool shape is
+    request/response; streaming input back to the LLM needs
+    a different pattern and probably waits for MCP
+    bidirectional transport maturity.
+  - Device-specific param names. Those live in device packages
+    (AM4, Hydrasynth, Axe-Fx II), not here.
+
+### BK-031 Hydrasynth Explorer support (replaces JD-Xi in founder's collection)
+
+- **Context.** Founder's next synth purchase (replacing the JD-Xi
+  in their collection). ASM Hydrasynth Explorer: 8-voice, 3
+  oscillators, 2 filters, 5 envelopes, 5 LFOs, 4 Mutators,
+  8 Macros, 32-slot mod matrix, arp + effects. Keytar form
+  factor (scaled-down variant of the Hydrasynth Keyboard /
+  Desktop / Deluxe). Owner's manual shipped locally at
+  `docs/manuals/other-gear/Hydrasynth_Explorer_Owners_Manual_2.2.0.pdf`.
+- **MIDI depth (researched 2026-04-19).** **Extraordinarily
+  editable over public MIDI, zero RE required for most of the
+  engine.** Summary:
+  - Full MIDI CC chart published (manual pp. 94–96). Every major
+    synthesis parameter has a dedicated CC number: all 3 oscs
+    (wavscan, cent, FRate, vol, pan), both filters (cutoff, res,
+    type, drive, keytrack, vel-env, ENV1amt, LFO1amt each),
+    all 5 envelopes × 4 stages, all 5 LFOs × gain/rate, all 4
+    mutators × ratio/depth/dry-wet, 8 macros, pre-FX, post-FX,
+    delay, reverb, arp, voice.
+  - NRPN mode toggle (`MIDI Param TX/RX = NRPN`, manual p. 82)
+    sends the same param set at higher resolution. Enables
+    14-bit addressing for precise edits.
+  - SysEx patch dump / receive exists ("Send Patch / All
+    Patches" actions, manual p. 82) but **ASM does not publish
+    the SysEx patch format.** RE required for patch-as-data
+    work. Not needed for edit-oriented tools.
+  - Program Change + Bank Select (CC 0 MSB / CC 32 LSB) for
+    patch switching across all 8 banks A–H. Documented.
+  - MPE support. Out of scope for MVP but future.
+- **Why this device now.** BK-030 primitives make it accessible
+  immediately — every CC and NRPN is addressable via the
+  generic tools with zero Hydrasynth-specific code. The device-
+  specific package adds schema sugar + lineage, not raw
+  protocol work. That makes BK-031 one of the lowest-effort
+  devices on the roadmap to add with real depth.
+- **Deliverable (MVP):**
+  - Schema module `src/knowledge/hydrasynth/params.ts` — every
+    CC from the manual chart, with `{ module, name, cc, nrpn?,
+    range, unit }`. Extracted from the manual's CC chart table
+    (already in-repo as the extracted .txt).
+  - Optional NRPN map — if the manual documents the NRPN
+    numbers explicitly, populate alongside each CC entry. If
+    not, ship CC-only for v1 and queue NRPN RE as a follow-up
+    (worst case: one capture session with any MIDI monitor tool
+    + the Hydrasynth in NRPN TX mode).
+  - Tool set (schema sugar over BK-030 primitives):
+    - `set_hydrasynth_param(port, module, name, value)` —
+      looks up CC, calls `send_cc` (or `send_nrpn` if caller
+      passes `high_res: true`).
+    - `list_hydrasynth_params(module?)` — enumerate the
+      param registry, optionally filtered by module.
+    - `switch_hydrasynth_patch(port, bank, program)` — bank
+      select MSB/LSB + PC, wraps `send_program_change`.
+    - `list_hydrasynth_patches()` — reads the factory patch
+      listing xlsx (`docs/manuals/other-gear/Hydrasynth_Single_Factory_Patch_Listing_2.0.xlsx`,
+      already in-repo) and returns `[{ bank, program, name,
+      category, author? }]`. One-time parse baked into a
+      generated JSON.
+    - `lookup_hydrasynth_patch(query)` — fuzzy search over the
+      factory listing ("pad", "pluck", "Blush Response's
+      ambient stuff"). Optional, stretch goal — depends on
+      how rich the xlsx metadata is.
+- **Sessions (rough):**
+  1. **A — Param registry.** Parse the CC chart out of the
+     extracted manual text. Emit `params.ts`. Sanity check a
+     handful of entries by hand (Filter 1 Cutoff = CC 74,
+     Macro 1 = CC 16, etc.).
+  2. **B — Device tool set.** Register 4–5 MCP tools. Smoke-
+     server assertions for validation (invalid bank, out-of-
+     range value, unknown param name). No hardware required.
+  3. **C — Patch-listing ingestion.** Parse the xlsx into
+     JSON; build `list_hydrasynth_patches` + optional
+     `lookup_hydrasynth_patch`. If the xlsx has thin metadata
+     (name-only), defer `lookup` to a later session.
+  4. **D — Hardware validation.** Founder plays through
+     Claude: "set filter 1 cutoff to 80," "switch to the pad
+     bank," "make the attack longer across all envelopes."
+     Validates the CC path end-to-end. Founder-time only;
+     no Claude RE work.
+  5. **E (stretch) — SysEx patch format RE.** If the Hydrasynth
+     community has published partial decodes (Surge XT, Dexed-
+     style editors, forum threads), pick up the format and add
+     `dump_hydrasynth_patch` / `upload_hydrasynth_patch`. If
+     not, queue as a dedicated future item.
+- **Dependencies:**
+  - **BK-030** — hard prerequisite. No point writing
+    Hydrasynth tools against a connection layer that assumes
+    a single AM4 handle.
+  - **BK-029** — project-rename lands before this is
+    public-facing. Device-specific package naming
+    (`hydrasynth-protocol`, `hydrasynth-mcp-tools` or similar
+    per the BK-012 layout) assumes the new project name.
+  - **BK-012** — clean package boundaries help but not
+    strictly blocking; can land `src/protocol/hydrasynth/`
+    as a sibling to `src/protocol/am4/` in the interim and
+    extract during the split.
+- **When to schedule.** After AM4 stabilizes + BK-014 (Axe-Fx
+  II) progresses — per founder's stated device priority (AM4 →
+  Axe-Fx II → Hydrasynth). Approximate effort: 3–4 sessions +
+  one founder hardware-validation session. No capture-based RE
+  (unlike Fractal devices) — the manual is the primary source.
+- **Founder context.** Hydrasynth is the founder's first deep-
+  dive into synthesis from scratch (guitar + amp background).
+  Tool descriptions should lean on synthesis concepts as
+  pedagogy — "Filter 1 cutoff: low values close the filter,
+  making the sound darker / muffled; raise it for brightness"
+  — rather than assuming synth vocabulary. That helps the
+  founder's learning curve and makes the tools friendly to
+  other first-time synth owners too.
+- **Non-goals (v1):**
+  - Multi-Hydrasynth Overflow mode (manual p. 83) — niche.
+  - Microtonal scale uploads — deferred to a later item.
+  - MPE routing — deferred.
+  - The Hydrasynth Deluxe's multi-patch mode (the Explorer is
+    single-patch only, so this simplifies scope).
+- **Relation to JD-Xi (BK-020).** Founder is replacing the
+  JD-Xi with the Hydrasynth for their own collection. BK-020
+  stays on the backlog as a *community-support* item — JD-Xi
+  is still an interesting target (Roland published its MIDI
+  Implementation) but is no longer validated on the founder's
+  own hardware. Demote BK-020 from "likely first Roland
+  target" to "future community contribution, founder-hardware
+  validation unavailable."

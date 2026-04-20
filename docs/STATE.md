@@ -5,9 +5,40 @@
 > hardware tasks (USB captures, round-trip tests, reference dumps) live
 > in **`docs/HARDWARE-TASKS.md`** — check that file alongside this one at
 > session start.
-> Last updated: **2026-04-19** (Session 25 — four non-HW release
-> items: (a) `list_midi_ports` MCP tool + graceful "AM4 not found"
-> error (P5-009 #1+#2); (b) startup banner extended with port-detection
+> Last updated: **2026-04-19** (Session 25 cont 4 — multi-device
+> roadmap planning session, no code changes. Three backlog deltas:
+> **BK-029 name decided** → **MCP MIDI Tools** (evaluated
+> Conversational Presets / Tone Tools / MMMT and settled on
+> "MCP MIDI Tools" — explicit, forum-searchable, and broad enough to
+> survive adding synths/loopers/pads without feeling tight). **BK-030
+> General-MIDI primitives** added — seven new/generalized tools
+> (`list_midi_ports` generalized, `reconnect_midi` with port arg,
+> `send_cc` / `send_note` / `send_program_change` / `send_nrpn` /
+> `send_sysex`) that earn the "MIDI Tools" name by letting Claude
+> drive any MIDI device with zero device-specific code. Hard
+> prerequisite for BK-029 (otherwise the rename over-promises).
+> **BK-031 Hydrasynth Explorer** added — ASM Hydrasynth Explorer
+> research landed (manual `docs/manuals/other-gear/Hydrasynth_
+> Explorer_Owners_Manual_2.2.0.pdf`). Every synthesis parameter is
+> CC-addressable per the manual's chart (pp. 94–96), NRPN mode
+> toggle upgrades the same chart to 14-bit, SysEx patch dump exists
+> but the format is unpublished. Device is accessible via BK-030
+> primitives on day one. Scheduled as Wave-1 device #3: **AM4 →
+> Axe-Fx II XL+ → Hydrasynth Explorer**, replacing the JD-Xi in
+> the founder's physical collection. Session order: BK-030 → BK-029
+> rename → BK-014 (Axe-Fx II) → BK-031 (Hydrasynth).)
+> Prior context (Session 25 cont 3): `README.md` at the repo root,
+> closing P5-009 #4 and P5-010's README-disclaimer pending item.
+> README covers: what Claude can do today, requirements (AM4 driver,
+> Node 18+, VS Build Tools, Claude client), install + preflight +
+> write-test, three connection paths (Claude Desktop JSON config
+> with Microsoft-Store sandbox note, Claude Code `claude mcp add`,
+> raw stdio), a three-step "confirm it works" smoke flow, 16-tool
+> cheat-sheet, safety defaults, and cross-links. Leads with the
+> Fractal Audio / AM4 trademark disclaimer.
+> Prior context (Session 25): four non-HW release items: (a)
+> `list_midi_ports` MCP tool + graceful "AM4 not found" error
+> (P5-009 #1+#2); (b) startup banner extended with port-detection
 > verdict to stderr (P5-009 #3); (c) P1-010 Session A — generator
 > infrastructure + paramNames seed + verify-cache-params golden
 > (20/20 byte-match); (d) P5-010 license + trademark hygiene —
@@ -17,7 +48,7 @@
 > before public distribution (candidate: "Conversational Presets").
 > Tool count 15 → 16. Preflight green (33/33 verify-msg, 16/16
 > verify-pack, 8/8 verify-echo, 20/20 verify-cache-params,
-> smoke-server 16 tools).)
+> smoke-server 16 tools).
 > Prior context (Session 24): BK-027 phase 1 —
 > kitchen-sink `apply_preset`. Added `slots[i].channels` (A/B/C/D →
 > per-channel params) alongside the existing `channel` / `params` shapes.
