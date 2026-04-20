@@ -5,8 +5,35 @@
 > hardware tasks (USB captures, round-trip tests, reference dumps) live
 > in **`docs/HARDWARE-TASKS.md`** — check that file alongside this one at
 > session start.
-> Last updated: **2026-04-19** (Session 25 cont 4 — multi-device
-> roadmap planning session, no code changes. Three backlog deltas:
+> Last updated: **2026-04-20** (Session 26 — P1-010 Session B major
+> pass: 15 new params across 11 blocks. Param registry now at 35
+> hand-authored entries (up from 20 at Session-25 close), covering
+> the major controls for every block type within the existing 5-unit
+> system. Additions: (1) **Amp tone stack** — `amp.mid/treble/
+> presence` (AM4 Owner's Manual line 1563). (2) **Drive controls** —
+> `drive.tone/level/mix` (AM4 Owner's Manual line 1330: "Page Right
+> and dial in Drive, Tone, and Level"). (3) **Reverb predelay** —
+> `reverb.predelay` (Blocks Guide §Reverb Basic Page). (4)
+> **Universal Mix** at pidHigh 0x01 across every effect block that
+> exposes a Mix Page per Blocks Guide §Common Mix/Level Parameters
+> (delay, chorus, flanger, phaser, compressor, filter, tremolo,
+> enhancer — 8 entries). Skipped for wah/geq/gate/volpan (no wet-dry
+> semantic per AM4 manual p.34: "Effects with no mix, such as Wah,
+> GEQ, etc., will show 'NA'"). Hz-unit params (rate/freq) and
+> seconds-unit params (reverb time 0.1–100s) deferred — need a
+> Unit-type extension first. Pipeline green: gen-params regenerates
+> `cacheParams.ts` deterministically, verify-cache-params 35/35
+> byte-match. HARDWARE-TASKS.md restructured in Session 25 cont 5 —
+> pending items (HW-011, HW-012) at the top, archive at bottom.
+> README.md shipped Session 25 cont 3 — closes P5-009 #4 +
+> P5-010 README disclaimer. Multi-device roadmap planning shipped
+> Session 25 cont 4 — BK-029 name decided (MCP MIDI Tools), BK-030
+> general-MIDI primitives, BK-031 Hydrasynth Explorer support plan.
+> Preflight: 33/33 verify-msg, 16/16 verify-pack, 8/8 verify-echo,
+> 35/35 verify-cache-params, smoke-server 16 tools with 41-line
+> list_params catalog, 5/5 command-ack.)
+> Prior context (Session 25 cont 4): multi-device roadmap planning
+> session, no code changes. Three backlog deltas:
 > **BK-029 name decided** → **MCP MIDI Tools** (evaluated
 > Conversational Presets / Tone Tools / MMMT and settled on
 > "MCP MIDI Tools" — explicit, forum-searchable, and broad enough to
@@ -311,16 +338,25 @@ sub-block 1 = Delay (89 recs, id=10 enum × 29), sub-block 9 = Drive
 ## Decoded parameters and unit conventions
 
 Live source of truth: `src/protocol/params.ts` (`KNOWN_PARAMS` + `Unit`
-union). 11 params across 4 blocks (Amp `0x003A`, Drive `0x0076`, Reverb
-`0x0042`, Delay `0x0046`) using 5 unit conventions (`knob_0_10`, `db`,
+union). **35 hand-authored params** (up from 20 at Session 25 close —
+Session 26 P1-010 Session B added amp tone stack, drive tone/level/mix,
+reverb predelay, and universal Mix across 8 effect blocks) across 15
+confirmed blocks, using 5 unit conventions (`knob_0_10`, `db`,
 `percent`, `ms`, `enum`). `pidLow` = block ID, `pidHigh` = parameter
-index within block; address is preset-independent. All 4 type enums
-(Amp 248 / Drive 78 / Reverb 79 / Delay 29) are populated from
-`cacheEnums.ts`. Amp Channel enum is fully populated (0..3 ↔ A..D).
-Capture-verified entries: `amp.gain/bass/level/channel`, `drive.drive/
-type=TS808`, `reverb.mix`, `delay.time`. Cache-derived and untested:
-`amp.type`, `reverb.type`, `delay.type`, plus the expanded `drive.type`
-index table (only index 8 has been wire-verified).
+index within block; address is preset-independent. `CACHE_PARAMS`
+mirrors every cache-derivable entry (verify-cache-params = 35/35
+byte-match against KNOWN_PARAMS).
+All 15 confirmed block enums (Amp 248 / Drive 78 / Reverb 79 /
+Delay 29 / Chorus 20 / Flanger 32 / Phaser 17 / Wah 9 / Compressor 19 /
+GEQ 18 / Filter 18 / Tremolo 7 / Enhancer 3 / Gate 4 / Volume-Pan 2)
+populated from `cacheEnums.ts`. Amp Channel enum is fully populated
+(0..3 ↔ A..D).
+
+**Capture-verified entries:** `amp.gain/bass/level/channel`,
+`drive.drive/type=TS808`, `reverb.mix`, `delay.time`. **Cache-derived,
+structural-evidence only (awaiting P1-010 Session D hardware
+spot-check):** `amp.mid/treble/presence`, all type enums, and the
+expanded `drive.type` index table (only index 8 has been wire-verified).
 
 ## Recent breakthroughs
 
@@ -620,7 +656,7 @@ Session 08 highlights (still load-bearing):
 - Preset dump format (`0x77/0x78/0x79`) + slot addressing — **🟢 confirmed**.
 - `0x01` SET_PARAM message format + value encoding — **🟢 fully decoded**.
 - Parameter ID structure — **🟢 (Session 06, preset-independent)**.
-- 8 params / 4 blocks / 5 units — **🟢 in `params.ts`**.
+- 23 hand-authored params / 15 confirmed blocks / 5 units — **🟢 in `params.ts`** (Session 25 cont 5: tone-stack completion).
 - Channel A/B/C/D addressing — **🟢 (Session 08: Amp `pidHigh=0x07D2`,
   float32 index 0..3; other blocks' channel pidHigh unverified)**.
 - Drive Type enum table — **🟡 only `8 → TS808` known**.

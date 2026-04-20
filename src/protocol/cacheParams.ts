@@ -50,6 +50,21 @@ export const CACHE_PARAMS = {
     pidLow: 0x003a, pidHigh: 0x000c,
     unit: 'knob_0_10', displayMin: 0, displayMax: 10,
   },
+  'amp.mid': {
+    block: 'amp', name: 'mid',
+    pidLow: 0x003a, pidHigh: 0x000d,
+    unit: 'knob_0_10', displayMin: 0, displayMax: 10,
+  },
+  'amp.treble': {
+    block: 'amp', name: 'treble',
+    pidLow: 0x003a, pidHigh: 0x000e,
+    unit: 'knob_0_10', displayMin: 0, displayMax: 10,
+  },
+  'amp.presence': {
+    block: 'amp', name: 'presence',
+    pidLow: 0x003a, pidHigh: 0x000f,
+    unit: 'knob_0_10', displayMin: 0, displayMax: 10,
+  },
   'drive.type': {
     block: 'drive', name: 'type',
     pidLow: 0x0076, pidHigh: 0x000a,
@@ -60,6 +75,21 @@ export const CACHE_PARAMS = {
     block: 'drive', name: 'drive',
     pidLow: 0x0076, pidHigh: 0x000b,
     unit: 'knob_0_10', displayMin: 0, displayMax: 10,
+  },
+  'drive.tone': {
+    block: 'drive', name: 'tone',
+    pidLow: 0x0076, pidHigh: 0x000c,
+    unit: 'knob_0_10', displayMin: 0, displayMax: 10,
+  },
+  'drive.level': {
+    block: 'drive', name: 'level',
+    pidLow: 0x0076, pidHigh: 0x000d,
+    unit: 'knob_0_10', displayMin: 0, displayMax: 10,
+  },
+  'drive.mix': {
+    block: 'drive', name: 'mix',
+    pidLow: 0x0076, pidHigh: 0x000e,
+    unit: 'percent', displayMin: 0, displayMax: 100,
   },
   'reverb.mix': {
     block: 'reverb', name: 'mix',
@@ -72,6 +102,16 @@ export const CACHE_PARAMS = {
     unit: 'enum', displayMin: 0, displayMax: 78,
     enumValues: REVERB_TYPES_VALUES,
   },
+  'reverb.predelay': {
+    block: 'reverb', name: 'predelay',
+    pidLow: 0x0042, pidHigh: 0x0010,
+    unit: 'ms', displayMin: 0, displayMax: 250,
+  },
+  'delay.mix': {
+    block: 'delay', name: 'mix',
+    pidLow: 0x0046, pidHigh: 0x0001,
+    unit: 'percent', displayMin: 0, displayMax: 100,
+  },
   'delay.type': {
     block: 'delay', name: 'type',
     pidLow: 0x0046, pidHigh: 0x000a,
@@ -83,17 +123,32 @@ export const CACHE_PARAMS = {
     pidLow: 0x0046, pidHigh: 0x000c,
     unit: 'ms', displayMin: 0, displayMax: 8000,
   },
+  'chorus.mix': {
+    block: 'chorus', name: 'mix',
+    pidLow: 0x004e, pidHigh: 0x0001,
+    unit: 'percent', displayMin: 0, displayMax: 100,
+  },
   'chorus.type': {
     block: 'chorus', name: 'type',
     pidLow: 0x004e, pidHigh: 0x000a,
     unit: 'enum', displayMin: 0, displayMax: 19,
     enumValues: CHORUS_TYPES_VALUES,
   },
+  'flanger.mix': {
+    block: 'flanger', name: 'mix',
+    pidLow: 0x0052, pidHigh: 0x0001,
+    unit: 'percent', displayMin: 0, displayMax: 100,
+  },
   'flanger.type': {
     block: 'flanger', name: 'type',
     pidLow: 0x0052, pidHigh: 0x000a,
     unit: 'enum', displayMin: 0, displayMax: 31,
     enumValues: FLANGER_TYPES_VALUES,
+  },
+  'phaser.mix': {
+    block: 'phaser', name: 'mix',
+    pidLow: 0x005a, pidHigh: 0x0001,
+    unit: 'percent', displayMin: 0, displayMax: 100,
   },
   'phaser.type': {
     block: 'phaser', name: 'type',
@@ -107,6 +162,11 @@ export const CACHE_PARAMS = {
     unit: 'enum', displayMin: 0, displayMax: 8,
     enumValues: WAH_TYPES_VALUES,
   },
+  'compressor.mix': {
+    block: 'compressor', name: 'mix',
+    pidLow: 0x002e, pidHigh: 0x0001,
+    unit: 'percent', displayMin: 0, displayMax: 100,
+  },
   'compressor.type': {
     block: 'compressor', name: 'type',
     pidLow: 0x002e, pidHigh: 0x0013,
@@ -119,17 +179,32 @@ export const CACHE_PARAMS = {
     unit: 'enum', displayMin: 0, displayMax: 17,
     enumValues: GEQ_TYPES_VALUES,
   },
+  'filter.mix': {
+    block: 'filter', name: 'mix',
+    pidLow: 0x0072, pidHigh: 0x0001,
+    unit: 'percent', displayMin: 0, displayMax: 100,
+  },
   'filter.type': {
     block: 'filter', name: 'type',
     pidLow: 0x0072, pidHigh: 0x000a,
     unit: 'enum', displayMin: 0, displayMax: 17,
     enumValues: FILTER_TYPES_VALUES,
   },
+  'tremolo.mix': {
+    block: 'tremolo', name: 'mix',
+    pidLow: 0x006a, pidHigh: 0x0001,
+    unit: 'percent', displayMin: 0, displayMax: 100,
+  },
   'tremolo.type': {
     block: 'tremolo', name: 'type',
     pidLow: 0x006a, pidHigh: 0x000a,
     unit: 'enum', displayMin: 0, displayMax: 6,
     enumValues: TREMOLO_TYPES_VALUES,
+  },
+  'enhancer.mix': {
+    block: 'enhancer', name: 'mix',
+    pidLow: 0x007a, pidHigh: 0x0001,
+    unit: 'percent', displayMin: 0, displayMax: 100,
   },
   'enhancer.type': {
     block: 'enhancer', name: 'type',

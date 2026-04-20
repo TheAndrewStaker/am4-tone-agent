@@ -121,6 +121,28 @@ export const KNOWN_PARAMS = {
     pidLow: 0x003a, pidHigh: 0x000c,
     unit: 'knob_0_10', displayMin: 0, displayMax: 10,
   },
+  // P1-010 Session B (2026-04-19) — AM4 tone stack completion. Cache
+  // records at ids 13/14/15 have the identical signature to gain/bass
+  // (knob_0_10, 0..1 range, display-scale 10). Named per AM4 Owner's
+  // Manual line 1563 "Gain, Bass, Mid, Treble, Presence, Level" and
+  // the Fractal Blocks Guide tone-stack order (§Tone Page, pp. 9–10).
+  // Pending P1-010 Session D hardware spot-check for absolute
+  // confirmation, but structural evidence is strong.
+  'amp.mid': {
+    block: 'amp', name: 'mid',
+    pidLow: 0x003a, pidHigh: 0x000d,
+    unit: 'knob_0_10', displayMin: 0, displayMax: 10,
+  },
+  'amp.treble': {
+    block: 'amp', name: 'treble',
+    pidLow: 0x003a, pidHigh: 0x000e,
+    unit: 'knob_0_10', displayMin: 0, displayMax: 10,
+  },
+  'amp.presence': {
+    block: 'amp', name: 'presence',
+    pidLow: 0x003a, pidHigh: 0x000f,
+    unit: 'knob_0_10', displayMin: 0, displayMax: 10,
+  },
   'amp.level': {
     block: 'amp', name: 'level',
     pidLow: 0x003a, pidHigh: 0x0000,
@@ -148,6 +170,25 @@ export const KNOWN_PARAMS = {
     pidLow: 0x0076, pidHigh: 0x000b,
     unit: 'knob_0_10', displayMin: 0, displayMax: 10,
   },
+  // P1-010 Session B (2026-04-20) — AM4 Owner's Manual line 1330:
+  // "Page Right and dial in Drive, Tone, and Level." Cache records
+  // at 0x0C/0x0D/0x0E have canonical pedal-layout signatures.
+  // Pending P1-010 Session D hardware spot-check.
+  'drive.tone': {
+    block: 'drive', name: 'tone',
+    pidLow: 0x0076, pidHigh: 0x000c,
+    unit: 'knob_0_10', displayMin: 0, displayMax: 10,
+  },
+  'drive.level': {
+    block: 'drive', name: 'level',
+    pidLow: 0x0076, pidHigh: 0x000d,
+    unit: 'knob_0_10', displayMin: 0, displayMax: 10,
+  },
+  'drive.mix': {
+    block: 'drive', name: 'mix',
+    pidLow: 0x0076, pidHigh: 0x000e,
+    unit: 'percent', displayMin: 0, displayMax: 100,
+  },
   'drive.channel': {
     block: 'drive', name: 'channel',
     pidLow: 0x0076, pidHigh: 0x07d2,
@@ -169,6 +210,13 @@ export const KNOWN_PARAMS = {
     pidLow: 0x0042, pidHigh: 0x0001,
     unit: 'percent', displayMin: 0, displayMax: 100,
   },
+  'reverb.predelay': {
+    // Blocks Guide §Reverb Basic Page: "Predelay — Adds extra delay
+    // before the reverb starts." Cache 0x10 (0..0.25s × 1000 = 0..250 ms).
+    block: 'reverb', name: 'predelay',
+    pidLow: 0x0042, pidHigh: 0x0010,
+    unit: 'ms', displayMin: 0, displayMax: 250,
+  },
   'reverb.channel': {
     block: 'reverb', name: 'channel',
     pidLow: 0x0042, pidHigh: 0x07d2,
@@ -189,6 +237,14 @@ export const KNOWN_PARAMS = {
     // Session 16: cache says `b=8` seconds → UI max 8000 ms (was 5000).
     unit: 'ms', displayMin: 0, displayMax: 8000,
   },
+  'delay.mix': {
+    // Blocks Guide: delay has Mix at pidHigh 0x01. "Note that the
+    // delay block uses a different Mix Law compared to other blocks" —
+    // semantics differ but the param is at the standard location.
+    block: 'delay', name: 'mix',
+    pidLow: 0x0046, pidHigh: 0x0001,
+    unit: 'percent', displayMin: 0, displayMax: 100,
+  },
   'delay.channel': {
     block: 'delay', name: 'channel',
     pidLow: 0x0046, pidHigh: 0x07d2,
@@ -208,17 +264,39 @@ export const KNOWN_PARAMS = {
   // cache record id is the wire pidHigh (10 for the effect blocks, 19/20
   // for Comp/GEQ because their cache slot reserves ids 0..12 for band
   // levels / assign slots).
+  // P1-010 Session B (2026-04-20) — universal Mix control per the
+  // Blocks Guide §Common Mix/Level Parameters (p. 7). Every effect
+  // block with a wet/dry concept exposes Mix at pidHigh 0x01 with the
+  // same percent signature as the confirmed reverb.mix. Skipped for
+  // Wah/GEQ/Gate/Volume-Pan (AM4 manual p. 34: "Effects with no mix,
+  // such as Wah, GEQ, etc., will show 'NA'"). Pending Session D
+  // hardware spot-check.
+  'chorus.mix': {
+    block: 'chorus', name: 'mix',
+    pidLow: 0x004e, pidHigh: 0x0001,
+    unit: 'percent', displayMin: 0, displayMax: 100,
+  },
   'chorus.type': {
     block: 'chorus', name: 'type',
     pidLow: 0x004e, pidHigh: 0x000a,
     unit: 'enum', displayMin: 0, displayMax: 19,
     enumValues: CHORUS_TYPES_VALUES,
   },
+  'flanger.mix': {
+    block: 'flanger', name: 'mix',
+    pidLow: 0x0052, pidHigh: 0x0001,
+    unit: 'percent', displayMin: 0, displayMax: 100,
+  },
   'flanger.type': {
     block: 'flanger', name: 'type',
     pidLow: 0x0052, pidHigh: 0x000a,
     unit: 'enum', displayMin: 0, displayMax: 31,
     enumValues: FLANGER_TYPES_VALUES,
+  },
+  'phaser.mix': {
+    block: 'phaser', name: 'mix',
+    pidLow: 0x005a, pidHigh: 0x0001,
+    unit: 'percent', displayMin: 0, displayMax: 100,
   },
   'phaser.type': {
     block: 'phaser', name: 'type',
@@ -231,6 +309,11 @@ export const KNOWN_PARAMS = {
     pidLow: 0x005e, pidHigh: 0x000a,
     unit: 'enum', displayMin: 0, displayMax: 8,
     enumValues: WAH_TYPES_VALUES,
+  },
+  'compressor.mix': {
+    block: 'compressor', name: 'mix',
+    pidLow: 0x002e, pidHigh: 0x0001,
+    unit: 'percent', displayMin: 0, displayMax: 100,
   },
   'compressor.type': {
     block: 'compressor', name: 'type',
@@ -248,17 +331,32 @@ export const KNOWN_PARAMS = {
   // captures. PEQ (pidLow=0x36) and Rotary (pidLow=0x56) are also confirmed
   // block addresses but have no Type enum — their params will be added when
   // we start supporting specific knob names.
+  'filter.mix': {
+    block: 'filter', name: 'mix',
+    pidLow: 0x0072, pidHigh: 0x0001,
+    unit: 'percent', displayMin: 0, displayMax: 100,
+  },
   'filter.type': {
     block: 'filter', name: 'type',
     pidLow: 0x0072, pidHigh: 0x000a,
     unit: 'enum', displayMin: 0, displayMax: 17,
     enumValues: FILTER_TYPES_VALUES,
   },
+  'tremolo.mix': {
+    block: 'tremolo', name: 'mix',
+    pidLow: 0x006a, pidHigh: 0x0001,
+    unit: 'percent', displayMin: 0, displayMax: 100,
+  },
   'tremolo.type': {
     block: 'tremolo', name: 'type',
     pidLow: 0x006a, pidHigh: 0x000a,
     unit: 'enum', displayMin: 0, displayMax: 6,
     enumValues: TREMOLO_TYPES_VALUES,
+  },
+  'enhancer.mix': {
+    block: 'enhancer', name: 'mix',
+    pidLow: 0x007a, pidHigh: 0x0001,
+    unit: 'percent', displayMin: 0, displayMax: 100,
   },
   'enhancer.type': {
     // AM4-Edit labels this "Mode", but keep `type` for consistency across blocks.
