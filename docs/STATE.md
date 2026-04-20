@@ -173,143 +173,72 @@ float32. One open question remains before the IR can cover full presets:
 
 ## The single next action
 
-### Capture the two undecoded scene-level writes (HW-011)
+**Tomorrow morning (founder, hardware):** Run **HW-011** (scene→channel
++ scene→bypass captures, 6 pcapngs) and **HW-012** (round-trip the new
+per-slot `channels` shape in `apply_preset`). Full steps live in
+`docs/HARDWARE-TASKS.md` at the top under "Pending — next up."
 
-HW-006 / HW-007 / HW-008 from Session 21 all closed green on hardware
-(scene switch, preset switch, scene-name persistence). Session 22
-decoded both the save ack and the rename ack into the 18-byte
-`isCommandAck` shape; Session 23 trimmed response sizes and unified
-the ack helper. The remaining Phase 1 gap is the per-scene writes
-that make multi-scene tones actually play as intended:
+**After HW-011 lands:** decode the two scene-level writes into
+`buildSetSceneChannel(sceneIndex, block, channelIndex)` +
+`buildSetSceneBypass(sceneIndex, block, bypassed)` with byte-exact
+goldens. That closes BK-010 and unlocks BK-027 phase 2 — extending
+`apply_preset` to take a `scenes: [...]` array for full multi-scene
+preset builds in one call.
 
-1. **Scene → channel assignment.** "Scene 2 uses the Amp block's
-   channel B." Without this write, all four scenes default to channel
-   A and the per-channel tones you configured never select.
-2. **Scene → bypass state.** "Scene 3 bypasses the Drive block."
-   Without this write, bypass state is global to the preset, not per
-   scene.
+**Remaining AM4-depth queue (non-HW, gates Wave 1 device expansion
+per `memory/feedback_am4_depth_gates_wave_expansion.md`):**
 
-Queued in detail as **HW-011** — three scene-channel captures + three
-scene-bypass captures in one hardware session (~15 min). Closes BK-010
-and unlocks BK-027 phase 2 (kitchen-sink `apply_preset` with per-slot
-channel + scene arrays).
+1. **P1-012 channel-aware param writes.** Release-critical UX gap
+   surfaced by HW-009 (param writes hit whichever channel is active,
+   silently cross-modifying other scenes). Add a `channel?` arg to
+   `set_param`/`set_params` so the tool switches channel first when
+   specified. Spec in 04-BACKLOG.md.
+2. **Advanced-controls capture session** (new HW-NNN, ~20 min).
+   Covers ambiguous knob_0_10 records in the Amp cache — Master,
+   Depth, Output Boost — that the Blocks Guide names but can't be
+   structurally disambiguated. Also the remaining Feedback knobs per
+   block. Queue a new HW entry before running.
+3. **Second unit-extension pass.** Add `bipolar_percent` (balance),
+   `count` (diode quantity, number-of-springs), `semitones` (pitch
+   shift). Unlocks ~15–20 more params across blocks with no captures
+   required.
 
-Hardware-test follow-ups (deferred from prior sessions, still outstanding):
+**Then** (post-AM4-depth-gate): BK-030 generic MIDI primitives →
+BK-029 rename to MCP MIDI Tools → BK-014 Axe-Fx II → BK-031 Hydrasynth.
 
-### Hardware-test `set_preset_name` and confirm whether rename persists
+---
 
-Session 19 (cont.) decoded preset rename: same register as block
-placement (pidLow=0x00CE), new pidHigh=0x000B, new action=0x000C,
-36-byte payload = 4-byte slot + 32-byte space-padded ASCII name.
-Byte-exact golden match against the captured rename of Z04 to "boston".
+## Archived follow-ups (all shipped)
 
-What needs hardware verification:
+The four follow-ups that used to live here — `set_preset_name`
+hardware test, round-trip a built preset via Z04, `apply_preset`
+build, scene rename decoding — all shipped in Sessions 19–22. See
+the Session 25 cont entry for tool-count history and the
+HARDWARE-TASKS.md archive for HW-001..HW-009.
 
-1. Restart Claude Desktop (picks up `set_preset_name`; 9 tools now).
-2. Build a preset on Z04 via `apply_preset`.
-3. Ask Claude to *"rename Z04 to <something distinctive>"*. Tool sends
-   the rename; no audible change.
-4. On the AM4, navigate away from Z04 and back. Check the slot name.
-   Did the new name stick? Options:
-   - **Name changed on display immediately and persists through
-     navigation:** rename is atomic — persists on its own.
-   - **Name changed on display but reverts after navigation:** rename
-     only writes the working buffer; need to call `save_to_slot`
-     afterward to persist.
-   - **Name didn't change at all:** rename command requires a
-     different pidHigh or payload convention we missed.
-5. If rename alone doesn't persist, the natural UX is to add a combined
-   `save_preset` tool that does `save_to_slot` + `set_preset_name` in
-   one call. Straightforward once we know the ordering.
+### What's still deferred
 
-Scene rename decoding is the follow-up: capture renames for scenes 2,
-3, 4 (we have scene 1's capture), then add `set_scene_name(sceneIndex,
-name)` with the pidHigh-per-scene map. Tracked in BK-011.
-
-### Earlier follow-up — round-trip a built preset via Z04
-
-Session 19 shipped `save_to_slot` (Z04-gated) after decoding the save
-command from `session-18-save-preset-z04.pcapng`. The save-ack shape
-isn't decoded, so success is confirmed by reloading the slot on the
-hardware.
-
-1. Restart Claude Desktop (picks up `save_to_slot`; 8 tools now).
-2. Build a preset with `apply_preset` (e.g. *"build a clean preset with
-   compressor, amp, delay, reverb"*).
-3. Ask *"save this to Z04"*. Tool should wire-ack; no audible change.
-4. On the AM4, navigate away from Z04 (e.g. load A01) then back to Z04.
-   The saved layout + params should reappear. If they don't, the save
-   didn't persist — grab the inbound-SysEx log from the tool response
-   and we'll compare against AM4-Edit's save traffic.
-5. Try *"save this to A05"* or similar → expect a clear rejection
-   error ("hard-gated to Z04").
-
-### Earlier follow-up (still valid) — `apply_preset` build
-
-The initial `apply_preset` hardware test already passed (Session 19:
-compressor → slot 1, amp/delay/reverb → 2/3/4, amp.gain + reverb.mix
-both audibly landed). No action needed.
-
-1. Restart Claude Desktop to pick up `apply_preset`.
-2. Load **Z04**, clear blocks on the device.
-3. Ask Claude something like *"build me a clean preset with compressor,
-   amp (gain 4, bass 6), delay (time 350 ms), and reverb (spring studio,
-   mix 35%)"*. Expect Claude to emit a single `apply_preset` tool call
-   with the structured slots list, and the AM4 to land at the right
-   layout + params in one shot.
-4. Verify on the hardware: chain matches, amp gain/bass match, delay time
-   matches, reverb type/mix match. Any unintended state from a previous
-   preset at slots 5+ (none exist) or unused params (stale values from
-   the prior preset — apply_preset doesn't currently reset every param,
-   only the ones specified) is a known limitation, not a bug.
-
-Open follow-ons (bigger scopes, see backlog):
-
-- **Scenes.** 4 scenes per preset; `session-18-switch-scene.pcapng`
-  exists but builders aren't written. Extending `apply_preset` to take
-  `scenes: [...]` unlocks full preset fidelity.
-- **Per-block channels.** amp.channel (A/B/C/D) is decoded; other blocks'
-  channel pidHigh is extrapolated from amp — worth one capture each to
-  confirm before exposing channel control in `apply_preset`.
-- **Save to slot / switch preset.** `session-18-save-preset-z04.pcapng`,
-  `session-18-switch-preset.pcapng` are captured but not decoded.
-  Decoding closes the loop for persistent preset generation.
-
-### What's deferred
-
-- **Apply/absorb discriminator** — the AM4 wire-acks writes whether or
-  not the target block is placed (Session 19 hardware finding). Echo
-  timing can't tell applied from absorbed. Parked as `BK-008`; unblocks
-  truly honest audible-change detection once decoded.
-- **Preset save / load / scene switch protocol decode.** Captures exist
-  (`session-18-save-preset-z04.pcapng`, `session-18-switch-scene.pcapng`,
-  `session-18-switch-preset.pcapng`) but builders aren't written yet.
-  Unblocks persistent preset generation (build from scratch + store).
-
-### Deferred
-
-- **Decode the READ response format.** The 0x0D READ action returns a
-  64-byte response with a 40-byte payload. Bytes 0-7 vary per response
-  even at stable values (rotating descriptor/counter), bytes 8/11 are
-  constant structural markers, bytes 14-39 are zero, and the actual
-  current value is NOT at any fixed offset as a packed float32
-  (scanned all 5-byte windows against known values 0.2/0.5/0.8/0.25 —
-  zero matches). AM4-Edit probably decodes this via a non-trivial
-  scheme; cracking it likely needs Ghidra on AM4-Edit's response
-  parser. Not a blocker — v0.2 uses WRITE echoes for confirmation.
-- **Block-command captures for preset-save / scene-switch / block-type
-  assignment.** Captures exist (`session-18-save-preset-z04.pcapng`,
-  `session-18-switch-scene.pcapng`, `session-18-block-type-gte-to-rev
-  .pcapng`, etc.) but NOT yet decoded into protocol builders. That's
-  the next session's work — decoding these unlocks the real MVP
-  (`apply_preset` in one call).
-- **PEQ and Rotary have pidLow but no Type enum.** KNOWN_PARAMS needs
-  specific knob entries (PEQ band freqs/gains, Rotary rate/depth)
-  once we decide the naming scheme. Cache records are already in
-  `docs/CACHE-DUMP.md`.
-- **P3-007 Model Lineage Dictionary** (see `04-BACKLOG.md`) —
-  `cacheEnums.ts` is the authoritative input for the wiki-scrape
-  pipeline. 15 block dictionaries ready (498 total enum entries).
+- **Apply/absorb discriminator (BK-008).** The AM4 wire-acks writes
+  regardless of whether the target block is placed. Echo timing can't
+  tell applied from absorbed. Parked; unblocks honest audible-change
+  detection once cracked (likely Ghidra on AM4-Edit's response parser).
+- **READ response format.** The `0x0D` READ action returns a 64-byte
+  response with a 40-byte payload where the current param value is NOT
+  at any fixed offset as a packed float32 (scanned all 5-byte windows
+  against known values — zero matches). Not a blocker — v0.2 uses
+  WRITE echoes for confirmation. Decoding unlocks a proper
+  `read_param` tool.
+- **PEQ and Rotary specific-knob entries.** Both blocks have confirmed
+  `pidLow` (0x36, 0x56) but no Type enum. Individual knob entries
+  (PEQ band freqs/gains, Rotary rate/depth) await the next unit-
+  extension pass + a naming decision.
+- **Advanced-control disambiguation captures.** Amp Master/Depth/
+  Output Boost and per-block Feedback knobs can't be unambiguously
+  mapped from cache signatures alone — queue as a dedicated capture
+  session (~20 min).
+- **Scene-state read-back (BK-025/BK-026).** Scene- and preset-switch
+  acks carry rich state payloads that could serve as a READ-response
+  workaround. Decode tentatively, not required for shipping.
 
 **Layouts (parser is source of truth — see `scripts/parse-cache.ts`):**
 
