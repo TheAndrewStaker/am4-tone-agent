@@ -3,6 +3,8 @@
   "version": "0.1.0",
   "description": "Talk to Claude, get AM4 tones. Local MCP server for Fractal AM4.",
   "private": true,
+  "license": "Apache-2.0",
+  "author": "Stephen Staker <stephenstaker@gmail.com>",
   "type": "module",
   "scripts": {
     "probe": "tsx scripts/probe.ts",

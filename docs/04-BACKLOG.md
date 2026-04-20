@@ -841,12 +841,24 @@ without installing Node, a C++ toolchain, or editing JSON by hand. See
      testing.
 
 ### P5-010 License and trademark hygiene
-- MIT or Apache-2.0 LICENSE file at the repo root.
-- README disclaimer: unaffiliated community tool; "Fractal Audio" and
-  "AM4" are Fractal's trademarks; this project controls a device the
-  user owns via documented SysEx. Explicit non-endorsement language.
-- Review any branding (logo, tool names, package name) for implicit
-  endorsement cues before pushing to npm / a public release.
+- ✅ **Shipped Session 25 (cont 2).** Apache-2.0 `LICENSE` at the
+  repo root (copyright 2026 Stephen Staker). Apache-2.0 chosen over
+  MIT for patent-retaliation protection.
+- ✅ **Shipped Session 25 (cont 2).** `NOTICE` file per Apache-2.0
+  convention — includes project copyright, trademark disclaimer for
+  Fractal Audio / AM4, and third-party attribution skeleton for
+  `@modelcontextprotocol/sdk`, `node-midi`, `zod`.
+- ✅ **Shipped Session 25 (cont 2).** `package.json` updated with
+  `"license": "Apache-2.0"` and `"author"` set.
+- ✅ **Shipped Session 25 (cont 2).** `CONTRIBUTING.md` (minimal
+  licensing note + preflight instructions) and `SECURITY.md`
+  (vulnerability contact + scope).
+- 🔜 **Pending.** README disclaimer — requires the README itself
+  (tracked in P5-009 #4). The NOTICE file carries the trademark
+  statement in the meantime.
+- 🔜 **Pending.** Branding / package-name review for implicit
+  endorsement cues — superseded by **BK-029** (project rename)
+  below. Block public distribution on BK-029.
 
 ---
 
@@ -2020,12 +2032,78 @@ Skip until explicit user demand materializes.
     shape is literally BK-027's shape + `{ location, name }`. Land
     BK-027 first (phase 1 is ready today); BK-028 is a thin
     batch-and-save wrapper on top.
-  - **BK-029 (potential future)** — a read-only `plan_preset_batch`
-    companion for very long batches, if the no-progress problem
-    becomes real in practice.
+  - **Future — `plan_preset_batch` companion (no BK id yet)** — a
+    read-only variant for very long batches, if the no-progress
+    problem becomes real in practice.
 
 - **When to schedule.** After BK-027 phase 1 (kitchen-sink apply
   landed) and P1-008 (write gate). Both are prerequisites. Not
   urgent on its own — the 20-tool-calls workflow works today, just
   slowly. Becomes urgent when a user first tries a real setlist
   build and the latency stings.
+
+### BK-029 Project rename before first public distribution
+
+- **Context.** "AM4" is Fractal Audio Systems, Inc.'s product name
+  and implicit trademark. The current project name `am4-tone-agent`
+  and every self-reference ("AM4 Tone Agent") use that mark in a
+  way that could read as implying an affiliation or endorsement.
+  The P5-010 NOTICE file carries an explicit disclaimer, but a
+  non-trademark-adjacent project name is the cleaner defense for a
+  public release — removes the trademark question instead of just
+  disclaiming it.
+- **Candidate.** Working idea: **"Conversational Presets"**
+  (package name `conversational-presets` or similar). Generic,
+  describes the product (natural-language ↔ audio presets), and
+  has no implicit tie to any manufacturer. That matters now that
+  the roadmap already covers multi-device (Fractal Wave 1 BK-014/
+  015, Roland/Boss Wave 2 BK-016..020) — a device-neutral project
+  name is better aligned with the direction the code is already
+  going.
+- **Scope of the rename (one pass, before any public push):**
+  - `package.json` `"name"` field.
+  - Repo name on GitHub (the origin remote URL changes; all old
+    clones need a `git remote set-url`).
+  - `LICENSE` + `NOTICE` project title lines.
+  - `README.md` title + install-paths examples (the README itself
+    is still pending; see P5-009 #4).
+  - Every doc under `docs/` that self-references "AM4 Tone Agent"
+    (`STATE.md`, `SESSIONS.md`, `CLAUDE.md`, planning docs) —
+    keep references to the **device** as "AM4" (that's correct
+    factual usage; trademark fair use for interoperability), but
+    replace project-name references.
+  - MCP server metadata: `server.name` / `version` in
+    `src/server/index.ts`.
+  - Tool descriptions that self-reference ("AM4 Tone Agent" vs
+    the tool doing the actual work) — search-and-replace pass.
+  - `docs/MCP-SETUP.md` install snippets (the server name appears
+    in `claude_desktop_config.json` examples).
+  - `scripts/smoke-server.ts` if it asserts on the server name.
+  - `src/knowledge/` file names stay — they're device-catalog
+    files, not project-brand files.
+- **Device-name usage that STAYS:** the string "AM4" is the
+  correct factual name for the hardware the server talks to.
+  Keep it in tool descriptions, manuals references, capture
+  filenames, protocol decodes, etc. Only the *project* name
+  changes; the device it controls keeps its real name.
+- **Blockers:**
+  - Final name choice (founder decision). Options on the table:
+    `conversational-presets`, `toneagent` (device-neutral),
+    `presetsmith`, something else entirely. Needs to be
+    decided before the rename pass, not negotiated during it.
+  - Whether to do a `git mv` to a new repo name on GitHub or
+    create a new repo and re-push history. `git mv` at the
+    repo level is just a GitHub-side rename and auto-redirects
+    existing clones — lower friction.
+- **When to schedule.** Before any of: npm publish, public GitHub
+  repo flip, `.exe` release (P5-005), or community beta
+  (BK-015). Can also land opportunistically earlier if the
+  founder decides on a name — the mechanical pass is ~30 minutes
+  + an hour of grep auditing.
+- **Non-goals:**
+  - Renaming decoded capture files, SysEx documentation, cache
+    files, etc. — those are *about* the AM4 device and their
+    names reflect that accurately.
+  - Renaming the current MCP tool set (`apply_preset`,
+    `save_to_location`, etc.) — tool names are device-neutral
+    already.

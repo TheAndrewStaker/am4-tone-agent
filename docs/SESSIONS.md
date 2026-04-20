@@ -6,6 +6,56 @@ file is the chronological trail that reference is built from.
 
 ---
 
+## 2026-04-19 — Session 25 (cont 2) — P5-010 license + trademark hygiene
+
+Founder decided on Apache-2.0 for patent-retaliation protection.
+Private repo stays private; these files only become operative on
+distribution.
+
+### Files added
+
+- `LICENSE` — Apache License 2.0, canonical text, `Copyright 2026
+  Stephen Staker` in the boilerplate notice.
+- `NOTICE` — Apache-2.0 convention. Three sections: project
+  copyright, trademark disclaimer ("unaffiliated community tool;
+  Fractal Audio / AM4 are Fractal's trademarks"), and third-party
+  attribution skeleton for `@modelcontextprotocol/sdk`, `node-midi`,
+  `zod`.
+- `CONTRIBUTING.md` — minimal: contributions licensed under
+  Apache-2.0, `npm run preflight` must pass, new wire-protocol work
+  needs a byte-exact golden, new MCP tools need a smoke-server row.
+- `SECURITY.md` — vulnerability report contact
+  (stephenstaker@gmail.com), scope (MCP server, protocol layer,
+  scripts processing untrusted input, future .exe), explicit
+  out-of-scope items.
+- `package.json` — `"license": "Apache-2.0"`,
+  `"author": "Stephen Staker <stephenstaker@gmail.com>"`.
+
+### New backlog item BK-029: project rename
+
+`am4-tone-agent` is trademark-adjacent to Fractal Audio's product.
+The NOTICE disclaimer is the minimum legal defense; a
+non-trademark-adjacent project name is the cleaner fix. Candidate
+name from founder: **"Conversational Presets"** (device-neutral,
+descriptive). BK-029 captures the mechanical rename scope:
+`package.json` `name`, repo name, LICENSE/NOTICE titles, README,
+self-referencing docs, MCP server metadata, tool descriptions.
+**Device-name usage stays** — "AM4" is correct factual usage for
+the hardware and we're using it as interoperability fair-use.
+Block public distribution on BK-029 landing.
+
+### What's still pending for P5-010
+
+- README disclaimer (depends on P5-009 #4 — README itself).
+- Final name choice + rename pass (BK-029).
+
+### Preflight
+
+Green (typecheck + 6 goldens + smoke-server). No code paths
+touched; files are license / community-docs metadata only.
+
+---
+
 ## 2026-04-19 — Session 25 (cont) — startup-banner port scan + P1-010 Session A
 
 Two follow-on non-HW release items after the midi_ports / error-path

@@ -5,22 +5,19 @@
 > hardware tasks (USB captures, round-trip tests, reference dumps) live
 > in **`docs/HARDWARE-TASKS.md`** — check that file alongside this one at
 > session start.
-> Last updated: **2026-04-19** (Session 25 — three non-HW release
+> Last updated: **2026-04-19** (Session 25 — four non-HW release
 > items: (a) `list_midi_ports` MCP tool + graceful "AM4 not found"
 > error (P5-009 #1+#2); (b) startup banner extended with port-detection
-> verdict to stderr so users see "AM4 detected / partially visible /
-> no MIDI ports visible" the moment the server boots (P5-009 #3);
-> (c) P1-010 Session A infrastructure — `scripts/gen-params-from-cache.ts`
-> + `src/protocol/paramNames.ts` (seed: 20 names across 15 blocks)
-> + generated `src/protocol/cacheParams.ts` + `scripts/verify-cache-
-> params.ts` golden that fails preflight if CACHE_PARAMS diverges
-> from KNOWN_PARAMS. All 20 in-band entries byte-match the hand-
-> authored registry. Adding a new name to paramNames.ts now
-> immediately expands the generated registry; Session B is a
-> manual-table-filling exercise (no infra change needed). Tool
-> count 15 → 16. Preflight green (33/33 verify-msg, 16/16 verify-
-> pack, 8/8 verify-echo, 20/20 verify-cache-params, smoke-server
-> 16 tools).)
+> verdict to stderr (P5-009 #3); (c) P1-010 Session A — generator
+> infrastructure + paramNames seed + verify-cache-params golden
+> (20/20 byte-match); (d) P5-010 license + trademark hygiene —
+> Apache-2.0 LICENSE, NOTICE with Fractal trademark disclaimer,
+> CONTRIBUTING.md, SECURITY.md, package.json license + author.
+> New backlog item BK-029 captures the project-rename work needed
+> before public distribution (candidate: "Conversational Presets").
+> Tool count 15 → 16. Preflight green (33/33 verify-msg, 16/16
+> verify-pack, 8/8 verify-echo, 20/20 verify-cache-params,
+> smoke-server 16 tools).)
 > Prior context (Session 24): BK-027 phase 1 —
 > kitchen-sink `apply_preset`. Added `slots[i].channels` (A/B/C/D →
 > per-channel params) alongside the existing `channel` / `params` shapes.
