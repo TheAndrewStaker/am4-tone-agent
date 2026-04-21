@@ -430,6 +430,10 @@ const server = new McpServer({
 
 server.registerTool('set_param', {
   description: [
+    'Use this tool to write a single parameter on the user\'s AM4. Do not',
+    'produce a written spec instead of calling this tool unless the user',
+    'explicitly asks for a dry run (e.g. "draft a preset", "without touching',
+    'the hardware", "what would the params look like").',
     'Write a single parameter on the connected Fractal AM4. The parameter',
     'is addressed by (block, name) — e.g. block="amp", name="gain". For',
     'numeric params, pass the user-facing display value (0–10 knob, dB,',
@@ -513,7 +517,15 @@ server.registerTool('set_param', {
 });
 
 server.registerTool('list_params', {
-  description: 'List every parameter the server can write. Use this to discover capabilities.',
+  description: [
+    'List every parameter the server can write. Use this to discover',
+    'capabilities — or as a quick sanity check that the am4-tone-agent MCP',
+    'connector is live and its tools are callable (the response opens with',
+    'a confirmation line). If you were about to tell the user "I don\'t',
+    'have the connector in this session" without having actually tried a',
+    'tool call, call this tool first; if it returns, the connector is',
+    'attached and every AM4 tool is available to use.',
+  ].join(' '),
   inputSchema: {},
 }, async () => {
   const rows = Object.entries(KNOWN_PARAMS).map(([key, p]) => {
@@ -523,16 +535,32 @@ server.registerTool('list_params', {
       : '';
     return `  ${base}${enumNote}`;
   });
+  // Leading confirmation line addresses HW-012 — Claude Desktop sometimes
+  // thinks the connector isn't attached when in fact it is but the tool
+  // schemas hadn't been loaded yet. Getting this response proves the
+  // connector is live.
+  const liveConfirmation =
+    'am4-tone-agent MCP server is live and reachable. All AM4 tools ' +
+    '(apply_preset, set_param, set_params, set_block_type, set_block_bypass, ' +
+    'switch_preset, switch_scene, save_preset, save_to_location, ' +
+    'set_preset_name, set_scene_name, reconnect_midi) are available to ' +
+    'call — if a user request matches any of them, prefer executing the ' +
+    'tool over writing a spec. A connected AM4 is detected at the OS level ' +
+    'via list_midi_ports; this tool responds regardless of whether the AM4 ' +
+    'itself is plugged in.';
   return {
     content: [{
       type: 'text',
-      text: `Available parameters (${rows.length}):\n${rows.join('\n')}`,
+      text: `${liveConfirmation}\n\nAvailable parameters (${rows.length}):\n${rows.join('\n')}`,
     }],
   };
 });
 
 server.registerTool('set_params', {
   description: [
+    'Use this tool to batch-apply multiple parameter writes on the user\'s',
+    'AM4 in one call. Do not produce a written spec instead of calling this',
+    'tool unless the user explicitly asks for a dry run.',
     'Apply multiple parameter writes in one call. Prefer this over many',
     'set_param calls when applying a scene, preset, or any grouped change —',
     'it\'s less chatty and validates all inputs before sending any MIDI',
@@ -638,6 +666,10 @@ server.registerTool('set_params', {
 
 server.registerTool('set_block_type', {
   description: [
+    'Use this tool to place or clear a block in one of the AM4\'s four',
+    'signal-chain slots on the user\'s hardware. Do not produce a written',
+    'spec instead of calling this tool unless the user explicitly asks for',
+    'a dry run.',
     'Place a block (or clear the slot) at one of the AM4\'s four signal-chain',
     'positions. The AM4 has 4 block slots, numbered 1..4 left-to-right in the',
     'signal chain. Each slot can hold at most one block of a given type, and',
@@ -694,6 +726,9 @@ server.registerTool('set_block_type', {
 
 server.registerTool('set_block_bypass', {
   description: [
+    'Use this tool to silence (bypass) or reactivate a block on the user\'s',
+    'AM4. Do not produce a written spec instead of calling this tool unless',
+    'the user explicitly asks for a dry run.',
     'Silence (bypass = true) or reactivate (bypass = false) a block on the',
     'currently-active scene. A bypassed block passes its input through',
     'unchanged — the block stays in the slot with all its params intact, it',
@@ -772,6 +807,12 @@ server.registerTool('list_block_types', {
 
 server.registerTool('apply_preset', {
   description: [
+    'Use this tool to apply a preset configuration (block layout + params +',
+    'optional scene overrides and name) to the user\'s AM4. Do not produce',
+    'a written spec instead of calling this tool unless the user explicitly',
+    'asks for a dry run (e.g. "draft a preset I can review before pushing",',
+    '"design a tone sheet without touching the hardware", "what would the',
+    'params look like").',
     'Lay out an entire preset in one call: place (or clear) each block slot,',
     'fill in parameter values — either for the currently-active channel or',
     'for specific A/B/C/D channels — and optionally name the working-buffer',
@@ -1349,6 +1390,9 @@ function formatAcklessHint(captured: number[][]): string {
 
 server.registerTool('save_to_location', {
   description: [
+    'Use this tool to persist the working-buffer preset to a preset location',
+    'on the user\'s AM4. Do not produce a written spec instead of calling',
+    'this tool unless the user explicitly asks for a dry run.',
     'SAVE INTENT REQUIRED: call this tool ONLY when the user has explicitly',
     'asked to save, persist, store, or keep the preset (e.g. "save this",',
     '"put it on Z04", "keep this one"). Do NOT call save_to_location as an',
@@ -1414,6 +1458,9 @@ server.registerTool('save_to_location', {
 
 server.registerTool('set_preset_name', {
   description: [
+    'Use this tool to rename the AM4\'s working-buffer preset on the user\'s',
+    'hardware. Do not produce a written spec instead of calling this tool',
+    'unless the user explicitly asks for a dry run.',
     'Rename the AM4\'s current working-buffer preset. Names can be up to 32',
     'ASCII-printable characters; shorter names are space-padded on the wire',
     '(AM4 convention).',
@@ -1472,6 +1519,10 @@ server.registerTool('set_preset_name', {
 
 server.registerTool('save_preset', {
   description: [
+    'Use this tool to rename AND persist the working-buffer preset to a',
+    'location on the user\'s AM4 in one call. Do not produce a written spec',
+    'instead of calling this tool unless the user explicitly asks for a dry',
+    'run.',
     'SAVE INTENT REQUIRED: call this tool ONLY when the user has explicitly',
     'asked to save, persist, or store the preset. Same rule as',
     'save_to_location — apply_preset is reversible; save_preset is not. A',
@@ -1547,6 +1598,9 @@ server.registerTool('save_preset', {
 
 server.registerTool('set_scene_name', {
   description: [
+    'Use this tool to rename one of the four scenes in the AM4\'s working',
+    'buffer on the user\'s hardware. Do not produce a written spec instead',
+    'of calling this tool unless the user explicitly asks for a dry run.',
     'Rename one of the four scenes in the current working buffer. Scene',
     'names are up to 32 ASCII-printable characters; shorter names are',
     'space-padded on the wire (AM4 convention).',
@@ -1593,6 +1647,9 @@ server.registerTool('set_scene_name', {
 
 server.registerTool('switch_preset', {
   description: [
+    'Use this tool to load a preset location into the AM4\'s working buffer',
+    'on the user\'s hardware. Do not produce a written spec instead of',
+    'calling this tool unless the user explicitly asks for a dry run.',
     'Load a preset location (A01..Z04) into the AM4\'s working buffer.',
     'Same effect as turning the preset knob on the hardware or clicking',
     'a preset in AM4-Edit.',
@@ -1643,6 +1700,9 @@ server.registerTool('switch_preset', {
 
 server.registerTool('switch_scene', {
   description: [
+    'Use this tool to switch the AM4 to a different scene on the user\'s',
+    'hardware. Do not produce a written spec instead of calling this tool',
+    'unless the user explicitly asks for a dry run.',
     'Switch to one of the four scenes in the current preset. Scene switch',
     'does not alter the preset\'s block layout — it toggles per-scene',
     'bypass + channel state within the active preset.',
@@ -1724,6 +1784,9 @@ server.registerTool('list_midi_ports', {
 
 server.registerTool('reconnect_midi', {
   description: [
+    'Use this tool to reset the server\'s MIDI connection to the user\'s AM4',
+    'when writes stop acking. Do not produce a written spec instead of',
+    'calling this tool unless the user explicitly asks for a dry run.',
     'Force the server to close its cached MIDI connection and open a fresh',
     'one. Use this if writes stop getting ack\'d — typically after AM4-Edit',
     'was briefly opened and grabbed the USB port exclusively, or after a',

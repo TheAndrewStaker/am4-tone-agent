@@ -134,7 +134,15 @@ async function main(): Promise<void> {
   const text = content[0].text;
   if (!text.includes('amp.gain')) throw new Error(`list_params output missing amp.gain:\n${text}`);
   if (!text.includes('amp.type')) throw new Error(`list_params output missing amp.type:\n${text}`);
-  console.log(`✓ list_params call returned catalog (${text.split('\n').length} lines)`);
+  // P5-011 item 4: list_params doubles as a connector-live sanity check.
+  // The response must lead with a confirmation that the MCP server is
+  // reachable and its tools are callable. Don't let this line regress —
+  // if it disappears, Claude Desktop's HW-012 failure mode becomes
+  // silently harder to diagnose.
+  if (!text.includes('am4-tone-agent MCP server is live')) {
+    throw new Error(`list_params missing live-confirmation line (P5-011 item 4):\n${text}`);
+  }
+  console.log(`✓ list_params call returned catalog (${text.split('\n').length} lines) with live-confirmation line`);
 
   // Exercise lookup_lineage forward + reverse — doesn't touch MIDI, just
   // reads src/knowledge/*.json. Confirms the tool is wired up and the data

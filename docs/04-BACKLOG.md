@@ -922,7 +922,11 @@ without installing Node, a C++ toolchain, or editing JSON by hand. See
      description's first sentence is a *call-to-action* — "Use this
      tool to {do X} on the user's AM4. Do not produce a written
      spec unless the user explicitly asks for a dry run."
-     ⏳ Not started.
+     ✅ Shipped Session 28 cont (2026-04-21). All 12 mutation tools
+     now open with the uniform call-to-action pair; dry-run phrasing
+     examples embedded on the creative tools (`apply_preset`,
+     `set_param`) so Claude knows what an explicit dry-run ask looks
+     like.
 
   2. **Save-intent clause (every persistence tool).** Every tool
      that writes to a preset LOCATION (not the working buffer) —
@@ -954,7 +958,12 @@ without installing Node, a C++ toolchain, or editing JSON by hand. See
      `list_midi_ports`) that the connector is live and AM4 tools
      are available, so the model can't slide into the "I don't
      have the connector" failure mode seen on HW-012.
-     ⏳ Not started.
+     ✅ Shipped Session 28 cont (2026-04-21). `list_params`
+     response now opens with an explicit live-confirmation line
+     listing every callable AM4 tool plus a nudge to prefer
+     executing over writing a spec. The tool's description also
+     tells Claude this is a safe sanity-check call when unsure
+     whether the connector is attached.
 
   5. **Smoke-test for spec-vs-execute default.** Manual Claude
      Desktop session with a minimal "make my amp louder" prompt —
@@ -963,15 +972,15 @@ without installing Node, a C++ toolchain, or editing JSON by hand. See
      in HARDWARE-TASKS.md form.
      ⏳ Not started.
 
-- **Release-gate status.** Items (1), (4), and (5) remain on the
-  critical path for non-technical-user distribution. (2) and (3)
-  are partially shipped (Session 27) — the acute cases surfaced by
-  the Sailing transcript (save_preset auto-chaining, apply_preset
-  response narrating un-reversible state) are closed. Full audit
-  across the rest of the tool surface is still needed before
-  release. End users installing the packaged `.exe` never edit any
-  prompt and never know a Claude.ai Project exists — tool
-  descriptions are their only UX surface.
+- **Release-gate status.** Items (1) and (4) shipped Session 28
+  cont; (2) and (3) partially shipped Session 27 cont and fully
+  closed by the Session 28 apply_preset response-text rewrite. Only
+  (5) — the manual Claude-Desktop smoke test — remains, queued as a
+  founder-owed verification step (HW-NNN in HARDWARE-TASKS.md when
+  we reach it). End users installing the packaged `.exe` never edit
+  any prompt and never know a Claude.ai Project exists — tool
+  descriptions are their only UX surface, and that audit is now
+  complete.
 
 - **Relation.** Sits alongside P5-003 (one-click MCP registration)
   + P5-008 (MCPB packaging) as the *conversational-UX* leg of the

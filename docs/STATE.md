@@ -5,7 +5,23 @@
 > hardware tasks (USB captures, round-trip tests, reference dumps) live
 > in **`docs/HARDWARE-TASKS.md`** — check that file alongside this one at
 > session start.
-> Last updated: **2026-04-21** (Session 28 — BK-027 phase 2 shipped.
+> Last updated: **2026-04-21** (Session 28 cont — P5-011 items 1
+> and 4 shipped. (1) Every mutation tool description now opens with
+> the uniform *"Use this tool to {X} on the user's AM4. Do not
+> produce a written spec instead of calling this tool unless the
+> user explicitly asks for a dry run."* lead — 12 tools:
+> `apply_preset` / `set_param` / `set_params` / `set_block_type` /
+> `set_block_bypass` / `save_to_location` / `save_preset` /
+> `set_preset_name` / `set_scene_name` / `switch_preset` /
+> `switch_scene` / `reconnect_midi`. (4) `list_params` response
+> opens with a live-confirmation line enumerating every callable
+> AM4 tool, plus its description now tells Claude to call
+> `list_params` as a sanity check if unsure whether the connector
+> is attached (HW-012 failure mode). Only P5-011 item (5) remains —
+> the manual Claude-Desktop smoke test, founder-owed. Preflight
+> green (37/37 verify-msg, 17 tools, 16 apply_preset validation
+> assertions).)
+> Prior context (Session 28 — BK-027 phase 2 shipped.
 > `apply_preset` now accepts an optional top-level `scenes[]` that
 > configures per-scene channel pointers, per-scene bypass, and scene
 > rename in one call. Orchestrator (at the tool layer, no new protocol
@@ -226,26 +242,12 @@ float32. One open question remains before the IR can cover full presets:
 
 ## The single next action
 
-**P5-011 MCP tool-description audit — remaining items (1), (4), (5).**
-Release-gate work. (2) and (3) partially shipped Session 27 cont and
-fully cleared by Session 28's apply_preset response-text fix for the
-working-buffer reversibility story. Still to land:
-1. **Call-to-action lead for every mutation tool.** `apply_preset` /
-   `set_param` / `set_params` / `switch_preset` / `switch_scene` /
-   `save_preset` / `save_to_location` / `set_preset_name` /
-   `set_scene_name` / `set_block_type` / `set_block_bypass` /
-   `reconnect_midi` first sentence → *"Use this tool to {…} on the
-   user's AM4. Do not produce a written spec unless the user
-   explicitly asks for a dry run."*
-4. **Top-of-tool-list sanity note** in `list_params` or
-   `list_midi_ports` confirming the connector is live, so the model
-   can't slide into "I don't have the connector" on Desktop (HW-012
-   failure mode).
-5. **Manual Claude-Desktop smoke test** (hard-to-automate): "make my
-   amp louder" prompt → first-turn tool call, not spec.
-
-Full rubric in 04-BACKLOG.md §P5-011 with ✅ partial / ⏳ not-started
-flags per item.
+**Pick from the AM4-depth queue below OR run the founder-side manual
+tests** (P5-011 item 5 smoke + HW-013 scenes round-trip — both need
+the device). P5-011 items 1 + 4 landed Session 28 cont; items 2 + 3
+cleared Session 27 cont / Session 28. The only non-AM4-depth work
+left on the release-gate is (5), which is a manual Claude Desktop
+check and can't be done from the tool layer.
 
 **Remaining AM4-depth queue (non-HW, gates Wave 1 device expansion
 per `memory/feedback_am4_depth_gates_wave_expansion.md`):**

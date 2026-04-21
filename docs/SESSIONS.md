@@ -6,6 +6,75 @@ file is the chronological trail that reference is built from.
 
 ---
 
+## 2026-04-21 — Session 28 cont — P5-011 items 1 + 4 shipped
+
+Release-gate tool-description audit. Items (1) call-to-action lead and
+(4) connector-live sanity note — both needed to keep Claude Desktop
+from sliding into the HW-012 "I don't have the connector" failure mode
+or the Sailing-transcript "write a spec instead of executing" failure
+mode.
+
+### (1) Call-to-action lead on all 12 mutation tools
+
+Uniform first-sentence pair prepended to every tool that changes
+hardware state:
+
+> Use this tool to {X} on the user's AM4. Do not produce a written
+> spec instead of calling this tool unless the user explicitly asks
+> for a dry run.
+
+Tools touched: `apply_preset`, `set_param`, `set_params`,
+`set_block_type`, `set_block_bypass`, `save_to_location`,
+`save_preset`, `set_preset_name`, `set_scene_name`, `switch_preset`,
+`switch_scene`, `reconnect_midi`.
+
+Dry-run phrasing examples ("draft a preset", "without touching the
+hardware", "what would the params look like") embedded on the most
+creative tools (`apply_preset`, `set_param`) so Claude recognizes an
+explicit dry-run ask versus an implicit execute ask. The remaining
+mutation tools inherit the short form — the dry-run risk on
+`switch_preset` / `reconnect_midi` / `save_preset` is low, but
+uniformity helps Claude see the pattern.
+
+### (4) `list_params` live-confirmation line
+
+Two changes:
+
+- **Description rewrite.** `list_params` now tells Claude this tool
+  doubles as a connector-sanity check: *"If you were about to tell
+  the user 'I don't have the connector in this session' without
+  having actually tried a tool call, call this tool first; if it
+  returns, the connector is attached and every AM4 tool is available
+  to use."*
+- **Response-text prepended.** The response opens with a confirmation
+  line enumerating every AM4 tool name (apply_preset / set_param /
+  set_params / set_block_type / set_block_bypass / switch_preset /
+  switch_scene / save_preset / save_to_location / set_preset_name /
+  set_scene_name / reconnect_midi) and a nudge to prefer executing
+  over spec'ing. The existing catalog of ≥50 params follows.
+
+### Preflight
+
+All existing golden tests pass. Tool count unchanged at 17.
+
+### P5-011 status
+
+- (1) ✅ shipped this session.
+- (2) ✅ partial Session 27 cont + closed by Session 28 apply_preset
+  response rewrite (save-intent + reversibility language).
+- (3) ✅ partial Session 27 cont + closed by Session 28 (working-
+  buffer reversibility story).
+- (4) ✅ shipped this session.
+- (5) ⏳ founder-owed manual Claude-Desktop smoke test — tracked as
+  a HARDWARE-TASKS.md item once we line it up.
+
+Tool-description audit is effectively complete from the tool layer.
+Remaining release-gate items are (a) the P5-011 (5) manual test,
+(b) HW-013 scenes round-trip, (c) the AM4-depth queue (P1-012,
+advanced-controls captures, second unit-extension pass).
+
+---
+
 ## 2026-04-21 — Session 28 — BK-027 phase 2 shipped; apply_preset scenes[]
 
 No new captures. All HW-011 decodes were in hand from Session 27; the work
