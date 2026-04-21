@@ -210,6 +210,38 @@ export const KNOWN_PARAMS = {
     unit: 'enum', displayMin: 0, displayMax: 1,
     enumValues: { 0: 'OFF', 1: 'ON' },
   },
+  // Session 29 cont: Amp Advanced-panel enums registered from Blocks
+  // Guide text (structural — wire indexing assumed from cache enum
+  // order). Out-of-band from the cache generator for the same reason
+  // amp.out_boost is: the generator emits only the block's Type enum,
+  // not its other enum records. HW-014-style spot-check still needed
+  // to confirm each value index lands the labeled state on the
+  // device.
+  //
+  // Tonestack Location (not Type — Type is a separate 69-value enum).
+  // Blocks Guide: "POST places the stack between the preamp and
+  // power amp. MID places it between the last two triode stages.
+  // END places it after the power amp (physically impossible with
+  // a real amp)." PRE-MID is the 5th option.
+  'amp.tonestack_location': {
+    block: 'amp', name: 'tonestack_location',
+    pidLow: 0x003a, pidHigh: 0x0018,
+    unit: 'enum', displayMin: 0, displayMax: 4,
+    enumValues: { 0: 'PRE', 1: 'POST', 2: 'MID', 3: 'END', 4: 'PRE-MID' },
+  },
+  // Master Volume Location. Blocks Guide §Advanced (p. 853):
+  // "Master Vol Location — Sets the location of the Master Volume
+  // control. Most amps have the Master Volume before the phase
+  // inverter ('Pre PI'). On some amps (like the 'Class-A' types)
+  // the Master Volume comes after the phase inverter ('PI'). A
+  // third option, 'pre-triode,' is the default for 'Hipower' amp
+  // types."
+  'amp.master_vol_location': {
+    block: 'amp', name: 'master_vol_location',
+    pidLow: 0x003a, pidHigh: 0x0038,
+    unit: 'enum', displayMin: 0, displayMax: 2,
+    enumValues: { 0: 'PRE-PI', 1: 'POST-PI', 2: 'PRE-TRIODE' },
+  },
   'amp.level': {
     block: 'amp', name: 'level',
     pidLow: 0x003a, pidHigh: 0x0000,
