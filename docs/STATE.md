@@ -5,7 +5,18 @@
 > hardware tasks (USB captures, round-trip tests, reference dumps) live
 > in **`docs/HARDWARE-TASKS.md`** — check that file alongside this one at
 > session start.
-> Last updated: **2026-04-21** (Session 27 — Per-block bypass decoded
+> Last updated: **2026-04-21** (Session 27 cont — Sailing-transcript
+> UX polish. Two observations from the founder's Christopher-Cross
+> "Sailing" Claude-Desktop test closed: (1) `apply_preset` now accepts
+> an optional top-level `name` that writes the working-buffer name
+> after slot writes (no save — apply/save boundary preserved);
+> (2) `save_to_location` + `save_preset` + `apply_preset` descriptions
+> now carry explicit save-intent and reversibility language so Claude
+> doesn't auto-chain a save after a try-it-out ask. P5-011 extended
+> with the full tool-description audit rubric — items 1/4/5 still
+> pending; 2/3 partially shipped this session. Preflight 37/37
+> verify-msg + 17/17 tools + new overlong-name smoke assertion green.)
+> Prior context (Session 27 — Per-block bypass decoded
 > from the 6 HW-011 captures + the HW-012 round-trip findings.
 > `buildSetBlockBypass(blockPidLow, bypassed)` at pidHigh=0x0003,
 > float32(1.0) = bypass, float32(0.0) = activate. Shared across every
@@ -206,14 +217,15 @@ fold in the apply_preset response-text honesty fix from HW-012
 idealized scene layouts).
 
 **Also release-gate work** — **P5-011 MCP tool-description audit**.
-HW-012 proved Claude Desktop falls back to spec-only output when the
-deferred tool schemas aren't actively loaded. The Claude.ai Project
-prompt fix doesn't help Desktop users (Desktop has no app-level
-prompt surface). The lever is the tool descriptions in
-`src/server/index.ts`. Audit pass: rewrite every state-changing tool's
-description lead to be a call-to-action ("Use this tool to …") and
-explicitly reject the spec-only fallback unless the user asks for a
-dry run. Full rubric in 04-BACKLOG.md §P5-011.
+HW-012 + the Sailing transcript (Session 27 cont) proved two Desktop
+failure modes: (a) spec-only output when the deferred tool schemas
+aren't loaded (HW-012), and (b) auto-chaining `save_preset` after a
+try-it-out ask ("build me a preset for X" — not a save ask; Sailing).
+(b) is partially closed — `save_to_location` / `save_preset` /
+`apply_preset` descriptions now carry save-intent and reversibility
+language. (a) and the remaining tool descriptions are still to-do.
+Full 5-item rubric in 04-BACKLOG.md §P5-011 with partial-ship status
+flags (✅ partial / ⏳ not started) per item.
 
 **Remaining AM4-depth queue (non-HW, gates Wave 1 device expansion
 per `memory/feedback_am4_depth_gates_wave_expansion.md`):**

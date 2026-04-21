@@ -910,30 +910,68 @@ without installing Node, a C++ toolchain, or editing JSON by hand. See
   users at all. The **MCP tool descriptions** (registered by the
   server at `src/server/index.ts`) are the only lever. Today those
   descriptions explain *what each tool does*; they don't tell the
-  model *when to prefer executing over speccing*. Audit pass:
-  1. For every "change hardware state" tool (`apply_preset`,
-     `set_param`, `set_params`, `switch_preset`, `switch_scene`,
-     `save_preset`, `set_preset_name`, `set_scene_name`,
-     `set_block_type`, `reconnect_midi`): rewrite the description
-     lead sentence to be a *call-to-action* — "Use this tool to
-     {do X} on the user's AM4. Do not produce a written spec
-     unless the user explicitly asks for a dry run."
-  2. Add a short top-of-tool-list note (in whatever tool is read
-     first — `list_params` or `list_midi_ports`) confirming the
-     connector is live and tools are available, so the model can't
-     get into the "I don't have the connector" failure mode.
-  3. Smoke-server assertion: spin a fresh Claude Desktop session
-     with a minimal "make my amp louder" prompt and check that the
-     first assistant message is a tool call, not a spec. Hard to
-     automate; record as a manual release-test item in
-     HARDWARE-TASKS.md form.
+  model *when to prefer executing over speccing*, and they don't
+  tell the model *when NOT to call* (save_preset after a build-a-
+  tone ask — Sailing transcript, 2026-04-21). Full audit rubric:
 
-- **Release-gate status.** This is a release-blocker for the
-  non-technical-user distribution plan (guitarist installs
-  packaged `.exe`, never edits any prompt, never knows a
-  Claude.ai Project exists). Without the tool-description pass,
-  end users hit exactly the failure founder hit on HW-012 and
-  have no "i see the connector" escape hatch.
+  1. **Call-to-action lead (every mutation tool).** For every tool
+     that changes hardware state — `apply_preset`, `set_param`,
+     `set_params`, `switch_preset`, `switch_scene`, `save_preset`,
+     `save_to_location`, `set_preset_name`, `set_scene_name`,
+     `set_block_type`, `set_block_bypass`, `reconnect_midi`: the
+     description's first sentence is a *call-to-action* — "Use this
+     tool to {do X} on the user's AM4. Do not produce a written
+     spec unless the user explicitly asks for a dry run."
+     ⏳ Not started.
+
+  2. **Save-intent clause (every persistence tool).** Every tool
+     that writes to a preset LOCATION (not the working buffer) —
+     `save_to_location`, `save_preset`, future `restore_location` —
+     gets an explicit: *"Call this ONLY when the user has asked to
+     save / persist / store the preset (e.g. 'save this', 'put it
+     on Z04', 'keep this one'). Do NOT call as an automatic follow-
+     up to apply_preset — apply is reversible, save is not. A bare
+     'build me a preset for X' is a try-it-out ask, not a save
+     ask."*
+     ✅ Partial (Session 27): `save_to_location`, `save_preset`,
+     and the apply_preset description's REVERSIBILITY block all
+     carry this language now. Remaining tools are working-buffer
+     only and don't need it.
+
+  3. **Reversibility clause (every working-buffer tool).** Every
+     tool that writes to the WORKING BUFFER only (not a location)
+     — `apply_preset`, `set_param`, `set_params`, `set_block_type`,
+     `set_block_bypass`, `switch_preset`, `switch_scene`,
+     `set_preset_name`, `set_scene_name` — gets a closing: *"This
+     change is reversible by switching presets. Do not chase it
+     with save_to_location / save_preset unless the user asked to
+     save."*
+     ✅ Partial (Session 27): `apply_preset` has it. Remaining
+     working-buffer tools need the line added.
+
+  4. **Top-of-tool-list sanity note.** Add a short confirmation
+     (in whichever tool is read first — `list_params` or
+     `list_midi_ports`) that the connector is live and AM4 tools
+     are available, so the model can't slide into the "I don't
+     have the connector" failure mode seen on HW-012.
+     ⏳ Not started.
+
+  5. **Smoke-test for spec-vs-execute default.** Manual Claude
+     Desktop session with a minimal "make my amp louder" prompt —
+     the assistant's first message must be a tool call, not a
+     spec. Hard to automate; record as a manual release-test item
+     in HARDWARE-TASKS.md form.
+     ⏳ Not started.
+
+- **Release-gate status.** Items (1), (4), and (5) remain on the
+  critical path for non-technical-user distribution. (2) and (3)
+  are partially shipped (Session 27) — the acute cases surfaced by
+  the Sailing transcript (save_preset auto-chaining, apply_preset
+  response narrating un-reversible state) are closed. Full audit
+  across the rest of the tool surface is still needed before
+  release. End users installing the packaged `.exe` never edit any
+  prompt and never know a Claude.ai Project exists — tool
+  descriptions are their only UX surface.
 
 - **Relation.** Sits alongside P5-003 (one-click MCP registration)
   + P5-008 (MCPB packaging) as the *conversational-UX* leg of the
@@ -1868,8 +1906,11 @@ Skip until explicit user demand materializes.
   on the device — 12 writes landed clean, block layout correct, per-
   channel amp values confirmed (channel A: Deluxe Verb Normal / gain
   3; channel D: 1959SLP Normal / gain 8; reverb mix 30 on channel A).
-  Phase 2 (scenes) still blocked on HW-011 decodes — captures landed
-  same session, decode pending.
+  Phase 2 (scenes) unblocked — HW-011 decode landed same session;
+  orchestration remains to be wired up. Optional `name?` field
+  shipped Session 27 (cont) after the Sailing-transcript UX test —
+  `apply_preset({slots, name})` writes the working-buffer name at
+  the end; still does NOT save (apply/save boundary preserved).
 
 - **Known runtime limitation (surfaced by HW-012; fix queued).**
   Because scene → channel pointer writes aren't decoded yet,

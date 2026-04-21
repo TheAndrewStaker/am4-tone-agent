@@ -259,6 +259,16 @@ async function main(): Promise<void> {
   );
   console.log(`✓ apply_preset surfaces path-like error for unknown param inside channels`);
 
+  // Name-field validation — the schema cap is 32, but the zod max rejects at
+  // the input layer with a validation error (not our buildSetPresetName
+  // throw). Either way the 33-char name must be rejected.
+  await assertApplyPresetError(
+    'overlong name',
+    { slots: [{ position: 1, block_type: 'amp' }], name: 'x'.repeat(33) },
+    '32',
+  );
+  console.log(`✓ apply_preset rejects overlong name (33 chars)`);
+
   child.stdin.end();
   await once(child, 'exit');
   const stderrStr = Buffer.concat(stderrChunks).toString('utf8');

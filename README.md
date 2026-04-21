@@ -165,7 +165,7 @@ If step 3 works, you're done. Move on to building full presets.
 
 | Tool | What it does |
 |---|---|
-| `apply_preset` | Build a whole preset in one call — blocks, per-channel params, optional naming. |
+| `apply_preset` | Build a whole preset in one call — blocks, per-channel params, optional name. Working buffer only; does not save. |
 | `set_param` | Write one parameter (amp gain, reverb mix, …). |
 | `set_params` | Batch write. Validates the whole batch before any MIDI leaves. |
 | `set_block_type` | Place a block (amp, drive, reverb, …) in a signal-chain slot. |

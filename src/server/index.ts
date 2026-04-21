@@ -773,11 +773,12 @@ server.registerTool('list_block_types', {
 server.registerTool('apply_preset', {
   description: [
     'Lay out an entire preset in one call: place (or clear) each block slot,',
-    'and fill in parameter values — either for the currently-active channel',
-    'or for specific A/B/C/D channels. Use this when the user is building a',
-    'tone from scratch or applying a named preset concept — it replaces a',
-    'sequence of set_block_type + set_param + channel-switch calls with a',
-    'single structured request.',
+    'fill in parameter values — either for the currently-active channel or',
+    'for specific A/B/C/D channels — and optionally name the working-buffer',
+    'preset at the end. Use this when the user is building a tone from',
+    'scratch or applying a named preset concept — it replaces a sequence of',
+    'set_block_type + set_param + channel-switch + set_preset_name calls',
+    'with a single structured request.',
     'Each slot accepts these optional shapes (pick at most one per slot):',
     '  • params — writes to whichever channel the block is on now.',
     '    Example: { gain: 6, bass: 5 }.',
@@ -792,6 +793,11 @@ server.registerTool('apply_preset', {
     'Only amp / drive / reverb / delay have channels — `channel` and',
     '`channels` are rejected for other blocks. Channel maps are written in',
     'canonical A→B→C→D order so the last-written channel is predictable.',
+    'Optional top-level field:',
+    '  • name — working-buffer preset name, up to 32 ASCII-printable chars.',
+    '    Written AFTER all slot writes so the display reflects it immediately.',
+    '    This does NOT save to a location — apply_preset remains working-',
+    '    buffer-only. Example: { slots: [...], name: "Sailing - C. Cross" }.',
     'CHANNEL/SCENE MODEL: channels (A/B/C/D) hold the param values; scenes',
     'pick which channel each block uses. If the user wants a preset where',
     'a block varies tone across scenes, use the `channels` shape to fill',
@@ -804,6 +810,13 @@ server.registerTool('apply_preset', {
     'channels, conflicting channel+channels, unknown channel letter) the',
     'entire call is rejected with nothing sent. Same ack caveat as',
     'set_param/set_params: wire-acks confirm receipt, not audible change.',
+    'REVERSIBILITY / SAVE INTENT: this call hits the WORKING BUFFER only.',
+    'The user can audition the tone, tweak it, or switch presets to discard.',
+    'Do NOT follow this call with save_to_location / save_preset unless the',
+    'user has explicitly asked to save / persist / store the preset. A bare',
+    '"make me a preset for X" or "build a tone for Y" is a try-it-out ask,',
+    'not a save ask. When in doubt, apply and then ask the user whether to',
+    'save.',
   ].join(' '),
   inputSchema: {
     slots: z.array(z.object({
@@ -824,8 +837,11 @@ server.registerTool('apply_preset', {
         'Map of channel letter (A/B/C/D, case-insensitive) → params for that channel. Fills multiple channels of the same block in one slot, e.g. { A: { gain: 3 }, D: { gain: 8 } }. Mutually exclusive with `channel` and `params`. Only valid for amp / drive / reverb / delay.',
       ),
     })).min(1).describe('Ordered list of slots to configure'),
+    name: z.string().max(32).optional().describe(
+      'Optional working-buffer preset name (≤32 ASCII-printable chars). Written after all slot writes. Does NOT save — persistence still requires a separate save_to_location / save_preset call.',
+    ),
   },
-}, async ({ slots }) => {
+}, async ({ slots, name }) => {
   // --- Validation pass (no MIDI yet) ---
   const seenPositions = new Set<number>();
   type PreparedWrite =
@@ -983,6 +999,19 @@ server.registerTool('apply_preset', {
     }
   });
 
+  // Prepare the optional name write. Location index is irrelevant (per HW-002
+  // the rename command is working-buffer scoped regardless of the location
+  // bytes in the payload), so we pass 0. Builder throws on overlong / non-
+  // ASCII names — we surface that as a validation error before any MIDI.
+  let nameWriteBytes: number[] | undefined;
+  if (name !== undefined) {
+    try {
+      nameWriteBytes = buildSetPresetName(0, name);
+    } catch (err) {
+      throw new Error(`name: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   // --- Send pass ---
   const conn = ensureMidi();
   const lines: string[] = [];
@@ -1011,9 +1040,24 @@ server.registerTool('apply_preset', {
       lines.push(`  ? ${label} — no ack within ${WRITE_ECHO_TIMEOUT_MS} ms`);
     }
   }
+  // Name write uses the 18-byte command-ack shape, not the 64-byte SET_PARAM
+  // write-echo, so it needs its own sendAndAwaitAck call.
+  let totalWrites = prepared.length;
+  if (nameWriteBytes !== undefined) {
+    totalWrites++;
+    const result = await sendAndAwaitAck(conn, nameWriteBytes, isCommandAck);
+    const label = `rename working buffer → "${name}"`;
+    if (result.acked) {
+      acked++;
+      lines.push(`  ✓ ${label}`);
+    } else {
+      unacked++;
+      lines.push(`  ? ${label} — no ack within ${WRITE_ECHO_TIMEOUT_MS} ms`);
+    }
+  }
   const header = unacked === 0
-    ? `Applied preset: ${prepared.length} writes, all wire-acked. Acks don't confirm audible change — cross-check on the AM4 if it matters. Per-slot channel targets are reflected in the channel lines above; params that follow a channel switch landed on that channel.`
-    : `Applied preset: ${prepared.length} writes, ${acked} acked, ${unacked} un-acked (server auto-reconnects after ${STALE_HANDLE_TIMEOUT_THRESHOLD} consecutive ack-less writes; or call reconnect_midi).`;
+    ? `Applied preset: ${totalWrites} writes, all wire-acked. Acks don't confirm audible change — cross-check on the AM4 if it matters. Working buffer only — the user can discard by switching presets, or ask to save/persist to a preset location.`
+    : `Applied preset: ${totalWrites} writes, ${acked} acked, ${unacked} un-acked (server auto-reconnects after ${STALE_HANDLE_TIMEOUT_THRESHOLD} consecutive ack-less writes; or call reconnect_midi).`;
   return {
     content: [{ type: 'text', text: `${header}\n${lines.join('\n')}` }],
   };
@@ -1076,6 +1120,13 @@ function formatAcklessHint(captured: number[][]): string {
 
 server.registerTool('save_to_location', {
   description: [
+    'SAVE INTENT REQUIRED: call this tool ONLY when the user has explicitly',
+    'asked to save, persist, store, or keep the preset (e.g. "save this",',
+    '"put it on Z04", "keep this one"). Do NOT call save_to_location as an',
+    'automatic follow-up to apply_preset — apply is reversible (the user can',
+    'switch presets to discard), save is not. A request like "build a preset',
+    'for X" is a try-it-out ask; without an explicit save phrase, apply and',
+    'let the user decide whether to save.',
     'Persist the AM4\'s current working-buffer preset (everything laid out',
     'via apply_preset / set_block_type / set_param) into a preset location',
     'so it survives power-cycling. Location naming is the AM4\'s native',
@@ -1192,6 +1243,12 @@ server.registerTool('set_preset_name', {
 
 server.registerTool('save_preset', {
   description: [
+    'SAVE INTENT REQUIRED: call this tool ONLY when the user has explicitly',
+    'asked to save, persist, or store the preset. Same rule as',
+    'save_to_location — apply_preset is reversible; save_preset is not. A',
+    'bare "make me a preset for Y" is a try-it-out ask, not a save ask.',
+    'When in doubt, use apply_preset (with its optional name field) and ask',
+    'the user whether to persist.',
     'Compose set_preset_name + save_to_location into a single call. The',
     'canonical flow for persisting a named preset: renames the working',
     'buffer, then saves it to the target location. Fails cleanly if the',

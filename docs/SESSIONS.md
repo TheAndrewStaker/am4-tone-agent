@@ -171,6 +171,79 @@ SET_PARAM primitive is previously hardware-verified.
 
 ---
 
+## 2026-04-21 — Session 27 (cont) — Sailing-transcript UX polish
+
+Founder ran a second Claude Desktop test — *"change my am4 preset to
+one for the song sailing by christopher cross"* — as a smoke test of
+the commit `7e27b77` state. Tools loaded cleanly (no deferred-tool
+miss this time), `lookup_lineage` queried for research, a 21-write
+`apply_preset` call landed the preset. Two UX observations from the
+transcript, both real gaps:
+
+**Observation 1 — naming is a two-step process when it shouldn't be.**
+After the successful apply, Claude volunteered a separate
+`save_preset(Z04, "Sailing - C. Cross")` call to name it. The user's
+mental model is "a preset is a layout + a name" — those should go
+together in one tool call. Fix: added optional top-level `name?` to
+`apply_preset`'s schema. Handler emits the rename write (using
+`buildSetPresetName` — working-buffer scoped per HW-002) after all
+slot writes complete, reports acked/unacked uniformly with the other
+writes. Does NOT save — the apply/save boundary is intentional
+(separate trust semantics).
+
+**Observation 2 — Claude auto-saved without save intent.** User's
+prompt was "change my am4 preset to X" — no persistence language. But
+Claude chained `save_preset` anyway. The fix has two sides: the tool
+description (tell Claude *when* to call), and the assistant's behavior
+(ask before persisting). The tool-description side landed this
+session — `save_to_location`, `save_preset`, and `apply_preset`'s
+description all gained explicit save-intent / reversibility language:
+
+- `save_to_location` / `save_preset` lead with: *"SAVE INTENT
+  REQUIRED: call this tool ONLY when the user has explicitly asked
+  to save / persist / store the preset … do NOT call as an automatic
+  follow-up to apply_preset — apply is reversible, save is not."*
+- `apply_preset` closes with: *"REVERSIBILITY / SAVE INTENT: this
+  call hits the WORKING BUFFER only. A bare 'make me a preset for X'
+  is a try-it-out ask, not a save ask. When in doubt, apply and ask
+  the user whether to save."*
+
+### What else landed this cont
+
+- `src/server/index.ts` — `apply_preset` schema: new top-level
+  optional `name` field (32-char zod cap). Handler prepares and
+  emits the name write after slot writes, with full ack reporting.
+- `scripts/smoke-server.ts` — new assertion for overlong-name
+  rejection (33-char name → schema validation error).
+- `docs/04-BACKLOG.md` — P5-011 extended into a 5-item rubric with
+  per-item status (✅ partial / ⏳ not started). Items 2 (save-intent)
+  and 3 (reversibility) partially shipped this session; items 1
+  (call-to-action lead on every mutation tool), 4 (top-of-tool-list
+  sanity note), 5 (manual Desktop smoke-test) remain to-do.
+- `docs/04-BACKLOG.md` — BK-027 status updated to note `name?`
+  shipped.
+- `docs/PROMPT-COVERAGE.md` — new row for *"Build a preset for
+  'Sailing'"* pattern as a representative one-call use case.
+- `README.md` — `apply_preset` description updated in the cheat-
+  sheet to mention the name field and working-buffer-only scope.
+
+### Preflight
+
+`npm run preflight` — 37/37 verify-msg, 17/17 tools, new overlong-
+name assertion green. Zero regressions.
+
+### Backlog deltas
+
+- **BK-027** — status note updated: `name?` shipped this cont,
+  phase 2 (scenes) remains the active work item.
+- **P5-011** — expanded from a narrative description to a
+  structured 5-item rubric with partial-ship markers. Items (2)
+  and (3) partially shipped this session against the acute cases
+  from the Sailing transcript; full audit across the remaining
+  working-buffer tools (items 1, 3-extended, 4, 5) still pending.
+
+---
+
 ## 2026-04-19 — Session 25 (cont 2) — P5-010 license + trademark hygiene
 
 Founder decided on Apache-2.0 for patent-retaliation protection.
