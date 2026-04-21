@@ -23,10 +23,12 @@
 > collection (replaced by the Hydrasynth Explorer) and is now a
 > community-support item with no founder-hardware validation.
 >
-> Last updated: 2026-04-21 (Session 29 — HW-015 archived. 12 captures
-> decoded; 10 new pidHighs registered + 1 structural correction
-> (amp.presence → amp.master at pidHigh=0x000F). HW-014 remains
-> top priority AM4-depth item; HW-013 and HW-016 unchanged.)
+> Last updated: 2026-04-21 (Session 29 cont — count/semitones naming
+> follow-up: `reverb.shift_1`/`reverb.shift_2` registered from Blocks
+> Guide (±24 semitones, structural). HW-017 queued to disambiguate
+> the remaining 5 count-type cache candidates that BG doesn't pin.
+> HW-015 archived earlier. Priority order unchanged: HW-013 >
+> HW-014 > HW-016 > HW-017.)
 
 ## Status key
 
@@ -141,6 +143,58 @@ Claude picks up from there and moves the item to ⏳ or ✅.
 
 <!-- HW-015 completed 2026-04-21 — see Archive below -->
 
+
+### HW-017 — Disambiguate count-type candidates (Session 29 follow-up) 🔜
+
+- **For:** closes the count/semitones naming follow-up in STATE.md's
+  AM4-depth queue. Five cache candidates have integer-step signatures
+  whose UI names can't be determined from Blocks Guide text alone —
+  they need single-knob captures to pin the label.
+- **Why:** Session 29's headline finding was that cache-signature-only
+  naming caught a Master/Presence mis-inference. These five candidates
+  are in the same risk zone; registering them without a capture would
+  re-open that class of bug. Each capture takes ~20 seconds.
+- **Setup:** AM4 plugged in, AM4-Edit open, USBPcap running. Same
+  methodology as HW-011 / HW-015.
+- **Capture targets (5 knobs):**
+  1. **Delay id=64 knob (pidHigh=0x0040, range 0..24 step=1).** Two
+     candidates per Blocks Guide: "Number Of Taps" (Multi-Tap Delay
+     type) OR "Bit Reduction" (Mono Delay type). Load a Multi-Tap
+     delay type and wiggle the taps knob; then load a Mono Delay and
+     wiggle the Bit Reduction knob. Whichever capture writes to
+     `pidHigh=0x0040` is the answer. Save as
+     `session-30-delay-taps.pcapng` and
+     `session-30-delay-bit-reduction.pcapng`.
+  2. **Phaser id=22 knob (pidHigh=0x0016, range 0..11 step=0).**
+     Blocks Guide says phaser has an "Order" control "Sets the number
+     of phase shifting circuits--or 'stages'--in increments of two"
+     from 2 to 12. Cache range 0..11 might be index 0..5 mapped to
+     2,4,…,12 — or something else entirely. Wiggle the Order/Stages
+     knob once; the capture's float value tells us. Save as
+     `session-30-phaser-order.pcapng`.
+  3. **Drive id=24 knob (pidHigh=0x0018, range 0..24 step=1).**
+     STATE.md tentatively called this `drive.bits` but Blocks Guide
+     puts Bit Reduction on the Delay block (see #1), not Drive. This
+     knob probably has a different role. Wiggle whatever knob on the
+     Drive Edit page fits the 0..24 range (look for EQ/post-EQ shift
+     or similar). Save as `session-30-drive-id24.pcapng`.
+  4. **Gate id=14 knob (pidHigh=0x000E, range 1..20 step=0).**
+     Structure suggests "Ratio" or similar threshold-shaping control.
+     Wiggle any Gate knob that reads 1–20 range. Save as
+     `session-30-gate-id14.pcapng`.
+  5. **Filter id=28 knob (pidHigh=0x001C, range 1..12 step=0).**
+     Possibly a filter "Order" similar to phaser, or "Stages" for a
+     cascaded filter. Wiggle the matching knob. Save as
+     `session-30-filter-id28.pcapng`.
+- **Signal completion:** *"HW-017 done"* + list of saved paths. Claude
+  processes captures via the same pipeline as HW-015 and registers
+  named params for the ones that resolve cleanly. Any that still
+  ambiguate (e.g. multiple wiggle captures pointing to the same
+  pidHigh) get flagged for further investigation.
+- **Priority:** low — unlocks ~5 niche params that aren't front-panel
+  essentials. Defer behind HW-013 (release-gate), HW-014 (blocks
+  release-gate by surfacing mid/treble verification), and HW-016
+  (Claude Desktop smoke). Do when founder has free device time.
 
 ### HW-016 — Claude Desktop first-turn-tool-call smoke (P5-011 item 5) 🔜
 

@@ -134,6 +134,18 @@ export const PARAM_NAMES: Readonly<Record<string, Readonly<Record<number, ParamN
     // no-op on non-spring reverbs.
     27: { name: 'springs', unit: 'count', displayMin: 2, displayMax: 6 },
     28: 'spring_tone',
+    // Session 29 follow-up (2026-04-21): Shimmer Verb / Plex Verb
+    // "Shift 1" and "Shift 2" pitch-shifter voices. Blocks Guide
+    // §Shimmer Verb Parameters: "Shift 1–8 — Sets the amount of
+    // detune within a range of ±24 semitones. This is where
+    // 'Shimmer' is born." AM4's reverb has two such voices (ids
+    // 56/57); the AxeFx/FM8-voice variant ships more. Cache signature
+    // (a=-24, b=24, c=1, step=1) matches the BG documentation
+    // exactly — needs the 'semitones' unit override since c=1 is
+    // structurally ambiguous. Structural registration; HW-014-style
+    // spot-check still required.
+    56: { name: 'shift_1', unit: 'semitones', displayMin: -24, displayMax: 24 },
+    57: { name: 'shift_2', unit: 'semitones', displayMin: -24, displayMax: 24 },
   },
   delay: {
     // Mix follows the universal percent-at-0x01 pattern (Blocks Guide

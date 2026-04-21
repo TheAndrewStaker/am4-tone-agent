@@ -157,6 +157,16 @@ export const CACHE_PARAMS = {
     pidLow: 0x0042, pidHigh: 0x001c,
     unit: 'knob_0_10', displayMin: 0, displayMax: 10,
   },
+  'reverb.shift_1': {
+    block: 'reverb', name: 'shift_1',
+    pidLow: 0x0042, pidHigh: 0x0038,
+    unit: 'semitones', displayMin: -24, displayMax: 24,
+  },
+  'reverb.shift_2': {
+    block: 'reverb', name: 'shift_2',
+    pidLow: 0x0042, pidHigh: 0x0039,
+    unit: 'semitones', displayMin: -24, displayMax: 24,
+  },
   'delay.mix': {
     block: 'delay', name: 'mix',
     pidLow: 0x0046, pidHigh: 0x0001,

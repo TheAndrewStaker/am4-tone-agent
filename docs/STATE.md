@@ -306,12 +306,16 @@ per `memory/feedback_am4_depth_gates_wave_expansion.md`):**
    `count` for `reverb.springs` (2..6) — `count` is now wire-verified,
    not just typing infrastructure. `semitones` still awaits a named
    param.
-4. **Count/semitones naming follow-up.** Cache has these candidates
-   with clear integer/step signatures; each needs a Blocks-Guide
-   cross-reference to name safely. Tractable in 1–2 hours of desk
-   work. Candidates still pending: `phaser.stages` (id=22, 0..11),
-   `delay.voices/taps` (id=64, 0..24), `reverb.shimmer_shift_1/2`
-   (ids 56/57, ±24 semitones), `drive.bits` (id=24, 0..24).
+4. **Count/semitones naming follow-up.** ✅ Partially closed
+   (Session 29 cont). `reverb.shift_1` and `reverb.shift_2` (pidHighs
+   0x0038 / 0x0039, semitones ±24) registered against Blocks Guide
+   §Shimmer Verb Parameters — structural, no wire capture yet.
+   `delay.taps`/`bit_reduction` (id=64), `phaser.order` (id=22),
+   `drive.id24` (id=24), `gate.id14` (id=14), `filter.id28` (id=28)
+   remain ambiguous — Blocks Guide names multiple candidates for
+   several of these (e.g. delay id=64 could be Taps on Multi-Tap OR
+   Bit Reduction on Mono Delay). Queued as HW-017 — cheap captures,
+   low priority since these aren't front-panel essentials.
 5. **HW-014 priority raised.** Session 29's correction caught a
    cache-signature mis-inference that only wire capture exposed
    (`pidHigh=0x000F` was structurally Presence-like but wire-wise

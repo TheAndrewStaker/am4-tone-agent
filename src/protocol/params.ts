@@ -312,6 +312,23 @@ export const KNOWN_PARAMS = {
     pidLow: 0x0042, pidHigh: 0x001c,
     unit: 'knob_0_10', displayMin: 0, displayMax: 10,
   },
+  // Session 29 follow-up: Shimmer Verb / Plex Verb pitch-shifter
+  // voices. Blocks Guide §Shimmer Verb Parameters describes "Shift
+  // 1–8" as detune amounts within ±24 semitones ("this is where
+  // 'Shimmer' is born"). AM4's reverb exposes two such voices at
+  // cache ids 56/57 — structural registration (cache signature
+  // matches BG exactly: a=-24, b=24, c=1, step=1). Not yet wire-
+  // verified; HW spot-check still required for absolute confirmation.
+  'reverb.shift_1': {
+    block: 'reverb', name: 'shift_1',
+    pidLow: 0x0042, pidHigh: 0x0038,
+    unit: 'semitones', displayMin: -24, displayMax: 24,
+  },
+  'reverb.shift_2': {
+    block: 'reverb', name: 'shift_2',
+    pidLow: 0x0042, pidHigh: 0x0039,
+    unit: 'semitones', displayMin: -24, displayMax: 24,
+  },
   'reverb.channel': {
     block: 'reverb', name: 'channel',
     pidLow: 0x0042, pidHigh: 0x07d2,
