@@ -399,13 +399,21 @@ sub-block 1 = Delay (89 recs, id=10 enum × 29), sub-block 9 = Drive
 ## Decoded parameters and unit conventions
 
 Live source of truth: `src/protocol/params.ts` (`KNOWN_PARAMS` + `Unit`
-union). **59 hand-authored params** (Session 28 cont 2 added the
-universal per-block output Balance across 15 confirmed blocks,
-unlocked by the new `bipolar_percent` unit; prior passes: Session 26
-added amp tone stack, drive tone/level/mix, reverb predelay + time,
-universal Mix across 8 effect blocks, LFO rates for chorus/flanger/
-phaser/tremolo, filter freq, and modulation depths; Session 25
-shipped P1-010 Session A generator + 20 seeds)
+union). **78 hand-authored params** (Session 29 cont 2 added Amp
+Advanced-panel enums `amp.tonestack_location` + `amp.master_vol_location`;
+Session 29 cont added `reverb.shift_1` / `reverb.shift_2` semitones
+from Blocks Guide cross-reference; Session 29 added 10 wire-verified
+entries from HW-015 — `amp.master` (correcting a Session-26
+mis-inference), `amp.depth`, `amp.presence` (moved to 0x1E),
+`amp.out_boost_level`, `amp.out_boost` toggle, delay/flanger/phaser
+`feedback`, `reverb.size`, `reverb.springs`, `reverb.spring_tone`;
+Session 28 cont 2 added the universal per-block output Balance
+across 15 confirmed blocks, unlocked by the new `bipolar_percent`
+unit; prior passes: Session 26 added amp tone stack, drive tone/
+level/mix, reverb predelay + time, universal Mix across 8 effect
+blocks, LFO rates for chorus/flanger/phaser/tremolo, filter freq,
+and modulation depths; Session 25 shipped P1-010 Session A generator
++ 20 seeds)
 across 15 confirmed blocks, using **10 unit conventions** (`knob_0_10`,
 `db`, `hz`, `seconds`, `percent`, `bipolar_percent`, `count`,
 `semitones`, `ms`, `enum`). `count` and `semitones` are typing-
@@ -726,7 +734,7 @@ Session 08 highlights (still load-bearing):
 - Preset dump format (`0x77/0x78/0x79`) + slot addressing — **🟢 confirmed**.
 - `0x01` SET_PARAM message format + value encoding — **🟢 fully decoded**.
 - Parameter ID structure — **🟢 (Session 06, preset-independent)**.
-- 44 hand-authored params / 15 confirmed blocks / 7 units — **🟢 in `params.ts`** (Session 26: P1-010 Session B + Unit-type extension).
+- 78 hand-authored params / 15 confirmed blocks / 10 units — **🟢 in `params.ts`** (Session 29 cont 2: HW-015 decode + count/semitones follow-up + Amp Advanced enums).
 - Channel A/B/C/D addressing — **🟢 (Session 08: Amp `pidHigh=0x07D2`,
   float32 index 0..3; other blocks' channel pidHigh unverified)**.
 - Drive Type enum table — **🟡 only `8 → TS808` known**.

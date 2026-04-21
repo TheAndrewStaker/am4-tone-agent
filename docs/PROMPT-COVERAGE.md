@@ -37,11 +37,16 @@ LLM-generation per link).
 | *"Change amp gain to 5"* | 1 × `set_param` | 1 | ~150 ms | ✅ |
 | *"More low end on the drive"* | 1 × `set_param drive.*` | 1 | ~150 ms | ✅ |
 | *"Set reverb mix to 30 and delay time to 400 ms"* | 1 × `set_params` (2 writes) | 2 | ~250 ms | ✅ |
-| *"Boost the mids"* | 1 × `set_param amp.mid` | 1 | ~150 ms | ⚠ P1-010 — `amp.mid` not yet in `KNOWN_PARAMS` (one of the hallucination examples) |
+| *"Boost the mids"* | 1 × `set_param amp.mid` | 1 | ~150 ms | ✅ Registered Session 26; structural (HW-014 spot-check pending for absolute confirmation) |
 | *"Set the amp to a Marshall JCM800"* | 1 × `set_param amp.type` | 1 | ~150 ms | ✅ (amp.type enum covers all 248 models) |
 | *"Swap the reverb for a delay"* | 1 × `set_block_type` | 1 | ~150 ms | ✅ |
 | *"Add a compressor before the amp"* | 1–2 × `set_block_type` | 1–2 | ~250 ms | ✅ |
-| *"Give me more feedback on the delay"* | 1 × `set_param delay.feedback` | 1 | ~150 ms | ⚠ P1-010 — `delay.feedback` not yet in registry |
+| *"Give me more feedback on the delay"* | 1 × `set_param delay.feedback` | 1 | ~150 ms | ✅ Shipped Session 29 (HW-015 wire-verified, bipolar_percent ±100) |
+| *"Crank the amp's master volume"* | 1 × `set_param amp.master` | 1 | ~150 ms | ✅ Shipped Session 29 (HW-015 — wire-verified on two Marshall amps; catches and corrects Session-26 mis-inference) |
+| *"Add depth and presence to the amp"* | 1 × `set_params` (2 writes) | 2 | ~250 ms | ✅ Shipped Session 29 (HW-015 wire-verified `amp.depth` @ 0x1A and `amp.presence` @ 0x1E) |
+| *"Turn on the out boost"* + *"set boost to 2 dB"* | `set_param amp.out_boost ON` then `set_param amp.out_boost_level 2` | 2 | ~250 ms | ✅ Shipped Session 29 (toggle + level both wire-verified) |
+| *"Add a shimmer verb with an octave-up shift"* | 1 × `set_block_type reverb shimmer` then `set_param reverb.shift_1 12` | 2 | ~250 ms | ✅ Shipped Session 29 cont (shift_1/shift_2 structural; BG-backed) |
+| *"Move the tone stack position"* / *"Change master volume location to Post-PI"* | 1 × `set_param amp.tonestack_location` / `amp.master_vol_location` | 1 | ~150 ms | ✅ Shipped Session 29 cont 2 (Advanced-panel enums, BG-backed) |
 
 ## Multi-channel / scene-aware edits
 
