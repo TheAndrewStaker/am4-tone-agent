@@ -96,6 +96,7 @@ async function main(): Promise<void> {
     'reconnect_midi',
     'save_preset',
     'save_to_location',
+    'set_block_bypass',
     'set_block_type',
     'set_param',
     'set_params',

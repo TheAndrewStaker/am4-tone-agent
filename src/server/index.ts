@@ -43,6 +43,7 @@ import {
 } from '../protocol/params.js';
 import {
   buildSaveToLocation,
+  buildSetBlockBypass,
   buildSetBlockType,
   buildSetParam,
   buildSetPresetName,
@@ -684,6 +685,66 @@ server.registerTool('set_block_type', {
       type: 'text',
       text:
         `Sent block placement (slot ${pos} → ${displayName}). No ack within ` +
+        `${WRITE_ECHO_TIMEOUT_MS} ms — this is unusual.\n` +
+        `Sent (${bytes.length}B): ${toHex(bytes)}\n` +
+        formatAcklessHint(result.captured),
+    }],
+  };
+});
+
+server.registerTool('set_block_bypass', {
+  description: [
+    'Silence (bypass = true) or reactivate (bypass = false) a block on the',
+    'currently-active scene. A bypassed block passes its input through',
+    'unchanged — the block stays in the slot with all its params intact, it',
+    'just makes no sound. Common use: "mute the drive on the clean scene"',
+    '(switch to that scene first, then set_block_bypass drive true).',
+    'Scene-scoping is implicit — this writes the working-buffer state, and',
+    'the AM4 automatically saves it to whichever scene is active right now.',
+    'To configure bypass on a specific scene, issue switch_scene first and',
+    'then set_block_bypass; the tool does not accept a scene argument.',
+    'Block names (case-insensitive): "amp", "compressor", "geq", "peq",',
+    '"reverb", "delay", "chorus", "flanger", "rotary", "phaser", "wah",',
+    '"volpan", "tremolo", "filter", "drive", "enhancer", "gate". "none" is',
+    'rejected — an empty slot has no bypass state.',
+  ].join(' '),
+  inputSchema: {
+    block: z.string().describe(
+      'Block name (e.g. "amp", "drive", "reverb"). Rejects "none".',
+    ),
+    bypassed: z.boolean().describe(
+      'true = bypass (silence the block). false = activate.',
+    ),
+  },
+}, async ({ block, bypassed }) => {
+  const value = resolveBlockType(block);
+  if (value === undefined || value === BLOCK_TYPE_VALUES.none) {
+    const known = (Object.keys(BLOCK_TYPE_VALUES) as BlockTypeName[])
+      .filter((n) => n !== 'none')
+      .join(', ');
+    throw new Error(`Unknown or invalid block "${block}". Known: ${known}`);
+  }
+  const displayName = BLOCK_NAMES_BY_VALUE[value] ?? `0x${value.toString(16)}`;
+  const bytes = buildSetBlockBypass(value, bypassed);
+  const conn = ensureMidi();
+  const result = await sendAndAwaitAck(conn, bytes, isWriteEcho);
+  const stateWord = bypassed ? 'bypassed' : 'active';
+  if (result.acked) {
+    return {
+      content: [{
+        type: 'text',
+        text:
+          `Set ${displayName} to ${stateWord} on the active scene. AM4 ` +
+          `wire-acked the change. To change a different scene's bypass, ` +
+          `switch_scene first and re-issue.`,
+      }],
+    };
+  }
+  return {
+    content: [{
+      type: 'text',
+      text:
+        `Sent ${displayName} → ${stateWord}. No ack within ` +
         `${WRITE_ECHO_TIMEOUT_MS} ms — this is unusual.\n` +
         `Sent (${bytes.length}B): ${toHex(bytes)}\n` +
         formatAcklessHint(result.captured),

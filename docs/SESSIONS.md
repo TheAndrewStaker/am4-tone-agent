@@ -6,6 +6,171 @@ file is the chronological trail that reference is built from.
 
 ---
 
+## 2026-04-21 — Session 27 — HW-011 captures landed; HW-012 round-trip + two UX findings
+
+### HW-011 — captures complete, decode queued
+
+Founder captured all six session-23 pcapngs: three scene-channel writes
+(scene 2/3/4 Amp → B/C/D) and three scene-bypass writes (scene 2 Amp,
+scene 3 Drive, scene 4 Reverb). Tshark text dumps generated. Decode
+into `buildSetSceneChannel` + `buildSetSceneBypass` is the next action.
+
+HARDWARE-TASKS.md step text clarified before the session: the workflow
+now explicitly says *navigate to the target scene first, then start
+the capture* so scene-switch writes (already decoded as HW-001) don't
+pollute the goldens.
+
+### HW-012 — round-trip worked; two UX findings
+
+Round-trip of the Session 24 per-slot `channels` shape in `apply_preset`
+succeeded — 12 writes landed clean, block layout correct, per-channel
+amp values confirmed (channel A: Deluxe Verb Normal / gain 3; channel
+D: 1959SLP Normal / gain 8; reverb mix 30 on channel A). Underlying
+primitives are the same verified ones from Session 19, so no surprise.
+
+Two non-obvious findings surfaced from the conversational surface, both
+release-relevant:
+
+**Finding 1 — Claude needed explicit prompting to load the MCP tool.**
+First-turn behavior: Claude Desktop produced a spec-only response
+("here's the apply_preset call you'd need") and said *"I don't have
+the am4-tone-agent connected in this session."* The connector was
+attached the whole time. Founder nudged with *"i see the connector.
+why can't you?"* → Claude queried the deferred tool list, loaded the
+schema, and executed successfully.
+
+Two compounding causes:
+- **Deferred tool loading.** MCP connectors expose tools to the model as
+  names-only until their schemas are actively loaded into context. This
+  is a context-economy tradeoff (the same pattern every Claude Code
+  session runs under). The model is supposed to notice when a request
+  matches a deferred tool and load it, but the heuristic misfires.
+- **Project system prompt biased toward spec output.** The existing
+  prompt framed the assistant as a *"design and planning agent"* whose
+  primary responsibility was *"build detailed preset configurations."*
+  Natural reading: produce a spec. Never mentioned that an MCP
+  connector might be attached and should be used.
+
+Fix landed this session: `CLAUDE.md` § "Project System Prompt (for
+Claude Project)" rewritten. New prompt defaults to tool use, reserves
+spec-only output for explicit dry-run asks ("what would the params
+look like", "draft a preset I can review", "design a tone sheet
+without touching the hardware"), and tells the assistant to check the
+deferred tool list on any AM4 request. Founder needs to re-paste the
+updated prompt into the Claude.ai project settings.
+
+Open question — does this address Claude Desktop too, or only the
+Claude.ai web Project? The web Project system prompt is set by the
+founder; Claude Desktop has no user-configurable app-level prompt, so
+the only lever on Desktop behavior is the **MCP tool descriptions**
+(registered by the server at `src/server/index.ts`). An audit pass on
+those descriptions — making them assertive about when to call rather
+than just describing what they do — is queued as **P5-011** (below).
+Relevant to the non-technical end-user distribution plan: they won't
+be editing any prompt, so tool descriptions are the only surface.
+
+**Finding 2 — `apply_preset` response text overstates scene semantics.**
+Claude Desktop's response text after the successful apply_preset
+said *"Give it a strum on channel A for the clean tone, then flip to
+channel D and you should get that hot Plexi roar."* In reality the
+amp was left on channel D (the last channel walked), and scene 1 —
+the active scene — was showing channel D = 1959SLP.
+
+Root cause: `apply_preset` phase 1 writes block layout + per-channel
+values, but scene→channel pointer writes aren't decoded yet (that's
+HW-011, being worked this session). So there's no mechanism for the
+tool to say *"scene 1 should use channel A on amp."* All scenes
+inherit whatever channel the block was on when apply_preset finished —
+which, because channels walk A → B → C → D in canonical order, is
+always the highest-letter channel the user supplied values for.
+
+Two fixes, one immediate and one HW-011-dependent:
+- **Immediate.** Tighten `apply_preset`'s response text to report the
+  *actual* final active channel, not an idealized scene layout.
+  Added to BK-027's known-limitations list.
+- **HW-011-dependent.** Once bypass/scene-channel writes land, extend
+  `apply_preset` with a `scenes[].channels` and `scenes[].bypass` map
+  so the tool can explicitly configure each scene. Already planned in
+  BK-027 phase 2.
+
+### HW-011 decode — scene-bypass IS new, scene-channel is NOT
+
+Decoded the 6 HW-011 captures plus a 7th the founder added on request
+for the bypass-off side (`session-23-scene-2-amp-unbypass.pcapng`).
+The original hypothesis — "two new scene-level SET_FLOAT_PARAM writes
+with pidHigh encoding (scene index, block slot)" — is **wrong**. What
+actually happens:
+
+- **Scene→channel**: no new command. It's the existing channel-switch
+  (pidHigh `0x07D2`, value = float(channel index)). The AM4 is
+  stateful and scopes the write to whichever scene is currently
+  active. Same pattern HW-009 already proved for param writes.
+- **Scene→bypass**: IS a new decode. SET_PARAM at the block's own
+  pidLow, `pidHigh=0x0003`, action = WRITE, value = `float32(1.0)` to
+  bypass / `float32(0.0)` to activate. Still no scene index on the
+  wire — also self-scopes to the active scene. Same pidHigh across
+  amp / drive / reverb, so presumably across every bypass-capable
+  block type.
+
+AM4-Edit's capture traffic also contains a housekeeping pattern
+(action `0x0017` on `pidHigh=0x3E81`, zero payload, fires 2× before
+and 2× after every real write) that we don't need to emit — our
+builders match the real WRITE byte-exact without it.
+
+This is a nice simplification: instead of two new primitives
+(`buildSetSceneChannel`, `buildSetSceneBypass`), one new primitive
+(`buildSetBlockBypass`) plus a **composition** at the orchestrator
+layer (switch scene, then emit channel-switch + bypass per block).
+Phase 2 of BK-027 now has a concrete execution plan.
+
+### What landed this session
+
+- `src/protocol/setParam.ts` — new `buildSetBlockBypass(blockPidLow,
+  bypassed)` primitive. pidHigh `0x0003`. Symmetric float32 1.0/0.0
+  encoding. Rejects 0x0000 (empty slot has no bypass).
+- `scripts/verify-msg.ts` — 4 new byte-exact goldens: amp / drive /
+  reverb bypass-ON, amp bypass-OFF. **37/37 message-build cases
+  match.**
+- `src/server/index.ts` — new `set_block_bypass` MCP tool. Takes
+  `block: string` + `bypassed: boolean`. Tool count 16 → 17. Tool
+  description names the stateful-scoping rule explicitly (*"To
+  configure bypass on a specific scene, issue switch_scene first"*).
+- `scripts/smoke-server.ts` — expected-tools list updated to 17.
+  Smoke test green.
+- `README.md` — tool count updated to 17; row added to the cheat-
+  sheet.
+- `docs/SYSEX-MAP.md` — new §6h "Per-block Bypass Register" with the
+  full decode, byte-exact table, and stateful-scoping caveat. Cross-
+  referenced in the §7 Axe-Fx-II bypass note as a contrast (AM4's
+  shape is different).
+
+### Preflight
+
+`npm run preflight` — TypeScript clean, 33/33 verify-pack, 37/37
+verify-msg, 8/8 verify-echo, 44/44 verify-cache-params, smoke-server
+17/17 tools + all assertions green. HW round-trip of
+`set_block_bypass` deferred to a future session — not a release
+blocker since the goldens cover both states and the underlying
+SET_PARAM primitive is previously hardware-verified.
+
+### Backlog deltas (end-of-session)
+
+- **BK-010** — closed. Scene support in `apply_preset` is now
+  fully unblocked: scene-channel uses the existing channel-switch,
+  scene-bypass uses the new primitive, scene-name uses the existing
+  rename. All three primitives exist.
+- **BK-027 phase 2** — became the next concrete work item. Input
+  schema is spec'd already; execution order is: for each
+  `scenes[i]` with overrides → `switch_scene(i)` → channel-switch
+  per block → `set_block_bypass` per block → scene-name. Response
+  text also needs the HW-012 honesty fix (report actual final
+  active channel per block, not idealized scene layouts).
+- **HW-011** — ✅ archived (moved to bottom of HARDWARE-TASKS.md
+  with full decode summary).
+- **HW-012** — ✅ archived with both UX findings noted.
+
+---
+
 ## 2026-04-19 — Session 25 (cont 2) — P5-010 license + trademark hygiene
 
 Founder decided on Apache-2.0 for patent-retaliation protection.

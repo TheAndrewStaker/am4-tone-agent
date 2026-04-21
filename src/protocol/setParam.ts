@@ -325,6 +325,45 @@ export function buildSwitchScene(sceneIndex: number): number[] {
 }
 
 /**
+ * Per-block bypass register: pidHigh = 0x0003 on the block's own pidLow
+ * (amp = 0x003A, drive = 0x0076, reverb = 0x0042, etc.). Value is a
+ * float32: 1.0 = bypassed (silent), 0.0 = active.
+ *
+ * Scene-scoping is implicit. The AM4 is stateful — bypass writes land on
+ * whichever scene is active right now. To change scene N's bypass for a
+ * block, the caller switches scene first (via `buildSwitchScene(n)`),
+ * then emits this write. Same stateful-scoping rule that applies to
+ * channel switches and SET_PARAM writes (see HW-009 / Session 23).
+ *
+ * Decoded Session 27 from four session-23 captures: amp/drive/reverb
+ * bypass-on (float 1.0) and amp bypass-off (float 0.0). Byte-exact
+ * goldens in `verify-msg`.
+ */
+const BLOCK_BYPASS_PID_HIGH = 0x0003;
+
+/**
+ * Build a SET-BYPASS command that silences (`bypassed=true`) or activates
+ * (`bypassed=false`) the block whose pidLow is `blockPidLow` on the
+ * AM4's currently-active scene. `blockPidLow` is the block's own pidLow
+ * (see `BLOCK_TYPE_VALUES` in `blockTypes.ts`) — NOT a slot number.
+ * `0x0000` (the "none" value) is rejected since bypass has no meaning
+ * on an empty slot.
+ *
+ * Callers targeting a specific scene are responsible for issuing
+ * `buildSwitchScene(sceneIndex)` first; this function writes the block-
+ * level bypass register and inherits whichever scene the device is on.
+ */
+export function buildSetBlockBypass(blockPidLow: number, bypassed: boolean): number[] {
+  if (!Number.isInteger(blockPidLow) || blockPidLow <= 0 || blockPidLow > 0x3fff) {
+    throw new Error(`Block pidLow must be a positive 14-bit integer, got ${blockPidLow}.`);
+  }
+  return buildSetFloatParam(
+    { pidLow: blockPidLow, pidHigh: BLOCK_BYPASS_PID_HIGH },
+    bypassed ? 1.0 : 0.0,
+  );
+}
+
+/**
  * Build a SWITCH-PRESET command that loads preset location
  * `locationIndex` (0..103, A01..Z04) into the AM4's working buffer.
  * Same register family as the other preset-level commands

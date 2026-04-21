@@ -729,6 +729,72 @@ Engage block:  payload = B0 B1 FF 01 00 00 00 01
 Bypass block:  payload = B0 B1 FF 01 01 00 00 01
 ```
 
+Note: the above is the wiki-documented **Axe-Fx II** shape. The AM4's
+per-block bypass is a different shape — regular SET_PARAM at a dedicated
+pidHigh. See §6h below.
+
+---
+
+## 6h. Per-block Bypass Register 🟢
+
+**Decoded Session 27** from `session-23-scene-{2,3,4}-{amp,drive,reverb}-bypass`
+and `session-23-scene-2-amp-unbypass`. Toggles a block between active
+and bypassed on the currently-active scene. The write itself carries no
+scene index — the AM4 is stateful and scopes the bypass to whichever
+scene is active right now (same rule that applies to channel switches
+and SET_PARAM writes; see Session 23 / HW-009).
+
+### Address
+
+- **function** `0x01` (PARAM_RW).
+- **pidLow** = the block's own pidLow (amp=`0x003A`, drive=`0x0076`,
+  reverb=`0x0042`, delay=`0x0046`, etc. — see `BLOCK_TYPE_VALUES` in
+  `src/protocol/blockTypes.ts`). Confirmed identical across amp, drive,
+  and reverb captures — the `0x0003` pidHigh is shared by every block
+  type that can be bypassed.
+- **pidHigh** `0x0003` — per-block bypass flag.
+- **action** `0x0001` (WRITE).
+
+### Value
+
+4-byte IEEE 754 float32 little-endian, septet-packed per §6b:
+- **`1.0`** (raw `00 00 80 3F`, packed `00 00 10 03 78`) — block is
+  **bypassed** (silent, but still in the slot with all params intact).
+- **`0.0`** (raw `00 00 00 00`, packed `00 00 00 00 00`) — block is
+  **active** (audible).
+
+### Captured goldens (byte-exact in `verify-msg`)
+
+| Capture | Built by | Wire |
+|---------|----------|------|
+| Amp bypass ON (scene 2) | `buildSetBlockBypass(0x003A, true)` | `F0 00 01 74 15 01 3A 00 03 00 01 00 00 00 04 00 00 00 10 03 78 46 F7` |
+| Drive bypass ON (scene 3) | `buildSetBlockBypass(0x0076, true)` | `F0 00 01 74 15 01 76 00 03 00 01 00 00 00 04 00 00 00 10 03 78 0A F7` |
+| Reverb bypass ON (scene 4) | `buildSetBlockBypass(0x0042, true)` | `F0 00 01 74 15 01 42 00 03 00 01 00 00 00 04 00 00 00 10 03 78 3E F7` |
+| Amp bypass OFF (scene 2) | `buildSetBlockBypass(0x003A, false)` | `F0 00 01 74 15 01 3A 00 03 00 01 00 00 00 04 00 00 00 00 00 00 2D F7` |
+
+### Scene-scoping is the caller's responsibility
+
+The wire write is scene-agnostic. To bypass a block on scene N:
+
+1. `buildSwitchScene(n)` — select the target scene.
+2. `buildSetBlockBypass(blockPidLow, bypassed)` — write. The AM4 stores
+   the new bypass flag against scene N internally.
+
+This is the same pattern as scene-to-channel mapping (§Session 27 — no
+dedicated scene-channel command; channel switch under an active scene
+self-scopes) and channel-scoped param writes (HW-009). It's the
+consequence of the AM4's stateful model: scenes are selectors, not
+containers of their own param state.
+
+### Observation — 0x0017 "action" traffic (same as §6c)
+
+Every bypass capture is bracketed by the same `action=0x0017,
+pidHigh=0x3E81, payload=0` bursts seen around block-placement writes:
+two fires 15–20 ms apart BEFORE the real WRITE, two more fires AFTER.
+AM4-Edit appears to be state-refreshing around every write. Not
+required by the protocol — our builder emits only the real WRITE and
+that matches byte-exact.
+
 ---
 
 ## 7. Parameter Value Encoding 🟡

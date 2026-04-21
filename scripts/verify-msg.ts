@@ -4,6 +4,7 @@
  */
 import {
   buildSaveToLocation,
+  buildSetBlockBypass,
   buildSetBlockType,
   buildSetFloatParam,
   buildSetParam,
@@ -197,6 +198,31 @@ const cases: { label: string; built: number[]; expected: string }[] = [
     label: 'buildSetSceneName(3, "lead") — matches session-22-rename-scene-4',
     built: buildSetSceneName(3, 'lead'),
     expected: 'f000017415014e013a000c00000024000000000003314a613208040201004020100804020100402010080402010040201008040201004020100067f7',
+  },
+  // Session 27: per-block bypass. pidHigh=0x0003 on the block's own pidLow,
+  // value = float32(1.0) to bypass, float32(0.0) to activate. Scene-scoping
+  // is implicit — these captures were taken with the target scene pre-selected.
+  // Captures: session-23-scene-{2,3,4}-{amp,drive,reverb}-bypass +
+  // session-23-scene-2-amp-unbypass.
+  {
+    label: 'buildSetBlockBypass(amp, true) — matches session-23-scene-2-amp-bypass',
+    built: buildSetBlockBypass(BLOCK_TYPE_VALUES.amp, true),
+    expected: 'f000017415013a000300010000000400000010037846f7',
+  },
+  {
+    label: 'buildSetBlockBypass(drive, true) — matches session-23-scene-3-drive-bypass',
+    built: buildSetBlockBypass(BLOCK_TYPE_VALUES.drive, true),
+    expected: 'f000017415017600030001000000040000001003780af7',
+  },
+  {
+    label: 'buildSetBlockBypass(reverb, true) — matches session-23-scene-4-reverb-bypass',
+    built: buildSetBlockBypass(BLOCK_TYPE_VALUES.reverb, true),
+    expected: 'f000017415014200030001000000040000001003783ef7',
+  },
+  {
+    label: 'buildSetBlockBypass(amp, false) — matches session-23-scene-2-amp-unbypass',
+    built: buildSetBlockBypass(BLOCK_TYPE_VALUES.amp, false),
+    expected: 'f000017415013a00030001000000040000000000002df7',
   },
 ];
 

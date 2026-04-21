@@ -49,9 +49,9 @@ LLM-generation per link).
 |---|---|---|---|---|
 | *"Change amp gain to 6 on channel B"* | 1 × `set_param(channel: "B")` | 2 (switch + write) | ~200 ms | ✅ Shipped session 22 |
 | *"Configure channel A with gain 3, channel B with gain 6"* | 1 × `set_params` with per-write `channel` | 4 (2 switch + 2 write) | ~300 ms | ✅ Shipped session 22 |
-| *"Change amp gain on scene 2"* | 1 × `set_param` with scene→channel lookup | 2–3 | ~250 ms | ⚠ Requires HW-011 + BK-025 decode (Claude needs to know scene 2's channel for Amp before picking which channel to target) |
-| *"Make scene 2 bypass the reverb"* | 1 × scene-bypass write | 1 | ~150 ms | ⚠ HW-011 decode (scene→bypass register) |
-| *"Point scene 3 at amp channel C"* | 1 × scene-channel write | 1 | ~150 ms | ⚠ HW-011 decode (scene→channel register) |
+| *"Change amp gain on scene 2"* | 1 × `set_param` with scene→channel lookup | 2–3 | ~250 ms | ⚠ Still requires BK-025 (scene-state read-back) so Claude can discover scene 2's channel mapping without a dedicated write. Post-BK-025: ✅ |
+| *"Make scene 2 bypass the reverb"* | `switch_scene(1)` + `set_block_bypass(reverb, true)` | 2 | ~200 ms | ✅ Shipped Session 27 — scene-bypass is scene-scoped via `switch_scene` + new `set_block_bypass` primitive (no dedicated scene-bypass register). |
+| *"Point scene 3 at amp channel C"* | `switch_scene(2)` + `set_param(amp.channel, C)` | 2 | ~200 ms | ✅ Shipped Session 27 — no dedicated scene-channel register; scoping is stateful via active scene. |
 
 ## Preset composition (single preset from scratch)
 
@@ -60,7 +60,7 @@ LLM-generation per link).
 | *"Build a clean preset with comp/amp/delay/reverb"* | 1 × `apply_preset` | ~10 | ~600 ms | ✅ |
 | *"Build the above with amp gain 6, delay 350 ms, reverb mix 30"* | 1 × `apply_preset` (with params) | ~13 | ~800 ms | ✅ |
 | *"Set up all 4 amp channels with different types and gains"* | 1 × `apply_preset` with `slots[i].channels` | ~20 | ~1.1 s | ⚠ BK-027 phase 1 (kitchen-sink apply_preset, no new decodes — shippable now) |
-| *"Build a preset with clean/crunch/rhythm/solo scenes on channels A/B/C/D"* | 1 × `apply_preset` kitchen-sink | ~40–60 | ~2.5 s (warn user) | ⚠ BK-027 phase 2 + HW-011 (scene→channel + scene→bypass decodes) |
+| *"Build a preset with clean/crunch/rhythm/solo scenes on channels A/B/C/D"* | 1 × `apply_preset` kitchen-sink | ~40–60 | ~2.5 s (warn user) | ⚠ BK-027 phase 2 (all decodes landed Session 27; only the handler wiring remains — single-session work) |
 | *"Copy preset A03 and tweak the reverb"* | 1 × `switch_preset` + 1 × `set_param` + 1 × `save_preset` | 3 | ~500 ms chained (3 MCP calls × ~3 s LLM-gen ≈ ~10 s total) | ⚠ Chain length crosses the 5-MCP-call warning threshold; tolerable but not great |
 
 ## Persistence

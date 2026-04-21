@@ -19,7 +19,8 @@
 > collection (replaced by the Hydrasynth Explorer) and is now a
 > community-support item with no founder-hardware validation.
 >
-> Last updated: 2026-04-19
+> Last updated: 2026-04-21 (Session 27 — HW-011 captures landed,
+> HW-012 round-tripped; see archive for both.)
 
 ## Status key
 
@@ -37,93 +38,11 @@ Claude picks up from there and moves the item to ⏳ or ✅.
 
 ## Pending — next up
 
-Do these in order; HW-011 is the critical-path item.
-
-### HW-011 — Capture scene→channel and scene→bypass assignments (BK-010 + BK-027) 🔜
-
-- **For:** the two remaining undecoded scene-level writes — (a) "scene N
-  points Amp at channel X" and (b) "scene N bypasses block Y." Once
-  decoded, BK-027's kitchen-sink `apply_preset` can finish the full
-  preset model end-to-end (including the multi-scene / multi-channel
-  example in the session 22 conversation).
-- **Why this is the critical gap.** The tools today can build block
-  layout (`apply_preset`), fill channel values (`set_params` with per-
-  write channel), switch scenes, and rename scenes. What they *cannot*
-  do: tell a scene which channel each block should use, or which blocks
-  to bypass on that scene. Without those writes, a preset's four scenes
-  all inherit whatever defaults the preset was initialized with —
-  usually all-channel-A, no bypass — so the per-channel tone variations
-  you went to the trouble of configuring never actually play.
-
-- **Steps (two captures in one session):**
-  1. **Scene-channel capture.** Load Z04 on the AM4. Open AM4-Edit's
-     scene editor. Pick scene 2 and change its Amp-block channel from
-     **A** to **B** (via whatever UI the editor exposes — dropdown or
-     per-scene channel selector). Save as
-     `samples/captured/session-23-scene-2-amp-channel-b.pcapng`.
-  2. Repeat for scene 3 Amp → C, scene 4 Amp → D (three captures total
-     — scenes 2/3/4, each with a distinct non-default channel). Save
-     as `session-23-scene-{3,4}-amp-channel-{c,d}.pcapng`.
-  3. **Scene-bypass capture.** Still on scene 2, toggle Amp's bypass
-     from active → bypassed. Save as
-     `samples/captured/session-23-scene-2-amp-bypass.pcapng`.
-  4. Repeat for Drive (scene 3 drive bypass) and Reverb (scene 4
-     reverb bypass) — 3 bypass captures so we can confirm the command
-     generalizes across blocks.
-- **Expected decode output:**
-  - Scene-channel write: most likely `SET_FLOAT_PARAM` at
-    `pidLow=0x00CE` with a `pidHigh` that encodes (scene index,
-    block slot). Byte-exact goldens per capture. `buildSetSceneChannel
-    (sceneIndex, block, channelIndex)` in `src/protocol/setParam.ts`.
-  - Scene-bypass write: similar shape, different action/pidHigh. May
-    turn out to be the same register as scene-channel with a bit flag
-    difference. `buildSetSceneBypass(sceneIndex, block, bypassed)`.
-- **Also captured for free during this session:** the 64-byte
-  write-echo payload for each change, which feeds **BK-025**
-  (scene-state read-back) by giving us known-ground-truth scene
-  states to diff against.
-- **Scope:** AM4 only (Axe-Fx II / other gear protocols handled
-  separately). Session completes in one hardware pass — ~15 min of
-  clicking + capture.
-
-### HW-012 — Round-trip `apply_preset` with the new per-slot `channels` shape 🔜
-
-- **For:** BK-027 phase 1 (Session 24). The new shape produces the same
-  primitive writes (channel-switch + SET_PARAM) that Session 19 already
-  verified on hardware, but an end-to-end hardware test confirms the
-  orchestration across channels in one call — ordering, per-channel
-  param landing, and `lastKnownChannel` tracking.
-- **Why this isn't automatic.** `apply_preset`'s goldens are captured
-  at the protocol layer (byte-exact against known writes). The channels
-  field stitches several such writes together; stitching-layer bugs
-  (wrong letter mapping, missing channel switch before params, param
-  order mismatch) won't fail the goldens. One hardware session
-  confirms the orchestration.
-- **Steps:**
-  1. Restart Claude Desktop (picks up the extended `apply_preset`
-     schema — no new tool count, same 16 tools).
-  2. Load Z04 on the AM4. Navigate to clear / known state.
-  3. Ask Claude *"build me a preset with amp on slot 1: channel A at
-     gain 3 using Deluxe Verb Normal, and channel D at gain 8 using
-     1959SLP Normal. Reverb on slot 2 with mix 30 on channel A."*
-  4. Observe a **single** `apply_preset` call (not a sequence). Verify
-     on the AM4:
-     - Slot 1 shows amp, slot 2 shows reverb.
-     - Switching the AM4's Amp channel knob between A and D shows the
-       two distinct amp types + gains.
-     - Reverb mix 30 on whichever channel is active.
-  5. Optional: ask *"now switch the amp to channel A"* (or use the
-     hardware knob) and verify gain 3 is there; then channel D and
-     verify gain 8.
-- **Expected outcome:** preset plays correctly with per-channel
-  tonality, zero follow-up tool calls needed after the initial
-  `apply_preset`. If the channel walk misbehaves (e.g. channel D
-  receives channel A's values), capture the tool response text and
-  compare the prepared-writes ✓/? lines against the user's intent.
-- **Not a blocker for release:** this is validation of a
-  convenience-layer change, not a protocol decode. The shape can
-  safely ship pre-test since the underlying writes are all
-  previously-verified primitives.
+**No AM4 hardware tasks pending.** Session 27 decoded HW-011 and
+archived HW-012. Active AM4 work (BK-027 phase 2 — scenes in
+`apply_preset`; P5-011 — MCP tool-description audit) is tool-side
+and doesn't need device time. When new HW-NNN items arise they land
+here.
 
 ---
 
@@ -380,6 +299,60 @@ highest numbers.
   awareness, a user asking Claude to tweak a tone can inadvertently
   modify channel A across multiple scenes. Tool-UX redesign
   tracked in **P1-012 Channel-aware param writes** (see backlog).
+
+### HW-011 — Capture scene→channel and scene→bypass assignments ✅
+
+- **Captured 2026-04-21** — 6 pcapngs in `samples/captured/`:
+  `session-23-scene-{2,3,4}-amp-channel-{b,c,d}.pcapng` and
+  `session-23-scene-{2,3,4}-{amp,drive,reverb}-bypass.pcapng`.
+  Founder added a 7th capture (`session-23-scene-2-amp-unbypass.pcapng`)
+  mid-decode to give verify-msg symmetric goldens for bypass-OFF.
+- **Decoded Session 27 — hypothesis was wrong, simpler than expected.**
+  - **Scene→channel**: no new primitive. It's the existing channel-
+    switch at `pidHigh=0x07D2` (decoded Session 08), value =
+    float(channel index). The AM4 is stateful and scopes the write
+    to whichever scene is active. Same rule as HW-009's channel-
+    scoped param writes.
+  - **Scene→bypass**: new decode. SET_PARAM at the block's own
+    pidLow, `pidHigh=0x0003`, value = float32(1.0) to bypass /
+    float32(0.0) to activate. Shared across amp / drive / reverb
+    — same register for every bypass-capable block. No scene index
+    on the wire; also self-scopes to the active scene.
+  - New primitive `buildSetBlockBypass(blockPidLow, bypassed)` and
+    MCP tool `set_block_bypass` shipped. Byte-exact goldens for 4
+    states (amp/drive/reverb bypass-ON + amp bypass-OFF) in
+    `verify-msg`. SYSEX-MAP.md §6h has the full decode. Tool count
+    16 → 17.
+  - **Bonus AM4-Edit observation** — the `action=0x0017,
+    pidHigh=0x3E81` housekeeping pattern (2 reads before, 2 reads
+    after every real WRITE) now confirmed across bypass captures
+    too, not just block-placement. Still not required to emit.
+- BK-010 closed as a result; BK-027 phase 2 is unblocked.
+
+### HW-012 — Round-trip `apply_preset` with the per-slot `channels` shape ✅
+
+- **Tested 2026-04-21** — 12-write `apply_preset` round-trip landed
+  clean on hardware. Block layout + per-channel amp values
+  (channel A: Deluxe Verb Normal / gain 3; channel D: 1959SLP
+  Normal / gain 8) + reverb mix 30 all confirmed on-device. Phase
+  1 of BK-027 is now hardware-verified.
+- **Finding 1 — Claude Desktop deferred-tool miss.** Initial user
+  prompt produced a spec-only response ("I don't have the
+  am4-tone-agent connected in this session") even though the
+  connector was attached. User had to nudge ("i see the connector")
+  before Claude loaded the tool schemas and executed. Root cause is
+  Claude Desktop's deferred tool-schema loading combined with a
+  Claude.ai Project system prompt biased toward spec output. Fix
+  queued as **P5-011** (MCP tool-description audit) — the lever on
+  Claude Desktop behavior is the tool descriptions themselves, since
+  Desktop has no user-configurable system prompt.
+- **Finding 2 — `apply_preset` response text overstates scene
+  semantics.** Response narrated "strum channel A for the clean
+  tone, then flip to channel D" but scene 1 was actually on channel
+  D (the last channel the A→B→C→D walk wrote to). Until scene→channel
+  writes compose into `apply_preset` (BK-027 phase 2), all scenes
+  inherit the end-of-walk channel. Response-text honesty fix lands
+  alongside phase 2.
 
 ---
 

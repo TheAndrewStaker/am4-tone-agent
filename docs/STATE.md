@@ -5,7 +5,28 @@
 > hardware tasks (USB captures, round-trip tests, reference dumps) live
 > in **`docs/HARDWARE-TASKS.md`** — check that file alongside this one at
 > session start.
-> Last updated: **2026-04-20** (Session 26 cont — Unit-type extension:
+> Last updated: **2026-04-21** (Session 27 — Per-block bypass decoded
+> from the 6 HW-011 captures + the HW-012 round-trip findings.
+> `buildSetBlockBypass(blockPidLow, bypassed)` at pidHigh=0x0003,
+> float32(1.0) = bypass, float32(0.0) = activate. Shared across every
+> block type that can be bypassed (amp/drive/reverb confirmed on
+> hardware; others share the register by structural symmetry). Scene-
+> scoping is stateful — the caller switches to the target scene first,
+> then emits the write. No dedicated scene-channel write either; the
+> existing channel-switch scopes to the active scene the same way.
+> This collapses the originally-hypothesized two new primitives
+> (`buildSetSceneChannel`, `buildSetSceneBypass`) into one new
+> primitive + a composition at the orchestrator layer. Four byte-exact
+> goldens landed (amp/drive/reverb bypass-ON + amp bypass-OFF) — all
+> 37/37 verify-msg green. New MCP tool `set_block_bypass`; tool count
+> 16 → 17. BK-010 closed (superseded by BK-027 phase 2 + this new
+> primitive). HW-011 archived. HW-012 archived with two findings —
+> Claude Desktop tool-discovery miss (P5-011) and apply_preset
+> response-text overstating scene semantics (fix queued in BK-027
+> phase 2). Founder re-paste of Claude.ai Project prompt skipped —
+> founder uses Claude Desktop only, so the real lever is the
+> MCP-tool-description audit (P5-011). Preflight green.)
+> Prior context (Session 26 cont — Unit-type extension:
 > 9 more params unlocked. Added `hz` and `seconds` units to the
 > `Unit` union (display = internal, scale 1 — semantic labels matter
 > so tool descriptions don't misread 3 Hz as 3 dB). Extended
@@ -173,17 +194,26 @@ float32. One open question remains before the IR can cover full presets:
 
 ## The single next action
 
-**Tomorrow morning (founder, hardware):** Run **HW-011** (scene→channel
-+ scene→bypass captures, 6 pcapngs) and **HW-012** (round-trip the new
-per-slot `channels` shape in `apply_preset`). Full steps live in
-`docs/HARDWARE-TASKS.md` at the top under "Pending — next up."
+**BK-027 phase 2 — scenes support in `apply_preset`.** HW-011 decoded
+(bypass = WRITE at pidHigh=0x0003 / float32; scene-channel = existing
+channel-switch under an active scene). Compose at the orchestrator
+layer: for each `scenes[i]` with overrides, emit `switch_scene(i)`
+→ channel-switch per block (`scenes[i].channels`) → `set_block_bypass`
+per block (`scenes[i].bypass`). The input schema and execution order
+are already spec'd in `04-BACKLOG.md` §BK-027 "Proposed shape." Also
+fold in the apply_preset response-text honesty fix from HW-012
+(report actual final active-channel-per-block, don't narrate
+idealized scene layouts).
 
-**After HW-011 lands:** decode the two scene-level writes into
-`buildSetSceneChannel(sceneIndex, block, channelIndex)` +
-`buildSetSceneBypass(sceneIndex, block, bypassed)` with byte-exact
-goldens. That closes BK-010 and unlocks BK-027 phase 2 — extending
-`apply_preset` to take a `scenes: [...]` array for full multi-scene
-preset builds in one call.
+**Also release-gate work** — **P5-011 MCP tool-description audit**.
+HW-012 proved Claude Desktop falls back to spec-only output when the
+deferred tool schemas aren't actively loaded. The Claude.ai Project
+prompt fix doesn't help Desktop users (Desktop has no app-level
+prompt surface). The lever is the tool descriptions in
+`src/server/index.ts`. Audit pass: rewrite every state-changing tool's
+description lead to be a call-to-action ("Use this tool to …") and
+explicitly reject the spec-only fallback unless the user asks for a
+dry run. Full rubric in 04-BACKLOG.md §P5-011.
 
 **Remaining AM4-depth queue (non-HW, gates Wave 1 device expansion
 per `memory/feedback_am4_depth_gates_wave_expansion.md`):**

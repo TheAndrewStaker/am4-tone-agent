@@ -46,7 +46,7 @@ Once connected, Claude can:
   Klon?"* / *"Which amp on the AM4 is inspired by a Matchless DC-30?"*
 - **Switch presets.** *"Load A01."*
 
-Under the hood Claude picks one of 16 tools (`apply_preset`,
+Under the hood Claude picks one of 17 tools (`apply_preset`,
 `set_param`, `save_preset`, `switch_scene`, `lookup_lineage`, …) and
 sends SysEx to the device. Tool round-trips land in roughly 30–60 ms;
 whole-preset builds take under a second.
@@ -161,7 +161,7 @@ If step 3 works, you're done. Move on to building full presets.
 
 ---
 
-## The 16 tools at a glance
+## The 17 tools at a glance
 
 | Tool | What it does |
 |---|---|
@@ -169,6 +169,7 @@ If step 3 works, you're done. Move on to building full presets.
 | `set_param` | Write one parameter (amp gain, reverb mix, …). |
 | `set_params` | Batch write. Validates the whole batch before any MIDI leaves. |
 | `set_block_type` | Place a block (amp, drive, reverb, …) in a signal-chain slot. |
+| `set_block_bypass` | Silence / activate a block on the currently-active scene. |
 | `save_to_location` | Persist the working buffer to a preset location (gated to Z04 until factory-safety ships). |
 | `set_preset_name` | Rename the working-buffer preset. |
 | `save_preset` | One-shot rename + save. |
