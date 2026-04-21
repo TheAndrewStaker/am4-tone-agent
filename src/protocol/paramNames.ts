@@ -50,8 +50,23 @@ export type ParamNameEntry =
   | string
   | { readonly name: string; readonly unit?: Unit; readonly displayMin?: number; readonly displayMax?: number };
 
+// Universal per-block output Balance at cache id=2 — signature
+// (a=-1, b=1, c=100) across every confirmed block. Blocks Guide §347
+// documents Balance as a standard block-level parameter that pans
+// the block's output between left and right. Requires the
+// `bipolar_percent` unit (display -100..+100, internal -1..+1,
+// scale 100) which generator default for c=100 would misclassify
+// as plain `percent` (0..100).
+const BALANCE: ParamNameEntry = {
+  name: 'balance',
+  unit: 'bipolar_percent',
+  displayMin: -100,
+  displayMax: 100,
+};
+
 export const PARAM_NAMES: Readonly<Record<string, Readonly<Record<number, ParamNameEntry>>>> = {
   amp: {
+    2: BALANCE,
     10: 'type',
     11: 'gain',
     12: 'bass',
@@ -70,6 +85,7 @@ export const PARAM_NAMES: Readonly<Record<string, Readonly<Record<number, ParamN
     15: 'presence',
   },
   drive: {
+    2: BALANCE,
     10: 'type',
     11: 'drive',
     // AM4 Owner's Manual line 1330: "Page Right and dial in Drive, Tone,
@@ -83,6 +99,7 @@ export const PARAM_NAMES: Readonly<Record<string, Readonly<Record<number, ParamN
   },
   reverb: {
     1: 'mix',
+    2: BALANCE,
     10: 'type',
     // Blocks Guide §Reverb Basic Page: "Time — Sets the decay time."
     // Cache 0x0B is 0.1..100 seconds, c=1 (raw passthrough). Needs the
@@ -100,6 +117,7 @@ export const PARAM_NAMES: Readonly<Record<string, Readonly<Record<number, ParamN
     // different Mix Law compared to other blocks" — same param, just
     // different internal curve; still the wet/dry knob.
     1: 'mix',
+    2: BALANCE,
     10: 'type',
     12: 'time',
   },
@@ -115,33 +133,40 @@ export const PARAM_NAMES: Readonly<Record<string, Readonly<Record<number, ParamN
   // signature. Depth is a percent knob at a distinct pidHigh per block.
   chorus: {
     1: 'mix',
+    2: BALANCE,
     10: 'type',
     12: { name: 'rate', unit: 'hz', displayMin: 0.1 },
     14: 'depth',
   },
   flanger: {
     1: 'mix',
+    2: BALANCE,
     10: 'type',
     11: { name: 'rate', unit: 'hz', displayMin: 0.05 },
     13: 'depth',
   },
   phaser: {
     1: 'mix',
+    2: BALANCE,
     10: 'type',
     12: { name: 'rate', unit: 'hz', displayMin: 0.1 },
   },
   wah: {
+    2: BALANCE,
     10: 'type',
   },
   compressor: {
     1: 'mix',
+    2: BALANCE,
     19: 'type',
   },
   geq: {
+    2: BALANCE,
     20: 'type',
   },
   filter: {
     1: 'mix',
+    2: BALANCE,
     10: 'type',
     // Blocks Guide §Filter: Frequency is the filter cutoff (20..20000 Hz
     // at cache-c=1 raw). Universal control for every filter type.
@@ -149,6 +174,7 @@ export const PARAM_NAMES: Readonly<Record<string, Readonly<Record<number, ParamN
   },
   tremolo: {
     1: 'mix',
+    2: BALANCE,
     10: 'type',
     // Blocks Guide §Tremolo: Rate sets the modulation speed (0.2..20 Hz
     // at cache-c=1 raw). Depth is a percent knob.
@@ -157,13 +183,16 @@ export const PARAM_NAMES: Readonly<Record<string, Readonly<Record<number, ParamN
   },
   enhancer: {
     1: 'mix',
+    2: BALANCE,
     // AM4-Edit labels this "Mode" but we keep `type` for cross-block consistency.
     14: 'type',
   },
   gate: {
+    2: BALANCE,
     19: 'type',
   },
   volpan: {
+    2: BALANCE,
     // The Volume-vs-Auto-Swell selector. Registered as `volpan.mode` in
     // KNOWN_PARAMS for historical reasons — keep the name stable.
     15: 'mode',

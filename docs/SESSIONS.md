@@ -6,6 +6,89 @@ file is the chronological trail that reference is built from.
 
 ---
 
+## 2026-04-21 — Session 28 cont 2 — P1-012 closed + second unit-extension pass
+
+### P1-012 formally closed (Shape 1 + 2 long since shipped)
+
+Audit pass on the backlog: Shape 1 (transparent channel-in-response
+via `channelStatusLine` + `lastKnownChannel` cache) and Shape 2
+(explicit `channel?` arg on `set_param` / `set_params` /
+`apply_preset`) both already live across Sessions 22–28 — the
+STATE.md teaser was stale. Backlog updated to reflect shipped
+status; Shape 3 (scene-first tool) + `read_block_channel` helper
+stay deferred (blocked on BK-025 scene-state read-back + BK-008
+READ-response format, both parked as research items).
+
+No code change — documentation-only cleanup.
+
+### Second unit-extension pass
+
+**Unit union + DISPLAY_TO_INTERNAL extended.** Added three new
+unit tags to `src/protocol/params.ts`:
+
+- `bipolar_percent` — display -100..+100%, internal -1..+1
+  (scale 100). For block-output Balance and stereo-pan knobs.
+- `count` — display = internal integer. For voices/stages/taps
+  counts. Infrastructure only this pass — no params registered
+  yet, candidates named in follow-up backlog item.
+- `semitones` — display = internal integer. For pitch shift.
+  Infrastructure only.
+
+Scale factor `1` on `count` / `semitones` means wire math is
+identical to `db` / `hz` / `seconds`; the distinct tag earns its
+keep on the LLM side so tool descriptions can label values
+correctly ("set rate to 3" = 3 Hz when unit=hz; "8 voices" = count,
+not 8 dB).
+
+**Universal `{block}.balance` registered across 15 confirmed blocks.**
+Blocks Guide §347: *"Every block outputs both left and right
+signals. As you adjust to the left or right, the opposite channel
+[is reduced]."* Confirmed as a block-level parameter at lines 899
+(Amp), 1233 (Chorus), 1430 (Flanger), 1733 (Delay), 1883 (Phaser),
+1948 (Volume/Pan). Cache signature identical across every confirmed
+block: id=2, a=-1, b=1, c=100 — 15 records, one pattern.
+
+Implementation:
+
+1. Hand-author 15 entries in `KNOWN_PARAMS` (amp / compressor / geq /
+   reverb / delay / chorus / flanger / phaser / wah / tremolo /
+   filter / drive / enhancer / gate / volpan).
+2. `paramNames.ts` gets a shared `BALANCE: ParamNameEntry` constant
+   (object-form override: unit=bipolar_percent, displayMin=-100,
+   displayMax=100 — otherwise the generator default for c=100 would
+   misclassify as `percent`).
+3. Run `npm run gen-params` → cacheParams.ts picks up 15 new
+   entries matching the hand-authored ones byte-for-byte.
+4. `verify-cache-params` 59/59 (was 44/44) confirms no drift.
+
+`list_params` catalog grows from 52 lines to 67. All 15 balance
+entries remain Session D hardware-spot-check-pending per the P1-010
+plan, but structural evidence across 15 independent blocks with
+identical signatures is very strong.
+
+### Preflight
+
+37/37 verify-msg, 16/16 verify-pack, 8/8 verify-echo, 59/59
+verify-cache-params, 17 tools, 16 apply_preset smokes +
+list_params live-confirmation guard. All green.
+
+### Follow-ups
+
+- **Count / semitones naming.** Cache candidates identified in this
+  session's scan — `phaser.stages` (id=22, 0..11), `delay.voices/
+  taps` (id=64, 0..24), `reverb.shimmer_shift_1/2` (ids 56/57,
+  ±24 semitones), `drive.bits` (id=24, 0..24). Each needs a Blocks-
+  Guide cross-reference before naming. Tracked in STATE.md's
+  AM4-depth queue item 4.
+- **Advanced-controls capture session** (STATE.md queue item 2) —
+  hardware captures to disambiguate ambiguous knob_0_10 records.
+- **HW-013 scenes[] round-trip** — founder-owed end-to-end test of
+  the BK-027 phase 2 orchestrator.
+- **P5-011 item 5 manual smoke** — founder-owed Claude-Desktop
+  first-turn-tool-call check.
+
+---
+
 ## 2026-04-21 — Session 28 cont — P5-011 items 1 + 4 shipped
 
 Release-gate tool-description audit. Items (1) call-to-action lead and

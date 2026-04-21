@@ -5,7 +5,25 @@
 > hardware tasks (USB captures, round-trip tests, reference dumps) live
 > in **`docs/HARDWARE-TASKS.md`** — check that file alongside this one at
 > session start.
-> Last updated: **2026-04-21** (Session 28 cont — P5-011 items 1
+> Last updated: **2026-04-21** (Session 28 cont 2 — P1-012 formally
+> closed + second unit-extension pass launched. P1-012 Shape 1
+> (transparent channel-in-response) and Shape 2 (explicit `channel?`
+> arg on `set_param` / `set_params` / `apply_preset`) were both
+> already live across Sessions 22–28; backlog entry updated to reflect
+> shipped status, Shape 3 + read-helper stay deferred on BK-025 /
+> BK-008. Second unit-extension pass: added `bipolar_percent` /
+> `count` / `semitones` to the `Unit` union + `DISPLAY_TO_INTERNAL`,
+> then leveraged `bipolar_percent` to register the universal per-
+> block output Balance parameter across all 15 confirmed blocks —
+> 15 new params (now 59 hand-authored, up from 44), cache id=2,
+> signature -100..+100%, backed by Blocks Guide §347 + 899 + 1233 +
+> 1430 + 1733 + 1883. `count` / `semitones` land as typing
+> infrastructure only for now — cache has candidates (phaser stages,
+> delay voices, reverb shimmer shifts, drive bit depth) but naming
+> needs more Blocks-Guide cross-referencing. `list_params` catalog
+> grows 52 → 67 lines. verify-cache-params 59/59 byte-match.
+> Preflight green.)
+> Prior context (Session 28 cont — P5-011 items 1
 > and 4 shipped. (1) Every mutation tool description now opens with
 > the uniform *"Use this tool to {X} on the user's AM4. Do not
 > produce a written spec instead of calling this tool unless the
@@ -252,20 +270,28 @@ check and can't be done from the tool layer.
 **Remaining AM4-depth queue (non-HW, gates Wave 1 device expansion
 per `memory/feedback_am4_depth_gates_wave_expansion.md`):**
 
-1. **P1-012 channel-aware param writes.** Release-critical UX gap
-   surfaced by HW-009 (param writes hit whichever channel is active,
-   silently cross-modifying other scenes). Add a `channel?` arg to
-   `set_param`/`set_params` so the tool switches channel first when
-   specified. Spec in 04-BACKLOG.md.
+1. **P1-012 channel-aware param writes.** ✅ Shapes 1 + 2 shipped
+   (Sessions 22–28). Shape 3 (scene-first tool) + read-helper
+   remain deferred on BK-025 / BK-008.
 2. **Advanced-controls capture session** (new HW-NNN, ~20 min).
    Covers ambiguous knob_0_10 records in the Amp cache — Master,
    Depth, Output Boost — that the Blocks Guide names but can't be
    structurally disambiguated. Also the remaining Feedback knobs per
    block. Queue a new HW entry before running.
-3. **Second unit-extension pass.** Add `bipolar_percent` (balance),
-   `count` (diode quantity, number-of-springs), `semitones` (pitch
-   shift). Unlocks ~15–20 more params across blocks with no captures
-   required.
+3. **Second unit-extension pass.** ✅ Infrastructure landed
+   Session 28 cont 2 — `bipolar_percent` / `count` / `semitones`
+   added to the `Unit` union. `bipolar_percent` used immediately to
+   register 15 new `{block}.balance` params. `count` / `semitones`
+   stay as typing-only until their candidate params (phaser stages,
+   delay voices, reverb shimmer, drive bit depth) get named against
+   specific Blocks-Guide pages.
+4. **Count/semitones naming follow-up.** Cache has these candidates
+   with clear integer/step signatures; each needs a Blocks-Guide
+   cross-reference to name safely. Tractable in 1–2 hours of desk
+   work. Candidates (from cache scan in Session 28 cont 2):
+   `phaser.stages` (id=22, 0..11), `delay.voices/taps` (id=64,
+   0..24), `reverb.shimmer_shift_1/2` (ids 56/57, ±24 semitones),
+   `drive.bits` (id=24, 0..24).
 
 **Then** (post-AM4-depth-gate): BK-030 generic MIDI primitives →
 BK-029 rename to MCP MIDI Tools → BK-014 Axe-Fx II → BK-031 Hydrasynth.
@@ -344,13 +370,19 @@ sub-block 1 = Delay (89 recs, id=10 enum × 29), sub-block 9 = Drive
 ## Decoded parameters and unit conventions
 
 Live source of truth: `src/protocol/params.ts` (`KNOWN_PARAMS` + `Unit`
-union). **44 hand-authored params** (up from 20 at Session 25 close —
-Session 26 added amp tone stack, drive tone/level/mix, reverb
-predelay + time, universal Mix across 8 effect blocks, LFO rates for
-chorus/flanger/phaser/tremolo, filter freq, and modulation depths)
-across 15 confirmed blocks, using **7 unit conventions** (`knob_0_10`,
-`db`, `hz`, `seconds`, `percent`, `ms`, `enum` — `hz` and `seconds`
-added in Session 26 cont for raw-passthrough semantic labeling).
+union). **59 hand-authored params** (Session 28 cont 2 added the
+universal per-block output Balance across 15 confirmed blocks,
+unlocked by the new `bipolar_percent` unit; prior passes: Session 26
+added amp tone stack, drive tone/level/mix, reverb predelay + time,
+universal Mix across 8 effect blocks, LFO rates for chorus/flanger/
+phaser/tremolo, filter freq, and modulation depths; Session 25
+shipped P1-010 Session A generator + 20 seeds)
+across 15 confirmed blocks, using **10 unit conventions** (`knob_0_10`,
+`db`, `hz`, `seconds`, `percent`, `bipolar_percent`, `count`,
+`semitones`, `ms`, `enum`). `count` and `semitones` are typing-
+only today — cache has candidates (phaser stages, delay voices,
+reverb shimmer shifts, drive bit depth) but each needs a specific
+Blocks-Guide page cross-reference before naming.
 `pidLow` = block ID, `pidHigh` = parameter index within block;
 address is preset-independent. `CACHE_PARAMS` mirrors every
 cache-derivable entry (verify-cache-params = 44/44 byte-match against

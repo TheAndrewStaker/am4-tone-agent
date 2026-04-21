@@ -32,20 +32,38 @@ import {
  * How a parameter's display value relates to the float stored on the
  * wire. The firmware always stores a float; the unit decides the scale.
  *
- *   knob_0_10 — UI 0–10, internal ÷10 (gain-style knobs)
- *   db        — UI dB, internal raw dB
- *   hz        — UI Hz (raw passthrough), for LFO rates + filter cutoffs
- *   seconds   — UI seconds (raw passthrough), for reverb time etc.
- *   percent   — UI 0–100%, internal ÷100
- *   ms        — UI milliseconds, internal seconds (÷1000)
- *   enum      — UI dropdown name, internal int-as-float (per-param table)
+ *   knob_0_10        — UI 0–10, internal ÷10 (gain-style knobs)
+ *   db               — UI dB, internal raw dB
+ *   hz               — UI Hz (raw passthrough), for LFO rates + filter cutoffs
+ *   seconds          — UI seconds (raw passthrough), for reverb time etc.
+ *   percent          — UI 0–100%, internal ÷100
+ *   bipolar_percent  — UI -100..+100%, internal -1..+1 (balance knobs —
+ *                      per-block output balance, stereo pan)
+ *   count            — UI integer count (voices, stages, taps, springs);
+ *                      display = internal (scale 1)
+ *   semitones        — UI integer semitones (pitch shift);
+ *                      display = internal (scale 1)
+ *   ms               — UI milliseconds, internal seconds (÷1000)
+ *   enum             — UI dropdown name, internal int-as-float (per-param table)
  *
- * Note: `db`, `hz`, and `seconds` all pass display=internal (scale 1).
- * They're distinct unit tags so tool descriptions can label values
- * accurately — Claude interprets "set rate to 3" as 3 Hz when it sees
- * `unit: 'hz'`, not 3 dB. The semantic label matters for LLM correctness.
+ * Note: `db`, `hz`, `seconds`, `count`, and `semitones` all pass
+ * display=internal (scale 1). They're distinct unit tags so tool
+ * descriptions can label values accurately — Claude interprets "set
+ * rate to 3" as 3 Hz when it sees `unit: 'hz'`, not 3 dB, and "8
+ * voices" as a count rather than 8 dB. Semantic labels matter for
+ * LLM correctness, even when the wire math is identical.
  */
-export type Unit = 'knob_0_10' | 'db' | 'hz' | 'seconds' | 'percent' | 'ms' | 'enum';
+export type Unit =
+  | 'knob_0_10'
+  | 'db'
+  | 'hz'
+  | 'seconds'
+  | 'percent'
+  | 'bipolar_percent'
+  | 'count'
+  | 'semitones'
+  | 'ms'
+  | 'enum';
 
 export interface Param extends ParamId {
   block: string;
@@ -63,6 +81,9 @@ const DISPLAY_TO_INTERNAL: Record<Exclude<Unit, 'enum'>, number> = {
   hz: 1,
   seconds: 1,
   percent: 100,
+  bipolar_percent: 100,
+  count: 1,
+  semitones: 1,
   ms: 1000,
 };
 
@@ -440,6 +461,33 @@ export const KNOWN_PARAMS = {
     unit: 'enum', displayMin: 0, displayMax: 1,
     enumValues: VOLPAN_MODES_VALUES,
   },
+
+  // Universal per-block output Balance (Session 28 cont — P1-010
+  // second unit-extension pass, introduced `bipolar_percent`).
+  // Blocks Guide line 347: "Every block outputs both left and right
+  // signals. As you adjust to the left or right, the opposite channel
+  // [is reduced]." Confirmed as a universal block-level parameter at
+  // lines 899 (Amp), 1233 (Chorus), 1430 (Flanger), 1733 (Delay),
+  // 1883 (Phaser). Cache signature is identical across all 15
+  // confirmed blocks: id=2, a=-1, b=1, c=100 (display = internal ×
+  // 100, so -100..+100%). Awaits Session D hardware spot-check for
+  // absolute confirmation; structural evidence across 15 independent
+  // blocks is extremely strong.
+  'amp.balance':       { block: 'amp',        name: 'balance', pidLow: 0x003a, pidHigh: 0x0002, unit: 'bipolar_percent', displayMin: -100, displayMax: 100 },
+  'compressor.balance':{ block: 'compressor', name: 'balance', pidLow: 0x002e, pidHigh: 0x0002, unit: 'bipolar_percent', displayMin: -100, displayMax: 100 },
+  'geq.balance':       { block: 'geq',        name: 'balance', pidLow: 0x0032, pidHigh: 0x0002, unit: 'bipolar_percent', displayMin: -100, displayMax: 100 },
+  'reverb.balance':    { block: 'reverb',     name: 'balance', pidLow: 0x0042, pidHigh: 0x0002, unit: 'bipolar_percent', displayMin: -100, displayMax: 100 },
+  'delay.balance':     { block: 'delay',      name: 'balance', pidLow: 0x0046, pidHigh: 0x0002, unit: 'bipolar_percent', displayMin: -100, displayMax: 100 },
+  'chorus.balance':    { block: 'chorus',     name: 'balance', pidLow: 0x004e, pidHigh: 0x0002, unit: 'bipolar_percent', displayMin: -100, displayMax: 100 },
+  'flanger.balance':   { block: 'flanger',    name: 'balance', pidLow: 0x0052, pidHigh: 0x0002, unit: 'bipolar_percent', displayMin: -100, displayMax: 100 },
+  'phaser.balance':    { block: 'phaser',     name: 'balance', pidLow: 0x005a, pidHigh: 0x0002, unit: 'bipolar_percent', displayMin: -100, displayMax: 100 },
+  'wah.balance':       { block: 'wah',        name: 'balance', pidLow: 0x005e, pidHigh: 0x0002, unit: 'bipolar_percent', displayMin: -100, displayMax: 100 },
+  'tremolo.balance':   { block: 'tremolo',    name: 'balance', pidLow: 0x006a, pidHigh: 0x0002, unit: 'bipolar_percent', displayMin: -100, displayMax: 100 },
+  'filter.balance':    { block: 'filter',     name: 'balance', pidLow: 0x0072, pidHigh: 0x0002, unit: 'bipolar_percent', displayMin: -100, displayMax: 100 },
+  'drive.balance':     { block: 'drive',      name: 'balance', pidLow: 0x0076, pidHigh: 0x0002, unit: 'bipolar_percent', displayMin: -100, displayMax: 100 },
+  'enhancer.balance':  { block: 'enhancer',   name: 'balance', pidLow: 0x007a, pidHigh: 0x0002, unit: 'bipolar_percent', displayMin: -100, displayMax: 100 },
+  'gate.balance':      { block: 'gate',       name: 'balance', pidLow: 0x0092, pidHigh: 0x0002, unit: 'bipolar_percent', displayMin: -100, displayMax: 100 },
+  'volpan.balance':    { block: 'volpan',     name: 'balance', pidLow: 0x0066, pidHigh: 0x0002, unit: 'bipolar_percent', displayMin: -100, displayMax: 100 },
 } as const satisfies Record<string, Param>;
 
 export type ParamKey = keyof typeof KNOWN_PARAMS;

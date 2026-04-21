@@ -379,7 +379,24 @@ the device's own store command to persist. See `docs/DECISIONS.md`.
   Depends on nothing outstanding — cache is parsed, block roles
   are confirmed, the generator just needs writing.
 
-### P1-012 Channel-aware param writes (release-critical UX)
+### P1-012 Channel-aware param writes (release-critical UX) — ✅ Shape 1 + 2 shipped
+- **Status (2026-04-21, Session 28 cont 2).** Shapes 1 + 2 both
+  shipped across Sessions 22–28. Shape 1 (transparent current-
+  channel reporting) lives in `channelStatusLine()` — every
+  `set_param` / `set_params` / `apply_preset` response appends the
+  channel the write landed on, sourced from the `lastKnownChannel`
+  cache (invalidated by `switch_preset` / `switch_scene` /
+  `reconnect_midi`). Shape 2 (explicit `channel?` arg) is live on
+  `set_param`, `set_params`, and `apply_preset` (via `slots[i].
+  channel` single-channel shortcut or `slots[i].channels` per-
+  channel map); BK-027 phase 2 added `scenes[i].channels` too.
+  Shape 3 (`set_param_in_scene` scene-first tool) + the
+  `read_block_channel` helper remain deferred — both depend on
+  unresolved protocol work (BK-025 for scene → channel state
+  read-back, BK-008 for a working READ primitive). The release
+  gate is met as long as Claude stays within Shape 1/2 semantics,
+  which the tool descriptions + `channelStatusLine` direct it to.
+
 - **Context.** HW-009 (2026-04-19) confirmed that `set_param` /
   `set_params` / `apply_preset` write to **whichever channel is
   active for that block right now**. Scenes select channels +
@@ -476,12 +493,12 @@ the device's own store command to persist. See `docs/DECISIONS.md`.
   - **Session 08** — already decoded `amp.channel` write; we
     have the wire primitive, just haven't wired it into tool UX.
 
-- **When to schedule.** Ship-now-batch adjacent. Tool-description
-  updates (deliverable 3) are a 15-minute edit and should land
-  with the save/rename description cleanup. The channel-read
-  helper + response-text extension (deliverables 1–2) depend on
-  deciding whether we have a working read primitive or need to
-  probe one; could bundle with BK-025 decode work.
+- **When to schedule.** Shape 1 + 2 deliverables completed across
+  Sessions 22–28 (see per-deliverable status above). Shape 3 +
+  read-helper stay deferred pending BK-025 / BK-008. Close-out
+  audit of tool descriptions done Session 28 cont 2 — everything
+  the backlog spec calls for is reflected in the current
+  `set_param` / `set_params` / `apply_preset` descriptions.
 
 ---
 

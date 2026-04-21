@@ -34,6 +34,11 @@ import {
 } from './cacheEnums.js';
 
 export const CACHE_PARAMS = {
+  'amp.balance': {
+    block: 'amp', name: 'balance',
+    pidLow: 0x003a, pidHigh: 0x0002,
+    unit: 'bipolar_percent', displayMin: -100, displayMax: 100,
+  },
   'amp.type': {
     block: 'amp', name: 'type',
     pidLow: 0x003a, pidHigh: 0x000a,
@@ -64,6 +69,11 @@ export const CACHE_PARAMS = {
     block: 'amp', name: 'presence',
     pidLow: 0x003a, pidHigh: 0x000f,
     unit: 'knob_0_10', displayMin: 0, displayMax: 10,
+  },
+  'drive.balance': {
+    block: 'drive', name: 'balance',
+    pidLow: 0x0076, pidHigh: 0x0002,
+    unit: 'bipolar_percent', displayMin: -100, displayMax: 100,
   },
   'drive.type': {
     block: 'drive', name: 'type',
@@ -96,6 +106,11 @@ export const CACHE_PARAMS = {
     pidLow: 0x0042, pidHigh: 0x0001,
     unit: 'percent', displayMin: 0, displayMax: 100,
   },
+  'reverb.balance': {
+    block: 'reverb', name: 'balance',
+    pidLow: 0x0042, pidHigh: 0x0002,
+    unit: 'bipolar_percent', displayMin: -100, displayMax: 100,
+  },
   'reverb.type': {
     block: 'reverb', name: 'type',
     pidLow: 0x0042, pidHigh: 0x000a,
@@ -117,6 +132,11 @@ export const CACHE_PARAMS = {
     pidLow: 0x0046, pidHigh: 0x0001,
     unit: 'percent', displayMin: 0, displayMax: 100,
   },
+  'delay.balance': {
+    block: 'delay', name: 'balance',
+    pidLow: 0x0046, pidHigh: 0x0002,
+    unit: 'bipolar_percent', displayMin: -100, displayMax: 100,
+  },
   'delay.type': {
     block: 'delay', name: 'type',
     pidLow: 0x0046, pidHigh: 0x000a,
@@ -132,6 +152,11 @@ export const CACHE_PARAMS = {
     block: 'chorus', name: 'mix',
     pidLow: 0x004e, pidHigh: 0x0001,
     unit: 'percent', displayMin: 0, displayMax: 100,
+  },
+  'chorus.balance': {
+    block: 'chorus', name: 'balance',
+    pidLow: 0x004e, pidHigh: 0x0002,
+    unit: 'bipolar_percent', displayMin: -100, displayMax: 100,
   },
   'chorus.type': {
     block: 'chorus', name: 'type',
@@ -154,6 +179,11 @@ export const CACHE_PARAMS = {
     pidLow: 0x0052, pidHigh: 0x0001,
     unit: 'percent', displayMin: 0, displayMax: 100,
   },
+  'flanger.balance': {
+    block: 'flanger', name: 'balance',
+    pidLow: 0x0052, pidHigh: 0x0002,
+    unit: 'bipolar_percent', displayMin: -100, displayMax: 100,
+  },
   'flanger.type': {
     block: 'flanger', name: 'type',
     pidLow: 0x0052, pidHigh: 0x000a,
@@ -175,6 +205,11 @@ export const CACHE_PARAMS = {
     pidLow: 0x005a, pidHigh: 0x0001,
     unit: 'percent', displayMin: 0, displayMax: 100,
   },
+  'phaser.balance': {
+    block: 'phaser', name: 'balance',
+    pidLow: 0x005a, pidHigh: 0x0002,
+    unit: 'bipolar_percent', displayMin: -100, displayMax: 100,
+  },
   'phaser.type': {
     block: 'phaser', name: 'type',
     pidLow: 0x005a, pidHigh: 0x000a,
@@ -185,6 +220,11 @@ export const CACHE_PARAMS = {
     block: 'phaser', name: 'rate',
     pidLow: 0x005a, pidHigh: 0x000c,
     unit: 'hz', displayMin: 0.1, displayMax: 10,
+  },
+  'wah.balance': {
+    block: 'wah', name: 'balance',
+    pidLow: 0x005e, pidHigh: 0x0002,
+    unit: 'bipolar_percent', displayMin: -100, displayMax: 100,
   },
   'wah.type': {
     block: 'wah', name: 'type',
@@ -197,11 +237,21 @@ export const CACHE_PARAMS = {
     pidLow: 0x002e, pidHigh: 0x0001,
     unit: 'percent', displayMin: 0, displayMax: 100,
   },
+  'compressor.balance': {
+    block: 'compressor', name: 'balance',
+    pidLow: 0x002e, pidHigh: 0x0002,
+    unit: 'bipolar_percent', displayMin: -100, displayMax: 100,
+  },
   'compressor.type': {
     block: 'compressor', name: 'type',
     pidLow: 0x002e, pidHigh: 0x0013,
     unit: 'enum', displayMin: 0, displayMax: 18,
     enumValues: COMPRESSOR_TYPES_VALUES,
+  },
+  'geq.balance': {
+    block: 'geq', name: 'balance',
+    pidLow: 0x0032, pidHigh: 0x0002,
+    unit: 'bipolar_percent', displayMin: -100, displayMax: 100,
   },
   'geq.type': {
     block: 'geq', name: 'type',
@@ -213,6 +263,11 @@ export const CACHE_PARAMS = {
     block: 'filter', name: 'mix',
     pidLow: 0x0072, pidHigh: 0x0001,
     unit: 'percent', displayMin: 0, displayMax: 100,
+  },
+  'filter.balance': {
+    block: 'filter', name: 'balance',
+    pidLow: 0x0072, pidHigh: 0x0002,
+    unit: 'bipolar_percent', displayMin: -100, displayMax: 100,
   },
   'filter.type': {
     block: 'filter', name: 'type',
@@ -229,6 +284,11 @@ export const CACHE_PARAMS = {
     block: 'tremolo', name: 'mix',
     pidLow: 0x006a, pidHigh: 0x0001,
     unit: 'percent', displayMin: 0, displayMax: 100,
+  },
+  'tremolo.balance': {
+    block: 'tremolo', name: 'balance',
+    pidLow: 0x006a, pidHigh: 0x0002,
+    unit: 'bipolar_percent', displayMin: -100, displayMax: 100,
   },
   'tremolo.type': {
     block: 'tremolo', name: 'type',
@@ -251,17 +311,32 @@ export const CACHE_PARAMS = {
     pidLow: 0x007a, pidHigh: 0x0001,
     unit: 'percent', displayMin: 0, displayMax: 100,
   },
+  'enhancer.balance': {
+    block: 'enhancer', name: 'balance',
+    pidLow: 0x007a, pidHigh: 0x0002,
+    unit: 'bipolar_percent', displayMin: -100, displayMax: 100,
+  },
   'enhancer.type': {
     block: 'enhancer', name: 'type',
     pidLow: 0x007a, pidHigh: 0x000e,
     unit: 'enum', displayMin: 0, displayMax: 2,
     enumValues: ENHANCER_TYPES_VALUES,
   },
+  'gate.balance': {
+    block: 'gate', name: 'balance',
+    pidLow: 0x0092, pidHigh: 0x0002,
+    unit: 'bipolar_percent', displayMin: -100, displayMax: 100,
+  },
   'gate.type': {
     block: 'gate', name: 'type',
     pidLow: 0x0092, pidHigh: 0x0013,
     unit: 'enum', displayMin: 0, displayMax: 3,
     enumValues: GATE_TYPES_VALUES,
+  },
+  'volpan.balance': {
+    block: 'volpan', name: 'balance',
+    pidLow: 0x0066, pidHigh: 0x0002,
+    unit: 'bipolar_percent', displayMin: -100, displayMax: 100,
   },
   'volpan.mode': {
     block: 'volpan', name: 'mode',
