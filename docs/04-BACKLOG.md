@@ -2540,3 +2540,74 @@ Skip until explicit user demand materializes.
   own hardware. Demote BK-020 from "likely first Roland
   target" to "future community contribution, founder-hardware
   validation unavailable."
+
+### BK-032 AM4-Edit first-page coverage — release-gate scope
+
+- **Context.** Scoped 2026-04-21 by founder direction during Session
+  29 wrap-up. When asked whether we're on track to support "all amp
+  block settings" before release, the agreed target became more
+  precise: **every parameter visible on AM4-Edit's first page for
+  every block type.** The rationale: first-page knobs are the primary
+  controls an intermediate-to-advanced user reaches for; deeper
+  Advanced-page params are power-user territory and post-MVP.
+  Front-page knobs vary by block TYPE (e.g. Spring reverb has Number
+  Of Springs / Spring Tone / Spring Drive / Boiiinnng!, while Plate
+  reverb has Plate Size / Diffusion / Crossover Freq / Low + High
+  Freq Time / Early + Late Level) so coverage is per-block-per-type,
+  not flat.
+- **Why.** Release marketing is "Claude can control your AM4 in
+  natural language." If a user says *"add some boiiinnng to the
+  spring reverb"* and the tool doesn't know what Boiiinnng is, the
+  MCP is below the bar. First-page knobs capture the vocabulary a
+  guitarist uses.
+- **Current state (per `src/protocol/params.ts`, 2026-04-21):**
+  - **Amp** ✅ front-panel complete (Session 29). Advanced page is
+    post-MVP per CLAUDE.md section "What's still deferred".
+  - **Reverb** 🟡 partial — 3 of 8 universal + 2 of 4 Spring-specific.
+    HW-018 closes the gap.
+  - **Drive** 🟡 partial — Type / Drive / Tone / Level / Mix +
+    Balance + Channel registered. EQ 1 + Advanced page (Low/High
+    Cut, Bass/Mid/Treble, Clip Type, Bias) missing. HW-019 closes.
+  - **Delay** 🟡 partial — Type / Time / Mix / Feedback +
+    Balance + Channel registered. Master Feedback, Drive, Bit
+    Reduction, Echo Pan, Spread, Tempo missing. HW-020 closes.
+  - **Compressor** 🔴 minimal — only Type / Mix / Balance. Threshold,
+    Ratio, Attack, Release, Knee, Auto Makeup, Detector Type
+    missing. HW-021 closes.
+  - **Chorus / Flanger / Phaser / Tremolo** 🟡 partial — Type /
+    Rate / Depth / Mix + Balance for each. Tempo (BPM-sync),
+    Manual (flanger/phaser), LFO Type, Voices (chorus) missing.
+    HW-022 closes.
+  - **Wah / Filter / Gate / GEQ** 🔴 minimal — only Type + Balance
+    (+ Filter Freq). HW-023 closes.
+- **HW tasks queued (see `docs/HARDWARE-TASKS.md`):**
+  - HW-018 Reverb first-page (7 captures)
+  - HW-019 Drive first-page + EQ 1 + Advanced clip controls (~12)
+  - HW-020 Delay first-page (7)
+  - HW-021 Compressor Config Page (8)
+  - HW-022 Modulation bundle (chorus/flanger/phaser/tremolo, ~14)
+  - HW-023 Secondary blocks (wah/filter/gate/geq, ~10)
+- **Priority order.** HW-018 → HW-019 → HW-020 → HW-021 → HW-022 →
+  HW-023 (by block popularity). Each is cheap capture-wise
+  (5–15 min per block group); the founder can batch them across
+  multiple short sessions or do one long sweep.
+- **Definition of done.** All HW-018..HW-023 tasks complete and
+  their captures decoded into `KNOWN_PARAMS` + `verify-msg`
+  goldens. verify-cache-params stays 100% byte-matching. STATE.md
+  reflects new param count and BK-032 flips to ✅. Then Wave 1
+  device expansion (BK-030 / BK-029 / BK-014 / BK-031) is
+  formally unblocked.
+- **Relation to HW-014 and HW-017.** HW-014 (39-param spot-check)
+  stays a separate release-gate item — it validates params we've
+  already registered structurally (cache-signature-only). HW-017
+  (count-type disambiguation) gets partially absorbed into HW-020
+  (resolves delay id=64 via Bit Reduction capture), HW-022
+  (resolves phaser id=22 via Order capture), and HW-023 (resolves
+  filter id=28 via Order capture). The remaining HW-017 items
+  (drive id=24, gate id=14) can stay as a separate low-priority
+  bucket.
+- **Relation to AM4-depth-gate.** Was previously informally "amp
+  depth + the structurally-decoded params." BK-032 formalizes the
+  full scope across every block. The Wave 1 device expansion
+  (BK-014 Axe-Fx II, BK-031 Hydrasynth) remains gated on BK-032
+  clearing.

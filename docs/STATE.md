@@ -322,8 +322,27 @@ per `memory/feedback_am4_depth_gates_wave_expansion.md`):**
    Master). Mid and Treble at 0x000D / 0x000E are still on that
    same structural-only footing. HW-014 closes the gap.
 
-**Then** (post-AM4-depth-gate): BK-030 generic MIDI primitives →
-BK-029 rename to MCP MIDI Tools → BK-014 Axe-Fx II → BK-031 Hydrasynth.
+**Release-gate scope expanded 2026-04-21 — BK-032 "AM4-Edit
+first-page coverage."** Founder direction: the release target is
+every parameter visible on AM4-Edit's first page for every block
+type, because those are the primary controls an intermediate-to-
+advanced user reaches for. This replaces the informal "amp depth
++ structurally-decoded params" framing with a precise per-block-
+per-type scope. Six new HW tasks queued:
+
+- HW-018 Reverb first-page (7 captures, 2 Spring-specific)
+- HW-019 Drive first-page + EQ 1 + Advanced clip (~12)
+- HW-020 Delay first-page (7; also resolves HW-017 delay id=64)
+- HW-021 Compressor Config Page (8 — biggest coverage jump)
+- HW-022 Modulation bundle (chorus/flanger/phaser/tremolo, ~14)
+- HW-023 Secondary (wah/filter/gate/geq, ~10)
+
+See `docs/04-BACKLOG.md` BK-032 for the full scope and
+`docs/HARDWARE-TASKS.md` for each task's capture checklist.
+
+**Then** (post-BK-032 + HW-013/014/016 release gates): BK-030
+generic MIDI primitives → BK-029 rename to MCP MIDI Tools →
+BK-014 Axe-Fx II → BK-031 Hydrasynth.
 
 ---
 
