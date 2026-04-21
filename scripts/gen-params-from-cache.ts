@@ -189,17 +189,27 @@ function generate(): { entries: GeneratedEntry[]; usedEnums: Set<string>; warnin
       if (!rawEntry) continue;
       const { name: paramName, unitOverride, displayMinOverride, displayMaxOverride } = resolveEntry(rawEntry);
       const inferred = inferUnit(rec, spec);
-      if (!inferred) {
+      // When paramNames provides a full override (unit + both bounds),
+      // skip the cache inference requirement — the caller is stating
+      // authoritatively how the param should be shaped. Phaser.feedback
+      // is the canonical case: cache c=111.1 doesn't fit any default
+      // bucket, but we know from wire captures + Blocks Guide that the
+      // knob is bipolar_percent ±90.
+      const hasFullOverride =
+        unitOverride !== undefined &&
+        displayMinOverride !== undefined &&
+        displayMaxOverride !== undefined;
+      if (!inferred && !hasFullOverride) {
         warnings.push(
           `${spec.blockName}.${paramName} (id=${rec.id}): unable to infer unit ` +
           `(kind=${rec.kind}, a=${rec.a}, b=${rec.b}, c=${rec.c}) — skipped`,
         );
         continue;
       }
-      const unit = unitOverride ?? inferred.unit;
-      const displayMin = displayMinOverride ?? inferred.displayMin;
-      const displayMax = displayMaxOverride ?? inferred.displayMax;
-      if (inferred.enumImport) usedEnums.add(inferred.enumImport);
+      const unit = unitOverride ?? inferred!.unit;
+      const displayMin = displayMinOverride ?? inferred!.displayMin;
+      const displayMax = displayMaxOverride ?? inferred!.displayMax;
+      if (inferred?.enumImport) usedEnums.add(inferred.enumImport);
       entries.push({
         key: `${spec.blockName}.${paramName}`,
         blockName: spec.blockName,
@@ -209,7 +219,7 @@ function generate(): { entries: GeneratedEntry[]; usedEnums: Set<string>; warnin
         unit,
         displayMin,
         displayMax,
-        enumImport: inferred.enumImport,
+        enumImport: inferred?.enumImport,
       });
     }
   }

@@ -6,6 +6,120 @@ file is the chronological trail that reference is built from.
 
 ---
 
+## 2026-04-21 — Session 29 — HW-015 advanced-controls capture
+
+### Captures
+
+Founder ran HW-015 in one pass. 12 pcapngs landed under
+`samples/captured/session-29-*`:
+
+- Amp knobs (5): `amp-master` + `amp-master-2` (on Brit 800 #34),
+  `amp-depth`, `amp-presence`, `amp-output-level`.
+- Amp toggle (1): `amp-out-boost-toggle`.
+- Time-effect feedback (3): `delay-feedback`, `flanger-feedback`,
+  `phaser-feedback`.
+- Reverb bonus (4): `reverb-size`, `reverb-plate-size`,
+  `reverb-number-of-springs`, `reverb-spring-tone`.
+
+Scope beat the HW-015 queue — founder captured the out-boost toggle
+and 4 reverb knobs beyond the original 8-knob target, which let us
+close Amp front-panel coverage in a single session instead of queuing
+a follow-up.
+
+### Headline finding — Amp Master/Presence correction
+
+`pidHigh=0x000F` on the Amp block was registered as `amp.presence`
+in Session 26 purely from cache signature (knob_0_10 / 0..1 / scale
+10). The `session-29-amp-master` capture on an unknown Marshall-type
+amp showed the Master knob writing to that exact register, as did
+the confirmatory `session-29-amp-master-2` on Brit 800 #34 — two
+independent amps, identical pidHigh. Real Presence was then captured
+via `session-29-amp-presence` at **`pidHigh=0x001E`**, totally
+separate from Master.
+
+The takeaway: cache signatures alone can't disambiguate within a
+block's knob_0_10 cluster. HW-014 is now a higher-priority
+release-gate item because `amp.mid` and `amp.treble` (ids 13/14) are
+still on cache-signature-only footing and could have similar
+mis-inferences lurking.
+
+### All new registers decoded (Session 29)
+
+| Block | pidHigh | Param | Unit | Display range |
+|-------|--------:|-------|------|---------------|
+| amp | `0x0008` | `out_boost_level` | db | 0..4 dB |
+| amp | `0x000F` | `master` (was `presence`) | knob_0_10 | 0..10 |
+| amp | `0x001A` | `depth` | knob_0_10 | 0..10 |
+| amp | `0x001E` | `presence` (moved from `0x000F`) | knob_0_10 | 0..10 |
+| amp | `0x0096` | `out_boost` | enum | OFF / ON |
+| delay | `0x000E` | `feedback` | bipolar_percent | -100..+100 |
+| flanger | `0x000E` | `feedback` | bipolar_percent | -99..+99 |
+| phaser | `0x0010` | `feedback` | bipolar_percent | -90..+90 |
+| reverb | `0x000F` | `size` | percent | 0..100 |
+| reverb | `0x001B` | `springs` | count | 2..6 |
+| reverb | `0x001C` | `spring_tone` | knob_0_10 | 0..10 |
+
+11 new `verify-msg` goldens — 37/37 → 48/48 green. KNOWN_PARAMS:
+59 → 69. verify-cache-params: 59/59 → 69/69 byte-match.
+
+### Quirk — AM4-Edit used `action=0x0002` in every HW-015 capture
+
+Every SET_PARAM write in the 12 captures has `action=0x0002` at
+bytes 10-11 of the 23-byte envelope, not the `action=0x0001` our
+builder emits (and that every prior capture — Sessions 04-27 —
+used). Value-byte packing is byte-for-byte identical between
+builder and capture; only the action field and the resulting
+checksum differ. Our builder's `action=0x0001` path has been
+wire-verified since Session 04 and lands writes cleanly, so both
+action values are accepted by the AM4 in practice. Documented as
+§6i's "AM4-Edit quirk" — likely a version or mode difference on
+Edit's side, not a protocol change. Goldens encode the builder's
+output rather than the raw capture because of this.
+
+### Universal vs type-specific reverb knobs
+
+`reverb.size` at `pidHigh=0x000F` appeared in two captures with
+different UI labels — "Plate Size" on a Plate reverb and "Size" on
+a Room/Hall reverb — both writing the same register. That's a
+universal-knob-with-type-dependent-label pattern, similar to the
+Master Volume behavior across amp types. Spring-reverb-specific
+registers (`springs` and `spring_tone` at `0x001B` / `0x001C`) only
+have UI on Spring reverbs but the underlying registers are writable
+on any reverb type — AM4 doesn't gate writes by the currently-
+active type.
+
+### Phaser.feedback required a generator tweak
+
+Cache signature for phaser feedback at id 16 is `a=-0.9, b=0.9,
+c=111.1` — the `c=111.1` scale factor doesn't fit any of the
+existing `inferUnit` buckets (10, 100, 1000, 1). `gen-params-from-
+cache.ts` was extended to accept a full paramNames override
+(unit + both display bounds), in which case cache-inference is
+skipped. phaser.feedback registers as `bipolar_percent` with
+`displayMin/Max=±90` (matches the internal ±0.9 clamp); AM4-Edit's
+displayed percentage reads slightly higher than our input (e.g. 50
+→ internal 0.5 → AM4-Edit ~55.5%) but the natural-language UX
+impact is negligible.
+
+### Files touched
+
+- `src/protocol/paramNames.ts` — 11 new id→name mappings.
+- `src/protocol/params.ts` — renamed `amp.presence` at `0x000F` →
+  `amp.master`, added 10 new KNOWN_PARAMS entries.
+- `src/protocol/cacheParams.ts` — regenerated (10 new entries).
+- `scripts/gen-params-from-cache.ts` — full-override bypass for
+  cache-inference when paramNames provides unit + bounds.
+- `scripts/verify-msg.ts` — 11 new byte-exact goldens.
+- `docs/SYSEX-MAP.md` — new §6i Advanced-Controls Capture section.
+- `docs/HARDWARE-TASKS.md` — HW-015 moved to Archive.
+- `docs/STATE.md` — Recent-Breakthroughs + AM4-depth queue updates.
+
+Preflight green end-to-end: typecheck, 48/48 verify-msg, 16/16
+verify-pack, 8/8 verify-echo, 69/69 verify-cache-params, smoke-server
+17 tools with updated list_params catalog.
+
+---
+
 ## 2026-04-21 — Session 28 cont 2 — P1-012 closed + second unit-extension pass
 
 ### P1-012 formally closed (Shape 1 + 2 long since shipped)

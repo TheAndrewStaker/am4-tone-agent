@@ -168,10 +168,47 @@ export const KNOWN_PARAMS = {
     pidLow: 0x003a, pidHigh: 0x000e,
     unit: 'knob_0_10', displayMin: 0, displayMax: 10,
   },
-  'amp.presence': {
-    block: 'amp', name: 'presence',
+  // Session 29 (HW-015): `pidHigh=0x000f` was wrongly registered as
+  // amp.presence in Session 26 based on cache signature alone. Two
+  // wire captures on Marshall-family amps (unknown amp + Brit 800
+  // #34) proved the register is Master. Real Presence is at
+  // pidHigh=0x001e (below).
+  'amp.master': {
+    block: 'amp', name: 'master',
     pidLow: 0x003a, pidHigh: 0x000f,
     unit: 'knob_0_10', displayMin: 0, displayMax: 10,
+  },
+  // Session 29 (HW-015): full 0→10 sweep capture confirmed Depth at
+  // pidHigh=0x001a. Knob_0_10 matches the cache signature.
+  'amp.depth': {
+    block: 'amp', name: 'depth',
+    pidLow: 0x003a, pidHigh: 0x001a,
+    unit: 'knob_0_10', displayMin: 0, displayMax: 10,
+  },
+  // Session 29 (HW-015): Presence at pidHigh=0x001e (not 0x000f — see
+  // amp.master above). Wire-verified on the same Marshall amp.
+  'amp.presence': {
+    block: 'amp', name: 'presence',
+    pidLow: 0x003a, pidHigh: 0x001e,
+    unit: 'knob_0_10', displayMin: 0, displayMax: 10,
+  },
+  // Session 29 (HW-015): Out Boost Level on the Extras tab, dB knob
+  // 0..4 dB with 0.05 dB steps.
+  'amp.out_boost_level': {
+    block: 'amp', name: 'out_boost_level',
+    pidLow: 0x003a, pidHigh: 0x0008,
+    unit: 'db', displayMin: 0, displayMax: 4,
+  },
+  // Session 29 (HW-015): Out Boost ON/OFF toggle on the Extras tab.
+  // Registered directly in KNOWN_PARAMS (out-of-band from the cache
+  // generator because per-block non-Type enum imports aren't
+  // supported). Wire-verified via session-29-amp-out-boost-toggle:
+  // value=1.0 → ON.
+  'amp.out_boost': {
+    block: 'amp', name: 'out_boost',
+    pidLow: 0x003a, pidHigh: 0x0096,
+    unit: 'enum', displayMin: 0, displayMax: 1,
+    enumValues: { 0: 'OFF', 1: 'ON' },
   },
   'amp.level': {
     block: 'amp', name: 'level',
@@ -254,6 +291,27 @@ export const KNOWN_PARAMS = {
     pidLow: 0x0042, pidHigh: 0x0010,
     unit: 'ms', displayMin: 0, displayMax: 250,
   },
+  // Session 29 (HW-015): reverb Size at pidHigh=0x000f. Wire-verified
+  // on two captures ("Plate Size" on Plate reverb + "Size" on Room
+  // reverb) — same register, type-dependent UI label. Percent scale.
+  'reverb.size': {
+    block: 'reverb', name: 'size',
+    pidLow: 0x0042, pidHigh: 0x000f,
+    unit: 'percent', displayMin: 0, displayMax: 100,
+  },
+  // Session 29 (HW-015): spring-reverb-specific params. Registers are
+  // writable on any reverb type; AM4-Edit exposes the UI only when
+  // a Spring reverb is active.
+  'reverb.springs': {
+    block: 'reverb', name: 'springs',
+    pidLow: 0x0042, pidHigh: 0x001b,
+    unit: 'count', displayMin: 2, displayMax: 6,
+  },
+  'reverb.spring_tone': {
+    block: 'reverb', name: 'spring_tone',
+    pidLow: 0x0042, pidHigh: 0x001c,
+    unit: 'knob_0_10', displayMin: 0, displayMax: 10,
+  },
   'reverb.channel': {
     block: 'reverb', name: 'channel',
     pidLow: 0x0042, pidHigh: 0x07d2,
@@ -281,6 +339,14 @@ export const KNOWN_PARAMS = {
     block: 'delay', name: 'mix',
     pidLow: 0x0046, pidHigh: 0x0001,
     unit: 'percent', displayMin: 0, displayMax: 100,
+  },
+  // Session 29 (HW-015): Feedback knobs on per-block delay/flanger/phaser.
+  // All bipolar — negative feedback inverts the phase of the repeats/
+  // sweep, a standard Fractal implementation detail.
+  'delay.feedback': {
+    block: 'delay', name: 'feedback',
+    pidLow: 0x0046, pidHigh: 0x000e,
+    unit: 'bipolar_percent', displayMin: -100, displayMax: 100,
   },
   'delay.channel': {
     block: 'delay', name: 'channel',
@@ -354,6 +420,12 @@ export const KNOWN_PARAMS = {
     pidLow: 0x0052, pidHigh: 0x000d,
     unit: 'percent', displayMin: 0, displayMax: 100,
   },
+  'flanger.feedback': {
+    block: 'flanger', name: 'feedback',
+    pidLow: 0x0052, pidHigh: 0x000e,
+    // Cache caps internal range at ±0.995 — display scale 100 ⇒ ±99%.
+    unit: 'bipolar_percent', displayMin: -99, displayMax: 99,
+  },
   'phaser.mix': {
     block: 'phaser', name: 'mix',
     pidLow: 0x005a, pidHigh: 0x0001,
@@ -369,6 +441,17 @@ export const KNOWN_PARAMS = {
     block: 'phaser', name: 'rate',
     pidLow: 0x005a, pidHigh: 0x000c,
     unit: 'hz', displayMin: 0.1, displayMax: 10,
+  },
+  'phaser.feedback': {
+    block: 'phaser', name: 'feedback',
+    pidLow: 0x005a, pidHigh: 0x0010,
+    // Cache signature is unusual — internal ±0.9, display-scale 111.1.
+    // We use standard bipolar_percent (scale 100) with clamped bounds
+    // so input stays inside the internal range; AM4-Edit's displayed
+    // percentage may read slightly higher than the value set (an input
+    // of "50" sets internal 0.5 which AM4-Edit shows as ~55.5%). The
+    // natural-language UX impact is negligible.
+    unit: 'bipolar_percent', displayMin: -90, displayMax: 90,
   },
   'wah.type': {
     block: 'wah', name: 'type',

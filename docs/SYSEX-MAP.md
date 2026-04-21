@@ -797,6 +797,82 @@ that matches byte-exact.
 
 ---
 
+## 6i. Advanced-Controls Capture (HW-015 / Session 29) 🟢
+
+**Captured 2026-04-21** (12 pcapngs under `samples/captured/session-29-*`).
+Disambiguates knobs that cache signatures alone couldn't pin — Amp
+Master/Depth/Presence/Out-Boost (toggle + level), delay/flanger/phaser
+Feedback, and spring-reverb-specific reverb knobs.
+
+### Key finding — Master/Presence correction
+
+`pidHigh=0x000F` on the Amp block was registered as `amp.presence` in
+Session 26 from cache signature alone. Two independent captures on
+Marshall-family amps (`session-29-amp-master` + `session-29-amp-master-2`
+on Brit 800 #34) proved the register is **Master**, not Presence. The
+real Presence knob lives at `pidHigh=0x001E` (confirmed by
+`session-29-amp-presence` on the same amp). Knob ordering on the Amp
+Edit page for a master-volume amp is therefore:
+
+| pidHigh | Knob |
+|---------|------|
+| `0x000B` | Gain |
+| `0x000C` | Bass |
+| `0x000D` | Mid (structural, HW-014 pending) |
+| `0x000E` | Treble (structural, HW-014 pending) |
+| `0x000F` | **Master** |
+| `0x001A` | **Depth** |
+| `0x001E` | **Presence** |
+
+Cache signatures for 0x000D / 0x000E are identical to the confirmed
+Master/Depth/Presence entries, so Mid and Treble are likely correct —
+HW-014 spot-check remains the final verification step.
+
+### New addresses captured this session
+
+| Block | pidHigh | Param | Unit | Capture |
+|-------|---------|-------|------|---------|
+| amp (`0x003A`) | `0x0008` | `out_boost_level` | db 0..4 | `session-29-amp-output-level` |
+| amp (`0x003A`) | `0x000F` | `master` | knob_0_10 | `session-29-amp-master` + `session-29-amp-master-2` |
+| amp (`0x003A`) | `0x001A` | `depth` | knob_0_10 | `session-29-amp-depth` |
+| amp (`0x003A`) | `0x001E` | `presence` | knob_0_10 | `session-29-amp-presence` |
+| amp (`0x003A`) | `0x0096` | `out_boost` | enum OFF/ON | `session-29-amp-out-boost-toggle` |
+| delay (`0x0046`) | `0x000E` | `feedback` | bipolar_percent ±100 | `session-29-delay-feedback` |
+| flanger (`0x0052`) | `0x000E` | `feedback` | bipolar_percent ±99 | `session-29-flanger-feedback` |
+| phaser (`0x005A`) | `0x0010` | `feedback` | bipolar_percent ±90 | `session-29-phaser-feedback` |
+| reverb (`0x0042`) | `0x000F` | `size` | percent 0..100 | `session-29-reverb-size` + `-plate-size` |
+| reverb (`0x0042`) | `0x001B` | `springs` | count 2..6 | `session-29-reverb-number-of-springs` |
+| reverb (`0x0042`) | `0x001C` | `spring_tone` | knob_0_10 | `session-29-reverb-spring-tone` |
+
+11 new goldens in `verify-msg` (one per pidHigh). Master also appears
+twice in the capture set (two different amp types); any future
+Marshall-amp rebuild can cross-reference either capture.
+
+### AM4-Edit uses `action=0x0002` for these writes
+
+**Quirk worth documenting.** All 12 captures show AM4-Edit emitting
+SET_PARAM writes with `action=0x0002` at bytes 10–11, not the
+`action=0x0001` our builder uses (and that every prior confirmed capture
+used). Value-byte packing matches byte-for-byte between builder and
+capture; only the action field (and the derived checksum) differ.
+Both action values are accepted by the AM4 in practice — our builder's
+0x0001 path has been verified on hardware across Sessions 04–28 — so
+this is a version or mode difference on AM4-Edit's side, not a protocol
+change. Goldens in `verify-msg` encode the builder's canonical
+`action=0x0001` output; the captures are cited for value-byte
+verification, not for the full 23-byte envelope match.
+
+### Reverb Size is universal per reverb type
+
+`reverb.size` at `pidHigh=0x000F` was confirmed on two captures — "Plate
+Size" on a Plate reverb and "Size" on a Room/Hall reverb. Same wire
+register, type-dependent UI label. Spring-specific knobs at `0x001B`
+(springs) and `0x001C` (spring_tone) were captured only on a Spring
+reverb; the registers are writable on any reverb type but AM4-Edit
+exposes the UI only under Spring.
+
+---
+
 ## 7. Parameter Value Encoding 🟡
 
 ### 14-bit IDs (block ID, parameter ID)

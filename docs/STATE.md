@@ -5,7 +5,28 @@
 > hardware tasks (USB captures, round-trip tests, reference dumps) live
 > in **`docs/HARDWARE-TASKS.md`** — check that file alongside this one at
 > session start.
-> Last updated: **2026-04-21** (Session 28 cont 2 — P1-012 formally
+> Last updated: **2026-04-21** (Session 29 — HW-015 captured and
+> decoded. 12 pcapngs processed; 10 new pidHighs registered + 1
+> structural correction. Headline finding: `pidHigh=0x000F` on the
+> Amp block was wrongly registered as `amp.presence` in Session 26
+> (cache signature alone). Two wire captures on Marshall-family amps
+> (unknown + Brit 800 #34) proved the register is **Master**. Real
+> Presence lives at `pidHigh=0x001E` (captured separately). New
+> params: `amp.master`, `amp.depth` (0x1A), `amp.presence` (0x1E,
+> moved from 0x0F), `amp.out_boost_level` (0x08, dB 0-4),
+> `amp.out_boost` (0x96, enum OFF/ON), `delay.feedback` (0x0E),
+> `flanger.feedback` (0x0E), `phaser.feedback` (0x10),
+> `reverb.size` (0x0F, percent), `reverb.springs` (0x1B, count),
+> `reverb.spring_tone` (0x1C). KNOWN_PARAMS 59 → 69; verify-msg
+> 37 → 48 goldens. verify-cache-params 69/69 byte-match. AM4-Edit
+> quirk documented: all HW-015 captures used `action=0x0002` instead
+> of our builder's `action=0x0001` — value-bytes match byte-for-byte,
+> only action field differs; both work on hardware. SYSEX-MAP §6i
+> added with the full decode table. HW-014 priority raised — Session
+> 29's correction caught a cache-signature mis-inference that only
+> wire capture could have flagged, and mid/treble at 0x0D/0x0E are
+> still structural. Preflight green.)
+> Prior context (Session 28 cont 2 — P1-012 formally
 > closed + second unit-extension pass launched. P1-012 Shape 1
 > (transparent channel-in-response) and Shape 2 (explicit `channel?`
 > arg on `set_param` / `set_params` / `apply_preset`) were both
@@ -273,25 +294,29 @@ per `memory/feedback_am4_depth_gates_wave_expansion.md`):**
 1. **P1-012 channel-aware param writes.** ✅ Shapes 1 + 2 shipped
    (Sessions 22–28). Shape 3 (scene-first tool) + read-helper
    remain deferred on BK-025 / BK-008.
-2. **Advanced-controls capture session** (new HW-NNN, ~20 min).
-   Covers ambiguous knob_0_10 records in the Amp cache — Master,
-   Depth, Output Boost — that the Blocks Guide names but can't be
-   structurally disambiguated. Also the remaining Feedback knobs per
-   block. Queue a new HW entry before running.
+2. **Advanced-controls capture session.** ✅ Shipped Session 29 —
+   HW-015 archived, 10 new pidHighs registered (`amp.master` /
+   `amp.depth` / `amp.presence` at corrected 0x1E / `amp.out_boost` /
+   `amp.out_boost_level` / delay+flanger+phaser `feedback` /
+   `reverb.size` / `reverb.springs` / `reverb.spring_tone`).
 3. **Second unit-extension pass.** ✅ Infrastructure landed
    Session 28 cont 2 — `bipolar_percent` / `count` / `semitones`
    added to the `Unit` union. `bipolar_percent` used immediately to
-   register 15 new `{block}.balance` params. `count` / `semitones`
-   stay as typing-only until their candidate params (phaser stages,
-   delay voices, reverb shimmer, drive bit depth) get named against
-   specific Blocks-Guide pages.
+   register 15 new `{block}.balance` params. Session 29 then used
+   `count` for `reverb.springs` (2..6) — `count` is now wire-verified,
+   not just typing infrastructure. `semitones` still awaits a named
+   param.
 4. **Count/semitones naming follow-up.** Cache has these candidates
    with clear integer/step signatures; each needs a Blocks-Guide
    cross-reference to name safely. Tractable in 1–2 hours of desk
-   work. Candidates (from cache scan in Session 28 cont 2):
-   `phaser.stages` (id=22, 0..11), `delay.voices/taps` (id=64,
-   0..24), `reverb.shimmer_shift_1/2` (ids 56/57, ±24 semitones),
-   `drive.bits` (id=24, 0..24).
+   work. Candidates still pending: `phaser.stages` (id=22, 0..11),
+   `delay.voices/taps` (id=64, 0..24), `reverb.shimmer_shift_1/2`
+   (ids 56/57, ±24 semitones), `drive.bits` (id=24, 0..24).
+5. **HW-014 priority raised.** Session 29's correction caught a
+   cache-signature mis-inference that only wire capture exposed
+   (`pidHigh=0x000F` was structurally Presence-like but wire-wise
+   Master). Mid and Treble at 0x000D / 0x000E are still on that
+   same structural-only footing. HW-014 closes the gap.
 
 **Then** (post-AM4-depth-gate): BK-030 generic MIDI primitives →
 BK-029 rename to MCP MIDI Tools → BK-014 Axe-Fx II → BK-031 Hydrasynth.

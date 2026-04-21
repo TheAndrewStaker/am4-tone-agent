@@ -23,9 +23,10 @@
 > collection (replaced by the Hydrasynth Explorer) and is now a
 > community-support item with no founder-hardware validation.
 >
-> Last updated: 2026-04-21 (Session 28 cont 2 — HW-014 / HW-015 /
-> HW-016 queued alongside HW-013. AM4-depth-gate verification work
-> is now fully enumerated in this file.)
+> Last updated: 2026-04-21 (Session 29 — HW-015 archived. 12 captures
+> decoded; 10 new pidHighs registered + 1 structural correction
+> (amp.presence → amp.master at pidHigh=0x000F). HW-014 remains
+> top priority AM4-depth item; HW-013 and HW-016 unchanged.)
 
 ## Status key
 
@@ -138,41 +139,8 @@ Claude picks up from there and moves the item to ⏳ or ✅.
   confirm. Good bundle candidate with HW-013 (both working-buffer
   scoped, no saves required).
 
-### HW-015 — Advanced-controls capture session (Amp Master/Depth/Output Boost + Feedback knobs) 🔜
+<!-- HW-015 completed 2026-04-21 — see Archive below -->
 
-- **For:** unlocks the remaining high-value Amp + time-effects
-  params that cache signatures alone can't disambiguate.
-- **Why:** several knob_0_10 records in the Amp cache have identical
-  signatures and the Blocks Guide names multiple candidates (Master,
-  Depth, Output Boost). Each needs a wire capture to pin the label
-  to a specific pidHigh. Same for per-block Feedback knobs
-  (delay.feedback, flanger.feedback, phaser.feedback).
-- **Setup:** AM4 plugged in, AM4-Edit open, USBPcap running on the
-  USB interface the AM4 is on. Same capture methodology as HW-011.
-- **Steps (per knob):**
-  1. In AM4-Edit, load Z04 or any scratch preset.
-  2. Navigate to the target block's page that has the knob.
-  3. Start a fresh USBPcap recording.
-  4. Move the target knob from its current value to a clearly-
-     different value (e.g. 5.0 → 7.5). Move it ONCE — don't
-     sweep, don't touch any other knob.
-  5. Stop the recording. Save as
-     `samples/captured/session-29-<block>-<knob>.pcapng`.
-  6. Repeat for each knob listed below.
-- **Capture targets (8 knobs):**
-  - Amp: Master, Depth, Output Boost (3 captures)
-  - Delay: Feedback knob on a Digital Mono-type delay (1 capture)
-  - Flanger: Feedback (1)
-  - Phaser: Feedback (1)
-  - Reverb: tail/decay adjustments beyond `time`/`predelay` if the
-    current type exposes any (2 — optional, defer if time-boxed).
-- **Signal completion:** *"HW-015 done"* + list of saved paths.
-  Claude processes captures via `scripts/parse-capture.ts`,
-  decodes pidHigh per capture, and registers the params in
-  `KNOWN_PARAMS` + `paramNames.ts` with byte-exact verify-msg
-  goldens.
-- **Priority:** medium — unlocks ~8 params, but less urgent than
-  HW-013/HW-014. Do after HW-013 + HW-014 clear.
 
 ### HW-016 — Claude Desktop first-turn-tool-call smoke (P5-011 item 5) 🔜
 
@@ -504,6 +472,34 @@ highest numbers.
     after every real WRITE) now confirmed across bypass captures
     too, not just block-placement. Still not required to emit.
 - BK-010 closed as a result; BK-027 phase 2 is unblocked.
+
+### HW-015 — Advanced-controls capture session ✅
+
+- **Captured 2026-04-21** — 12 pcapngs in `samples/captured/`:
+  `session-29-amp-{master, master-2, depth, presence, output-level,
+  out-boost-toggle}.pcapng`, `session-29-{delay, flanger,
+  phaser}-feedback.pcapng`, `session-29-reverb-{size, plate-size,
+  number-of-springs, spring-tone}.pcapng`. Founder captured beyond
+  the original 8-knob scope — the reverb bonus captures (2 originally
+  optional + 2 extra) and the out-boost toggle (added mid-session)
+  round it out.
+- **Decoded Session 29 — one structural correction + 11 new registers.**
+  Core finding: `pidHigh=0x000F` on the Amp block was registered as
+  `amp.presence` in Session 26 from cache signature alone. Two
+  captures on Marshall-family amps proved the register is **Master**
+  (not Presence), and the real Presence lives at `pidHigh=0x001E`.
+  See SYSEX-MAP §6i for the full table of new addresses. 11 new
+  byte-exact goldens in `verify-msg` (48/48 green); KNOWN_PARAMS
+  grew 59 → 69 entries.
+- **AM4-Edit quirk noted.** All 12 captures used `action=0x0002`
+  on the wire, not the `action=0x0001` our builder emits. Value-byte
+  packing matches byte-for-byte; only the action field differs. Both
+  work on hardware — documented as a benign version/mode difference
+  in SYSEX-MAP §6i.
+- **Amp-depth release-gate movement.** HW-014 is now higher-priority
+  because Session 29 surfaced a mis-inference (`amp.presence`→Master)
+  that cache-signature-only naming missed. Mid/Treble at
+  0x000D/0x000E remain structural and need HW-014 to close.
 
 ### HW-012 — Round-trip `apply_preset` with the per-slot `channels` shape ✅
 

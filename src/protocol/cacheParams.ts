@@ -39,6 +39,11 @@ export const CACHE_PARAMS = {
     pidLow: 0x003a, pidHigh: 0x0002,
     unit: 'bipolar_percent', displayMin: -100, displayMax: 100,
   },
+  'amp.out_boost_level': {
+    block: 'amp', name: 'out_boost_level',
+    pidLow: 0x003a, pidHigh: 0x0008,
+    unit: 'db', displayMin: 0, displayMax: 4,
+  },
   'amp.type': {
     block: 'amp', name: 'type',
     pidLow: 0x003a, pidHigh: 0x000a,
@@ -65,9 +70,19 @@ export const CACHE_PARAMS = {
     pidLow: 0x003a, pidHigh: 0x000e,
     unit: 'knob_0_10', displayMin: 0, displayMax: 10,
   },
+  'amp.master': {
+    block: 'amp', name: 'master',
+    pidLow: 0x003a, pidHigh: 0x000f,
+    unit: 'knob_0_10', displayMin: 0, displayMax: 10,
+  },
+  'amp.depth': {
+    block: 'amp', name: 'depth',
+    pidLow: 0x003a, pidHigh: 0x001a,
+    unit: 'knob_0_10', displayMin: 0, displayMax: 10,
+  },
   'amp.presence': {
     block: 'amp', name: 'presence',
-    pidLow: 0x003a, pidHigh: 0x000f,
+    pidLow: 0x003a, pidHigh: 0x001e,
     unit: 'knob_0_10', displayMin: 0, displayMax: 10,
   },
   'drive.balance': {
@@ -122,10 +137,25 @@ export const CACHE_PARAMS = {
     pidLow: 0x0042, pidHigh: 0x000b,
     unit: 'seconds', displayMin: 0.1, displayMax: 100,
   },
+  'reverb.size': {
+    block: 'reverb', name: 'size',
+    pidLow: 0x0042, pidHigh: 0x000f,
+    unit: 'percent', displayMin: 0, displayMax: 100,
+  },
   'reverb.predelay': {
     block: 'reverb', name: 'predelay',
     pidLow: 0x0042, pidHigh: 0x0010,
     unit: 'ms', displayMin: 0, displayMax: 250,
+  },
+  'reverb.springs': {
+    block: 'reverb', name: 'springs',
+    pidLow: 0x0042, pidHigh: 0x001b,
+    unit: 'count', displayMin: 2, displayMax: 6,
+  },
+  'reverb.spring_tone': {
+    block: 'reverb', name: 'spring_tone',
+    pidLow: 0x0042, pidHigh: 0x001c,
+    unit: 'knob_0_10', displayMin: 0, displayMax: 10,
   },
   'delay.mix': {
     block: 'delay', name: 'mix',
@@ -147,6 +177,11 @@ export const CACHE_PARAMS = {
     block: 'delay', name: 'time',
     pidLow: 0x0046, pidHigh: 0x000c,
     unit: 'ms', displayMin: 0, displayMax: 8000,
+  },
+  'delay.feedback': {
+    block: 'delay', name: 'feedback',
+    pidLow: 0x0046, pidHigh: 0x000e,
+    unit: 'bipolar_percent', displayMin: -100, displayMax: 100,
   },
   'chorus.mix': {
     block: 'chorus', name: 'mix',
@@ -200,6 +235,11 @@ export const CACHE_PARAMS = {
     pidLow: 0x0052, pidHigh: 0x000d,
     unit: 'percent', displayMin: 0, displayMax: 100,
   },
+  'flanger.feedback': {
+    block: 'flanger', name: 'feedback',
+    pidLow: 0x0052, pidHigh: 0x000e,
+    unit: 'bipolar_percent', displayMin: -99, displayMax: 99,
+  },
   'phaser.mix': {
     block: 'phaser', name: 'mix',
     pidLow: 0x005a, pidHigh: 0x0001,
@@ -220,6 +260,11 @@ export const CACHE_PARAMS = {
     block: 'phaser', name: 'rate',
     pidLow: 0x005a, pidHigh: 0x000c,
     unit: 'hz', displayMin: 0.1, displayMax: 10,
+  },
+  'phaser.feedback': {
+    block: 'phaser', name: 'feedback',
+    pidLow: 0x005a, pidHigh: 0x0010,
+    unit: 'bipolar_percent', displayMin: -90, displayMax: 90,
   },
   'wah.balance': {
     block: 'wah', name: 'balance',

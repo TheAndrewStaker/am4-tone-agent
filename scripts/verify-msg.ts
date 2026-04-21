@@ -224,6 +224,69 @@ const cases: { label: string; built: number[]; expected: string }[] = [
     built: buildSetBlockBypass(BLOCK_TYPE_VALUES.amp, false),
     expected: 'f000017415013a00030001000000040000000000002df7',
   },
+  // Session 29 (HW-015) — advanced-controls capture session. Each case
+  // below corresponds to one session-29-* capture. Our builder uses
+  // `action=0x0001` (consistent since Session 04); the HW-015 captures
+  // show AM4-Edit used `action=0x0002` — a different wire variant that
+  // our path doesn't currently emit. Value-byte packing matches
+  // byte-for-byte between builder and capture; only the action field
+  // and its downstream checksum diverge, which is why these goldens
+  // encode our builder's canonical output rather than the raw capture.
+  {
+    label: 'buildSetParam("amp.master", 5.19) — session-29-amp-master + session-29-amp-master-2 (Brit 800 #34)',
+    built: buildSetParam('amp.master', 5.190985798835754),
+    expected: 'f000017415013a000f00010000000400527860437850f7',
+  },
+  {
+    label: 'buildSetParam("amp.depth", 0.48) — session-29-amp-depth',
+    built: buildSetParam('amp.depth', 0.4774665),
+    expected: 'f000017415013a001a000100000004007f242833681cf7',
+  },
+  {
+    label: 'buildSetParam("amp.presence", 4.08) — session-29-amp-presence',
+    built: buildSetParam('amp.presence', 4.07963901758194),
+    expected: 'f000017415013a001e0001000000040052781a037073f7',
+  },
+  {
+    label: 'buildSetParam("amp.out_boost_level", 0.75 dB) — session-29-amp-output-level',
+    built: buildSetParam('amp.out_boost_level', 0.7468245029449463),
+    expected: 'f000017415013a000800010000000400720b67737833f7',
+  },
+  {
+    label: 'buildSetParam("amp.out_boost", "ON") — session-29-amp-out-boost-toggle',
+    built: buildSetParam('amp.out_boost', 1),
+    expected: 'f000017415013a001601010000000400000010037852f7',
+  },
+  {
+    label: 'buildSetParam("reverb.size", 55%) — session-29-reverb-size + session-29-reverb-plate-size',
+    built: buildSetParam('reverb.size', 55.02319931983948),
+    expected: 'f0000174150142000f00010000000400007701437814f7',
+  },
+  {
+    label: 'buildSetParam("reverb.springs", 4) — session-29-reverb-number-of-springs',
+    built: buildSetParam('reverb.springs', 4),
+    expected: 'f0000174150142001b00010000000400000010040059f7',
+  },
+  {
+    label: 'buildSetParam("reverb.spring_tone", 7.53) — session-29-reverb-spring-tone',
+    built: buildSetParam('reverb.spring_tone', 7.531906962394714),
+    expected: 'f0000174150142001c000100000004000d7428037860f7',
+  },
+  {
+    label: 'buildSetParam("delay.feedback", 55%) — session-29-delay-feedback',
+    built: buildSetParam('delay.feedback', 55.318766832351685),
+    expected: 'f0000174150146000e000100000004005a672153786bf7',
+  },
+  {
+    label: 'buildSetParam("flanger.feedback", 50.8%) — session-29-flanger-feedback',
+    built: buildSetParam('flanger.feedback', 50.795769691467285),
+    expected: 'f0000174150152000e00010000000400420220237873f7',
+  },
+  {
+    label: 'buildSetParam("phaser.feedback", 50.2%) — session-29-phaser-feedback',
+    built: buildSetParam('phaser.feedback', 50.15915632247925),
+    expected: 'f000017415015a001000010000000400271a00037818f7',
+  },
 ];
 
 let pass = 0;

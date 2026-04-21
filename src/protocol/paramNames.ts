@@ -67,22 +67,31 @@ const BALANCE: ParamNameEntry = {
 export const PARAM_NAMES: Readonly<Record<string, Readonly<Record<number, ParamNameEntry>>>> = {
   amp: {
     2: BALANCE,
+    // Session 29 (HW-015): Out Boost Level — dB knob on the Extras tab,
+    // cache (a=0, b=4, c=1, step=0.05). Wire-verified at pidHigh=0x08.
+    8: { name: 'out_boost_level', unit: 'db', displayMin: 0, displayMax: 4 },
     10: 'type',
     11: 'gain',
     12: 'bass',
-    // Session B additions (2026-04-19). Cache record signatures at ids
-    // 13/14/15 are identical to gain/bass (0..1 range, display-scale 10,
-    // step 0.001). The AM4 Owner's Manual line 1563 lists the Amp
-    // block's front-panel controls as "Gain, Bass, Mid, Treble,
-    // Presence, Level" — Fractal's canonical tone-stack order places
-    // Mid/Treble/Presence in exactly that sequence after Bass (Blocks
-    // Guide §Tone Page, pp. 9–10). Awaits P1-010 Session D hardware
-    // spot-check per the P1-010 plan; structural evidence alone is
-    // strong (identical cache layout to confirmed neighbors + manual-
-    // documented AM4-specific labels).
+    // ids 13/14 (mid/treble) still structural — cache signature identical
+    // to gain/bass (knob_0_10, 0..1 range, step 0.001). Named per the
+    // AM4 Owner's Manual line 1563 tone-stack order "Gain, Bass, Mid,
+    // Treble, Presence, Level". HW-014 spot-check still pending.
     13: 'mid',
     14: 'treble',
-    15: 'presence',
+    // Session 29 (HW-015): id 15 (pidHigh=0x0f) was mis-inferred as
+    // 'presence' in Session 26 from the cache signature alone. Two
+    // wire captures (amp-master on an unknown Marshall-family amp +
+    // amp-master-2 on "Brit 800 #34") prove this register is Master.
+    // Real Presence was subsequently captured at id 30 (pidHigh=0x1e).
+    15: 'master',
+    // Session 29 (HW-015): Depth at pidHigh=0x1a, knob_0_10. Wire-
+    // verified with a full 0→10 sweep capture.
+    26: 'depth',
+    // Session 29 (HW-015): Presence at pidHigh=0x1e, knob_0_10. Wire-
+    // verified on the same amp as amp-master. Corrects the Session 26
+    // structural guess at id 15.
+    30: 'presence',
   },
   drive: {
     2: BALANCE,
@@ -106,10 +115,25 @@ export const PARAM_NAMES: Readonly<Record<string, Readonly<Record<number, ParamN
     // 'seconds' unit override — generator default for c=1 is 'db'.
     // displayMin rounded to 0.1 (cache stores 0.10000000149…).
     11: { name: 'time', unit: 'seconds', displayMin: 0.1 },
+    // Session 29 (HW-015): Size at pidHigh=0x0f, percent. Wire-verified
+    // on two captures — "Plate Size" (on Plate reverb type) and "Size"
+    // (on Room reverb type) both wrote to this register, confirming
+    // it's a universal reverb-size knob whose UI label depends on the
+    // active reverb type.
+    15: 'size',
     // Blocks Guide §Reverb Basic Page (p. 82): "Predelay — Adds extra
     // delay before the reverb starts." Cache 0x10 signature (0..0.25s
     // × 1000 → 0..250 ms) matches the canonical reverb predelay range.
     16: 'predelay',
+    // Session 29 (HW-015): Spring-reverb-specific. Number of Springs
+    // (integer count 2..6) at pidHigh=0x1b; cache c=1 structurally
+    // ambiguous — needs 'count' override. Spring Tone (knob_0_10) at
+    // pidHigh=0x1c; cache signature matches knob_0_10 default. Both
+    // only visible in AM4-Edit when a Spring reverb type is active,
+    // but the registers remain writable on any type — writes simply
+    // no-op on non-spring reverbs.
+    27: { name: 'springs', unit: 'count', displayMin: 2, displayMax: 6 },
+    28: 'spring_tone',
   },
   delay: {
     // Mix follows the universal percent-at-0x01 pattern (Blocks Guide
@@ -120,6 +144,10 @@ export const PARAM_NAMES: Readonly<Record<string, Readonly<Record<number, ParamN
     2: BALANCE,
     10: 'type',
     12: 'time',
+    // Session 29 (HW-015): Feedback at pidHigh=0x0e. Cache (a=-1, b=1,
+    // c=100) is bipolar — negative feedback inverts the phase of the
+    // repeats, a standard Fractal delay feature.
+    14: { name: 'feedback', unit: 'bipolar_percent', displayMin: -100, displayMax: 100 },
   },
   // Universal `mix` at pidHigh 0x01 across every effect block that
   // exposes a Mix Page per the Blocks Guide (p. 7). Skipped for
@@ -144,12 +172,27 @@ export const PARAM_NAMES: Readonly<Record<string, Readonly<Record<number, ParamN
     10: 'type',
     11: { name: 'rate', unit: 'hz', displayMin: 0.05 },
     13: 'depth',
+    // Session 29 (HW-015): Feedback at pidHigh=0x0e. Cache (a=-0.995,
+    // b=0.995, c=100) — bipolar_percent with the internal range
+    // clamped slightly short of ±1.0 per Fractal's flanger
+    // implementation.
+    14: { name: 'feedback', unit: 'bipolar_percent', displayMin: -99, displayMax: 99 },
   },
   phaser: {
     1: 'mix',
     2: BALANCE,
     10: 'type',
     12: { name: 'rate', unit: 'hz', displayMin: 0.1 },
+    // Session 29 (HW-015): Feedback at pidHigh=0x10. Cache (a=-0.9,
+    // b=0.9, c=111.1) — bipolar, internal ±0.9 with an unusual
+    // display-scale of 111.1 meaning internal -0.9 displays as
+    // -99.99%. We use the standard bipolar_percent unit (scale 100)
+    // with displayMin/Max clamped to ±90 so input stays within the
+    // internal range; the displayed percentage in AM4-Edit may read
+    // slightly higher than the value Claude used (e.g. "50" sets
+    // internal 0.5, AM4-Edit displays ~55.5%) but the wire behavior
+    // is correct. Natural-language UX impact is negligible.
+    16: { name: 'feedback', unit: 'bipolar_percent', displayMin: -90, displayMax: 90 },
   },
   wah: {
     2: BALANCE,
