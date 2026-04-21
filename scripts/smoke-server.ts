@@ -269,6 +269,78 @@ async function main(): Promise<void> {
   );
   console.log(`✓ apply_preset rejects overlong name (33 chars)`);
 
+  // scenes[] validation (BK-027 phase 2). Like the slot validation, these
+  // fail in the pre-MIDI validation layer so no hardware is required.
+  await assertApplyPresetError(
+    'scenes: empty scene entry',
+    { slots: [{ position: 1, block_type: 'amp' }], scenes: [{ index: 1 }] },
+    'at least one of channels / bypass / name',
+  );
+  console.log(`✓ apply_preset rejects scene entry with no channels/bypass/name`);
+
+  await assertApplyPresetError(
+    'scenes: duplicate index',
+    {
+      slots: [{ position: 1, block_type: 'amp' }],
+      scenes: [
+        { index: 2, channels: { amp: 'A' } },
+        { index: 2, channels: { amp: 'B' } },
+      ],
+    },
+    'used twice',
+  );
+  console.log(`✓ apply_preset rejects duplicate scene index`);
+
+  await assertApplyPresetError(
+    'scenes: unknown block in channels map',
+    {
+      slots: [{ position: 1, block_type: 'amp' }],
+      scenes: [{ index: 1, channels: { not_a_block: 'A' } }],
+    },
+    'channels.not_a_block',
+  );
+  console.log(`✓ apply_preset rejects unknown block in scenes[].channels`);
+
+  await assertApplyPresetError(
+    'scenes: channels on block without channels',
+    {
+      slots: [{ position: 1, block_type: 'compressor' }],
+      scenes: [{ index: 1, channels: { compressor: 'A' } }],
+    },
+    "doesn't have channels",
+  );
+  console.log(`✓ apply_preset rejects scenes[].channels on compressor`);
+
+  await assertApplyPresetError(
+    'scenes: non-A/B/C/D letter',
+    {
+      slots: [{ position: 1, block_type: 'amp' }],
+      scenes: [{ index: 1, channels: { amp: 'E' } }],
+    },
+    'must be one of A/B/C/D',
+  );
+  console.log(`✓ apply_preset rejects non-A/B/C/D letter in scenes[].channels`);
+
+  await assertApplyPresetError(
+    'scenes: unknown block in bypass map',
+    {
+      slots: [{ position: 1, block_type: 'amp' }],
+      scenes: [{ index: 1, bypass: { not_a_block: true } }],
+    },
+    'bypass.not_a_block',
+  );
+  console.log(`✓ apply_preset rejects unknown block in scenes[].bypass`);
+
+  await assertApplyPresetError(
+    'scenes: "none" in bypass map',
+    {
+      slots: [{ position: 1, block_type: 'amp' }],
+      scenes: [{ index: 1, bypass: { none: true } }],
+    },
+    'no bypass state',
+  );
+  console.log(`✓ apply_preset rejects "none" in scenes[].bypass`);
+
   child.stdin.end();
   await once(child, 'exit');
   const stderrStr = Buffer.concat(stderrChunks).toString('utf8');

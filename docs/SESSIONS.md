@@ -6,6 +6,103 @@ file is the chronological trail that reference is built from.
 
 ---
 
+## 2026-04-21 — Session 28 — BK-027 phase 2 shipped; apply_preset scenes[]
+
+No new captures. All HW-011 decodes were in hand from Session 27; the work
+was tool-layer orchestration + the HW-012 response-text honesty fix.
+
+### `apply_preset` gains `scenes[]`
+
+New optional top-level field on `apply_preset`:
+
+```typescript
+scenes?: Array<{
+  index: 1 | 2 | 3 | 4,
+  name?: string,                             // ≤32 ASCII-printable
+  channels?: { [block: string]: 'A'|'B'|'C'|'D' },
+  bypass?: { [block: string]: boolean },     // true = bypass (silent)
+}>;
+```
+
+Each entry must supply at least one of channels / bypass / name —
+empty entries are rejected as a no-op. Scenes may be listed in any
+order; the orchestrator walks them sequentially so the AM4 ends up
+on the last-configured scene index.
+
+**Execution inside the handler.** After existing slot-level writes
+(block placement + per-slot channel param writes + optional name):
+
+1. `buildSwitchScene(sceneIndex)` — standard 64-byte-echo ack shape.
+2. `buildSetParam(<block>.channel, idx)` per entry in `channels`.
+3. `buildSetBlockBypass(<blockPidLow>, bypassed)` per entry in
+   `bypass`. pidHigh=0x0003 with float32 (1.0 bypass / 0.0 active).
+4. `buildSetSceneName(sceneIndex, name)` if supplied — uses the
+   18-byte `isCommandAck` shape (same register family as preset
+   rename), **different predicate from the rest of the loop**.
+
+Ack-shape branching lives in a compact `COMMAND_ACK_KINDS` set so
+the existing single-loop send pattern stays intact; the predicate
+is picked per-write.
+
+### HW-012 response-text honesty fix (bundled)
+
+Closed in the same change rather than queued separately — the
+narrative was already about scenes, and the correct fix was to
+remove the idealized per-scene narration entirely rather than add
+more. The response now prints:
+
+- **Active scene after this call** (set to the last scene-switch we
+  issued; explicitly omitted when the caller didn't configure any
+  scenes, so Claude doesn't narrate untouched state).
+- **Channels the active scene points at** — sourced from
+  `lastKnownChannel` after the send loop finishes. Scene-switch
+  writes invalidate the cache at the moment they fire; subsequent
+  channel-switch writes within that scene re-populate it. Net: the
+  reported channels reflect the LAST scene's pointers, which is
+  what the AM4 is actually playing when the call returns.
+- **Per-write ack log** unchanged except for the new
+  `switch_scene`, `scene_channel`, `bypass`, `scene_name` labels.
+
+When no scenes are touched, the response reverts to the
+slot-channels-only story ("last channel written per block… scene
+pointers unchanged by this call") — no scene claims from whole
+cloth.
+
+### Validation — seven new smoke assertions
+
+Smoke-server picks up scene-path validation (pre-MIDI, no hardware
+required):
+
+- empty scene entry (no channels/bypass/name) → *"at least one of
+  channels / bypass / name"*.
+- duplicate scene index → *"used twice"*.
+- unknown block in `scenes[].channels` → path-prefixed error.
+- `scenes[].channels` on compressor (no channel register) →
+  *"doesn't have channels"*.
+- non-A/B/C/D letter → *"must be one of A/B/C/D"*.
+- unknown block in `scenes[].bypass` → path-prefixed error.
+- `"none"` in `scenes[].bypass` → *"no bypass state"*.
+
+### Preflight
+
+37/37 verify-msg, 16/16 verify-pack, 8/8 verify-echo, 44/44
+verify-cache-params, 16/16 verify-enum-lookup, smoke-server 17 tools
++ 16 apply_preset validation assertions (6 kitchen-sink phase 1 + 1
+overlong-name + 7 scenes phase 2, + 2 existing lineage paths).
+Tool count unchanged at 17.
+
+### Follow-ups
+
+- **P5-011 items 1/4/5** — MCP tool-description audit (call-to-
+  action lead per mutation tool, top-of-list connector-live note,
+  Claude Desktop manual smoke test). Release-gate.
+- **P1-012 channel-aware param writes** — `set_param` / `set_params`
+  channel arg. AM4-depth-gate.
+- **Second unit-extension pass** — `bipolar_percent`, `count`,
+  `semitones` → ~15–20 more params. AM4-depth-gate.
+
+---
+
 ## 2026-04-21 — Session 27 — HW-011 captures landed; HW-012 round-trip + two UX findings
 
 ### HW-011 — captures complete, decode queued

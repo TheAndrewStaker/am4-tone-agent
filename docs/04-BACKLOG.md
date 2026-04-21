@@ -1900,36 +1900,41 @@ Skip until explicit user demand materializes.
 - **When to schedule.** After BK-025 ships — same methodology,
   likely half the effort because we have a template by then.
 
-### BK-027 Kitchen-sink `apply_preset` (blocks × channels × scenes, one call)
-- **Status (2026-04-21):** **Phase 1 hardware-verified (Session 27,
+### BK-027 Kitchen-sink `apply_preset` (blocks × channels × scenes, one call) — ✅ shipped (both phases)
+- **Status (2026-04-21, Session 28):** **Phase 2 shipped.** `scenes[]`
+  added to the tool schema; orchestrator composes `switch_scene` →
+  per-block channel-switch → per-block `set_block_bypass` →
+  `set_scene_name` at the tool layer (no new protocol primitive —
+  Session 27's HW-011 decode supplied everything needed). Response
+  text rewritten to report the actual final active scene + its
+  channel pointers, replacing the idealized-scene narration that
+  tripped HW-012. Seven new pre-MIDI validation smoke assertions.
+  Hardware round-trip deferred to the next session touching the
+  device — the primitives are each individually hardware-verified
+  (HW-011 + Session 27 MCP tool test; BK-027 phase 1 round-trip per
+  HW-012), so this session is orchestration only.
+
+- **Phase 1 status (2026-04-21):** **Hardware-verified (Session 27,
   HW-012).** `slots[i].channels` per-channel param maps round-tripped
   on the device — 12 writes landed clean, block layout correct, per-
   channel amp values confirmed (channel A: Deluxe Verb Normal / gain
   3; channel D: 1959SLP Normal / gain 8; reverb mix 30 on channel A).
-  Phase 2 (scenes) unblocked — HW-011 decode landed same session;
-  orchestration remains to be wired up. Optional `name?` field
-  shipped Session 27 (cont) after the Sailing-transcript UX test —
-  `apply_preset({slots, name})` writes the working-buffer name at
-  the end; still does NOT save (apply/save boundary preserved).
+  Optional `name?` field shipped Session 27 (cont) after the
+  Sailing-transcript UX test — `apply_preset({slots, name})` writes
+  the working-buffer name at the end; still does NOT save (apply/save
+  boundary preserved).
 
-- **Known runtime limitation (surfaced by HW-012; fix queued).**
-  Because scene → channel pointer writes aren't decoded yet,
-  `apply_preset`'s channel walk leaves the block sitting on whichever
-  channel was written last (A → B → C → D canonical order = highest
-  letter the caller supplied values for). All scenes inherit that
-  channel. In the HW-012 round-trip, scene 1 ended up showing amp
-  channel D even though the caller conceptually described channel A
-  as the clean-tone starting point. The tool's response text
-  over-promised *"strum channel A for the clean tone, then flip to
-  channel D"* — that narration ignores the actual final state.
-  - **Immediate fix (before phase 2 lands):** tighten
-    `apply_preset`'s response text to report the actual final
-    active channel per block, and name the current-scene-shows-
-    channel-X fact verbatim. No lying-by-narrative.
-  - **Full fix (phase 2, HW-011-dependent):** `scenes[].channels`
-    map lets the caller explicitly assign channel letters per
-    scene. Response text then reports "scene N → block B on
-    channel X" for each scene configured.
+- **HW-012 finding (closed Session 28).** Phase 1 left the tool
+  narrating scene intent that didn't match the actual final
+  active-channel-per-block state. Phase 2's response rewrite
+  eliminates the idealized narration entirely: when scenes are
+  configured, the response reports the last-active scene (the one
+  the AM4 is on when the call returns) and the channels that scene
+  now points at, sourced from `lastKnownChannel` after the send loop.
+  When scenes aren't configured, the response reverts to a
+  channels-only story with an explicit "scene pointers unchanged by
+  this call" caveat so Claude can't invent scene state that wasn't
+  touched.
 - **Context.** Session 22 conversation produced a realistic user prompt
   the tool stack currently can't satisfy in one call: *"make a preset
   with a clean scene, a crunch scene, a rhythm scene, and a solo
@@ -2019,18 +2024,20 @@ Skip until explicit user demand materializes.
   - **Phase 1 (shipped Session 24, hardware-verified Session 27):**
     `slots[i].channels` — per-channel param maps via the existing
     channel-switch + SET_PARAM primitives.
-  - **Phase 2 (ready to build as of Session 27):** `scenes[]` support.
-    All required primitives now exist — scene-switch (Session 21),
+  - **Phase 2 (shipped Session 28):** `scenes[]` support. All
+    required primitives already existed — scene-switch (Session 21),
     scene-channel reuses the existing channel-switch under an active
-    scene (Session 27 decode), scene-bypass via new
-    `buildSetBlockBypass` at `pidHigh=0x0003` (Session 27 decode),
-    scene-name via `set_scene_name` (Session 21). The orchestrator
-    walks: for each `scenes[i]` with overrides → `switch_scene(i)`
+    scene (Session 27 HW-011 decode), scene-bypass via
+    `buildSetBlockBypass` at `pidHigh=0x0003` (Session 27 HW-011
+    decode), scene-name via `set_scene_name` (Session 21). The
+    orchestrator walks: for each `scenes[i]` → `switch_scene(i)`
     → channel-switch per block in `scenes[i].channels` →
-    `set_block_bypass` per block in `scenes[i].bypass` → scene-name
-    if supplied. Each phase remains independently useful — a preset
-    with per-channel params but default scene mappings still sounds
-    correct.
+    `set_block_bypass` per block in `scenes[i].bypass` →
+    `set_scene_name` if supplied. Ack-shape branching: scene-name
+    uses the 18-byte `isCommandAck`; all other scene-phase writes
+    use the 64-byte `isWriteEcho`. Hardware round-trip deferred to
+    the next session using the device (primitives each
+    individually HW-verified).
 
 - **Why not grow `save_preset` too?** Two reasons.
   1. **Separation of concerns.** `apply_preset` operates on the
@@ -2048,13 +2055,14 @@ Skip until explicit user demand materializes.
   composite it already is.
 
 - **When to schedule.** Phase 1 shipped Session 24 + hardware-verified
-  Session 27. Phase 2 is the **next active work item** as of Session
-  27 — tractable in a single session given all primitives now exist.
+  Session 27. Phase 2 shipped Session 28 (orchestration-only, no new
+  protocol work).
 
 - **Relation to other items.**
-  - **BK-010 Scene support in apply_preset** — already closed
-    (2026-04-21, Session 27). Phase 2 completes the deliverable.
+  - **BK-010 Scene support in apply_preset** — closed 2026-04-21
+    (Session 27). Fully superseded by the phase 2 deliverable.
   - **HW-011** — ✅ archived. Decode complete.
+  - **HW-012 response-text honesty fix** — ✅ bundled into phase 2.
   - **P1-012 Channel awareness** — phase 1 extends the per-write
     channel mechanism to per-channel batches, building on the
     same cache + switch primitives.

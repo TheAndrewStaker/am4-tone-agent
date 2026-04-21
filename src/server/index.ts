@@ -793,23 +793,35 @@ server.registerTool('apply_preset', {
     'Only amp / drive / reverb / delay have channels — `channel` and',
     '`channels` are rejected for other blocks. Channel maps are written in',
     'canonical A→B→C→D order so the last-written channel is predictable.',
-    'Optional top-level field:',
+    'Optional top-level fields:',
     '  • name — working-buffer preset name, up to 32 ASCII-printable chars.',
     '    Written AFTER all slot writes so the display reflects it immediately.',
     '    This does NOT save to a location — apply_preset remains working-',
     '    buffer-only. Example: { slots: [...], name: "Sailing - C. Cross" }.',
+    '  • scenes — per-scene overrides. Each entry configures one of the four',
+    '    scenes (index 1..4) by pointing each block at a specific channel',
+    '    (`channels: { amp: "A", drive: "A" }`), setting per-block bypass',
+    '    (`bypass: { drive: true }` silences drive on that scene), and/or',
+    '    renaming (`name: "clean"`). A scene entry may specify any combination',
+    '    of channels / bypass / name — at least one must be supplied.',
+    '    Scenes are configured in the order given; the AM4 ends up on the',
+    '    last-configured scene when apply_preset returns.',
     'CHANNEL/SCENE MODEL: channels (A/B/C/D) hold the param values; scenes',
     'pick which channel each block uses. If the user wants a preset where',
-    'a block varies tone across scenes, use the `channels` shape to fill',
-    'the relevant channels; scenes then select which channel each scene',
-    'plays through (scene→channel writes are not yet implemented in this',
-    'tool — see BK-027 phase 2).',
+    'a block varies tone across scenes, use `slots[].channels` to fill',
+    'the relevant channels with params, then use `scenes[].channels` to',
+    'point each scene at the channel it should use. Unspecified scene',
+    'channel/bypass pointers keep whatever the preset already had; only',
+    'named scenes/blocks are touched.',
     'Validation happens up-front; if any slot/param is invalid (duplicate',
     'position, unknown block type, unknown param for that block, value out',
     'of range, unknown enum name, channel on a block that doesn\'t have',
-    'channels, conflicting channel+channels, unknown channel letter) the',
-    'entire call is rejected with nothing sent. Same ack caveat as',
-    'set_param/set_params: wire-acks confirm receipt, not audible change.',
+    'channels, conflicting channel+channels, unknown channel letter), or',
+    'any scene entry is invalid (duplicate index, unknown block in',
+    'channels/bypass map, non-A/B/C/D letter, bypass value not boolean,',
+    'empty scene entry with no channels/bypass/name), the entire call is',
+    'rejected with nothing sent. Same ack caveat as set_param/set_params:',
+    'wire-acks confirm receipt, not audible change.',
     'REVERSIBILITY / SAVE INTENT: this call hits the WORKING BUFFER only.',
     'The user can audition the tone, tweak it, or switch presets to discard.',
     'Do NOT follow this call with save_to_location / save_preset unless the',
@@ -840,15 +852,37 @@ server.registerTool('apply_preset', {
     name: z.string().max(32).optional().describe(
       'Optional working-buffer preset name (≤32 ASCII-printable chars). Written after all slot writes. Does NOT save — persistence still requires a separate save_to_location / save_preset call.',
     ),
+    scenes: z.array(z.object({
+      index: z.number().int().min(1).max(4).describe('Scene number 1..4 (matches AM4-Edit numbering).'),
+      name: z.string().max(32).optional().describe(
+        'Optional scene name (≤32 ASCII-printable chars). Space-padded on the wire.',
+      ),
+      channels: z.record(z.string(), z.string()).optional().describe(
+        'Map of block name → channel letter (A/B/C/D). Points this scene at a specific channel per block, e.g. { amp: "A", drive: "A" }. Only blocks with channels (amp / drive / reverb / delay) may appear.',
+      ),
+      bypass: z.record(z.string(), z.boolean()).optional().describe(
+        'Map of block name → bypass flag. true = silence the block on this scene (block stays in the slot, just passes input through); false = active. Example: { drive: true, reverb: false }.',
+      ),
+    })).max(4).optional().describe(
+      'Per-scene overrides. Each scene entry configures one of the four scenes; at least one of channels / bypass / name must be supplied per entry. Scenes not listed here are left untouched.',
+    ),
   },
-}, async ({ slots, name }) => {
+}, async ({ slots, name, scenes }) => {
   // --- Validation pass (no MIDI yet) ---
   const seenPositions = new Set<number>();
   type PreparedWrite =
     | { kind: 'place'; position: 1 | 2 | 3 | 4; blockName: string; bytes: number[] }
     | { kind: 'channel'; block: string; index: number; bytes: number[] }
-    | { kind: 'param'; block: string; paramName: string; resolved: number; key: ParamKey; display: string; bytes: number[] };
+    | { kind: 'param'; block: string; paramName: string; resolved: number; key: ParamKey; display: string; bytes: number[] }
+    | { kind: 'switch_scene'; sceneIndex: number; bytes: number[] }
+    | { kind: 'scene_channel'; block: string; index: number; sceneIndex: number; bytes: number[] }
+    | { kind: 'bypass'; block: string; bypassed: boolean; sceneIndex: number; bytes: number[] }
+    | { kind: 'scene_name'; sceneIndex: number; name: string; bytes: number[] };
   const prepared: PreparedWrite[] = [];
+  // Writes that ack with the 18-byte command-ack shape (rename family) vs
+  // the 64-byte write-echo shape (SET_PARAM / placement / scene-switch /
+  // bypass). Used below by the send loop to pick the right predicate.
+  const COMMAND_ACK_KINDS = new Set<PreparedWrite['kind']>(['scene_name']);
 
   /**
    * Resolve a single (paramName, value) pair within a block into a prepared
@@ -999,6 +1033,145 @@ server.registerTool('apply_preset', {
     }
   });
 
+  // --- Scenes validation + prepare phase ---
+  // Each scene entry can remap per-block channel pointers, set per-block
+  // bypass, and/or rename the scene. Scenes are applied after all slot-
+  // level writes so the AM4 sees the final block layout + channel data
+  // before scene pointers get rewired. See BK-027 phase 2 / HW-011
+  // decode for the primitives used here.
+  type PreparedScene = {
+    /** 0..3 internal index. */
+    sceneIndex: number;
+    /** 1..4 display index (as supplied by caller). */
+    oneBased: number;
+    /** block (canonical) → channel letter. Validated; may be empty. */
+    channels: Array<{ block: string; letter: 'A' | 'B' | 'C' | 'D'; index: number }>;
+    /** block (canonical) → bypass boolean. */
+    bypass: Array<{ block: string; blockValue: number; bypassed: boolean }>;
+    /** Optional scene name. */
+    name?: string;
+  };
+  const preparedScenes: PreparedScene[] = [];
+  const seenSceneIndices = new Set<number>();
+  if (scenes !== undefined) {
+    scenes.forEach((sc, i) => {
+      const at = `scenes[${i}] (scene ${sc.index})`;
+      if (seenSceneIndices.has(sc.index)) {
+        throw new Error(`${at}: scene index ${sc.index} used twice — each scene may appear at most once per call`);
+      }
+      seenSceneIndices.add(sc.index);
+
+      const hasAny =
+        sc.name !== undefined
+        || (sc.channels !== undefined && Object.keys(sc.channels).length > 0)
+        || (sc.bypass !== undefined && Object.keys(sc.bypass).length > 0);
+      if (!hasAny) {
+        throw new Error(`${at}: supply at least one of channels / bypass / name — an empty scene entry is a no-op.`);
+      }
+
+      const chList: PreparedScene['channels'] = [];
+      if (sc.channels !== undefined) {
+        for (const [rawBlock, rawLetter] of Object.entries(sc.channels)) {
+          const blockValue = resolveBlockType(rawBlock);
+          if (blockValue === undefined) {
+            const known = Object.keys(BLOCK_TYPE_VALUES).filter((n) => n !== 'none').join(', ');
+            throw new Error(`${at} channels.${rawBlock}: unknown block "${rawBlock}". Known: ${known}`);
+          }
+          const canonicalBlock = BLOCK_NAMES_BY_VALUE[blockValue] ?? rawBlock;
+          if (canonicalBlock === 'none') {
+            throw new Error(`${at} channels.${rawBlock}: "none" has no channel register. Remove the entry.`);
+          }
+          if (!CHANNEL_BLOCKS.has(canonicalBlock)) {
+            throw new Error(`${at} channels.${canonicalBlock}: block "${canonicalBlock}" doesn't have channels (only amp / drive / reverb / delay expose A/B/C/D).`);
+          }
+          if (typeof rawLetter !== 'string') {
+            throw new Error(`${at} channels.${canonicalBlock}: expected channel letter A/B/C/D, got ${JSON.stringify(rawLetter)}`);
+          }
+          const letter = rawLetter.trim().toUpperCase();
+          if (letter !== 'A' && letter !== 'B' && letter !== 'C' && letter !== 'D') {
+            throw new Error(`${at} channels.${canonicalBlock}: must be one of A/B/C/D, got "${rawLetter}"`);
+          }
+          chList.push({
+            block: canonicalBlock,
+            letter: letter as 'A' | 'B' | 'C' | 'D',
+            index: ['A', 'B', 'C', 'D'].indexOf(letter),
+          });
+        }
+      }
+
+      const byList: PreparedScene['bypass'] = [];
+      if (sc.bypass !== undefined) {
+        for (const [rawBlock, rawVal] of Object.entries(sc.bypass)) {
+          const blockValue = resolveBlockType(rawBlock);
+          if (blockValue === undefined) {
+            const known = Object.keys(BLOCK_TYPE_VALUES).filter((n) => n !== 'none').join(', ');
+            throw new Error(`${at} bypass.${rawBlock}: unknown block "${rawBlock}". Known: ${known}`);
+          }
+          const canonicalBlock = BLOCK_NAMES_BY_VALUE[blockValue] ?? rawBlock;
+          if (canonicalBlock === 'none') {
+            throw new Error(`${at} bypass.${rawBlock}: "none" has no bypass state. Remove the entry.`);
+          }
+          if (typeof rawVal !== 'boolean') {
+            throw new Error(`${at} bypass.${canonicalBlock}: expected boolean (true = bypass, false = active), got ${JSON.stringify(rawVal)}`);
+          }
+          byList.push({ block: canonicalBlock, blockValue, bypassed: rawVal });
+        }
+      }
+
+      if (sc.name !== undefined) {
+        // Byte-build surfaces overlong / non-ASCII errors cleanly.
+        try {
+          buildSetSceneName(sc.index - 1, sc.name);
+        } catch (err) {
+          throw new Error(`${at} name: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
+      preparedScenes.push({
+        sceneIndex: sc.index - 1,
+        oneBased: sc.index,
+        channels: chList,
+        bypass: byList,
+        name: sc.name,
+      });
+    });
+
+    for (const ps of preparedScenes) {
+      prepared.push({
+        kind: 'switch_scene',
+        sceneIndex: ps.sceneIndex,
+        bytes: buildSwitchScene(ps.sceneIndex),
+      });
+      for (const ch of ps.channels) {
+        const channelKey = `${ch.block}.channel` as ParamKey;
+        prepared.push({
+          kind: 'scene_channel',
+          block: ch.block,
+          index: ch.index,
+          sceneIndex: ps.sceneIndex,
+          bytes: buildSetParam(channelKey, ch.index),
+        });
+      }
+      for (const by of ps.bypass) {
+        prepared.push({
+          kind: 'bypass',
+          block: by.block,
+          bypassed: by.bypassed,
+          sceneIndex: ps.sceneIndex,
+          bytes: buildSetBlockBypass(by.blockValue, by.bypassed),
+        });
+      }
+      if (ps.name !== undefined) {
+        prepared.push({
+          kind: 'scene_name',
+          sceneIndex: ps.sceneIndex,
+          name: ps.name,
+          bytes: buildSetSceneName(ps.sceneIndex, ps.name),
+        });
+      }
+    }
+  }
+
   // Prepare the optional name write. Location index is irrelevant (per HW-002
   // the rename command is working-buffer scoped regardless of the location
   // bytes in the payload), so we pass 0. Builder throws on overlong / non-
@@ -1017,21 +1190,44 @@ server.registerTool('apply_preset', {
   const lines: string[] = [];
   let acked = 0;
   let unacked = 0;
+  /**
+   * Track the scene the server switched to last during this call. Scene
+   * index is 0..3 internally; translated to 1..4 for the response text.
+   * Remains undefined if no scene was touched, in which case we deliberately
+   * don't narrate which scene is active — the pre-call scene is whatever it
+   * was, and we didn't change it.
+   */
+  let lastActiveScene: number | undefined;
   for (const w of prepared) {
+    const predicate = COMMAND_ACK_KINDS.has(w.kind) ? isCommandAck : isWriteEcho;
     const echoPromise = conn.receiveSysExMatching(
-      (resp) => isWriteEcho(w.bytes, resp),
+      (resp) => predicate(w.bytes, resp),
       WRITE_ECHO_TIMEOUT_MS,
     );
     conn.send(w.bytes);
     let label: string;
     if (w.kind === 'place') label = `place slot ${w.position} → ${w.blockName}`;
     else if (w.kind === 'channel') label = `switch ${w.block} to channel ${channelLetter(w.index)}`;
+    else if (w.kind === 'switch_scene') label = `switch to scene ${w.sceneIndex + 1}`;
+    else if (w.kind === 'scene_channel') label = `scene ${w.sceneIndex + 1}: point ${w.block} at channel ${channelLetter(w.index)}`;
+    else if (w.kind === 'bypass') label = `scene ${w.sceneIndex + 1}: ${w.block} → ${w.bypassed ? 'bypassed' : 'active'}`;
+    else if (w.kind === 'scene_name') label = `scene ${w.sceneIndex + 1} rename → "${w.name}"`;
     else label = `${w.key} = ${w.display}`;
     try {
       await echoPromise;
       acked++;
       recordAckOutcome(true);
-      if (w.kind === 'channel') lastKnownChannel[w.block] = w.index;
+      if (w.kind === 'channel' || w.kind === 'scene_channel') {
+        lastKnownChannel[w.block] = w.index;
+      }
+      if (w.kind === 'switch_scene') {
+        // A scene change means the AM4's block→channel pointers are now
+        // whatever the new scene dictates; our server-side cache of
+        // "which channel each block is on" is no longer authoritative
+        // until we explicitly point things in this new scene.
+        invalidateChannelCache();
+        lastActiveScene = w.sceneIndex;
+      }
       if (w.kind === 'param') observeWrittenParam(w.block, w.paramName, w.resolved);
       lines.push(`  ✓ ${label}`);
     } catch {
@@ -1055,11 +1251,44 @@ server.registerTool('apply_preset', {
       lines.push(`  ? ${label} — no ack within ${WRITE_ECHO_TIMEOUT_MS} ms`);
     }
   }
+
+  // Honesty lines — report the actual final on-device state we can vouch
+  // for. Don't narrate idealized per-scene layouts (HW-012 finding: the
+  // tool used to describe scene→channel intent that didn't match reality).
+  const stateLines: string[] = [];
+  if (lastActiveScene !== undefined) {
+    stateLines.push(
+      `Active scene after this call: ${lastActiveScene + 1} (last scene configured). Other scenes retain whatever channel / bypass state they had before — switch_scene to audition them.`,
+    );
+    const channelPairs = (['amp', 'drive', 'reverb', 'delay'] as const)
+      .filter((b) => lastKnownChannel[b] !== undefined)
+      .map((b) => `${b}=${channelLetter(lastKnownChannel[b] as number)}`);
+    if (channelPairs.length) {
+      stateLines.push(
+        `Channels the active scene (${lastActiveScene + 1}) now points at: ${channelPairs.join(', ')}.`,
+      );
+    }
+  } else {
+    // No scenes were touched. Slot-level channel writes filled A/B/C/D with
+    // params but didn't change which channel each scene uses — that's
+    // whatever the preset already had. Be explicit so Claude doesn't
+    // narrate "scene 1 plays channel A" on its own.
+    const channelPairs = (['amp', 'drive', 'reverb', 'delay'] as const)
+      .filter((b) => lastKnownChannel[b] !== undefined)
+      .map((b) => `${b}=${channelLetter(lastKnownChannel[b] as number)}`);
+    if (channelPairs.length) {
+      stateLines.push(
+        `Last channel written per block: ${channelPairs.join(', ')}. Param values are stored in those channels regardless of scene; which scene plays which channel is unchanged by this call.`,
+      );
+    }
+  }
+
   const header = unacked === 0
     ? `Applied preset: ${totalWrites} writes, all wire-acked. Acks don't confirm audible change — cross-check on the AM4 if it matters. Working buffer only — the user can discard by switching presets, or ask to save/persist to a preset location.`
     : `Applied preset: ${totalWrites} writes, ${acked} acked, ${unacked} un-acked (server auto-reconnects after ${STALE_HANDLE_TIMEOUT_THRESHOLD} consecutive ack-less writes; or call reconnect_midi).`;
+  const body = [header, ...stateLines, ...lines].join('\n');
   return {
-    content: [{ type: 'text', text: `${header}\n${lines.join('\n')}` }],
+    content: [{ type: 'text', text: body }],
   };
 });
 

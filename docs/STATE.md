@@ -5,7 +5,28 @@
 > hardware tasks (USB captures, round-trip tests, reference dumps) live
 > in **`docs/HARDWARE-TASKS.md`** — check that file alongside this one at
 > session start.
-> Last updated: **2026-04-21** (Session 27 cont — Sailing-transcript
+> Last updated: **2026-04-21** (Session 28 — BK-027 phase 2 shipped.
+> `apply_preset` now accepts an optional top-level `scenes[]` that
+> configures per-scene channel pointers, per-scene bypass, and scene
+> rename in one call. Orchestrator (at the tool layer, no new protocol
+> primitive) composes: `switch_scene(i)` → channel-switch per block in
+> `scenes[i].channels` → `set_block_bypass` per block in
+> `scenes[i].bypass` → `set_scene_name` if supplied. The handler walks
+> scenes in the order the caller supplied so the AM4 ends up on the
+> last-configured scene; the response text reports the actual final
+> scene and its channel assignments, no idealized-per-scene narrative
+> (HW-012 finding closed). Channel-cache invalidation fires inside the
+> send loop on each scene-switch so `lastKnownChannel` stays honest
+> across scene boundaries. Seven new validation smoke assertions
+> (empty scene entry, duplicate index, unknown block in channels,
+> channels on compressor, non-A/B/C/D letter, unknown block in bypass,
+> "none" in bypass). Preflight green — 37/37 verify-msg, 16/16
+> verify-pack, 8/8 verify-echo, 44/44 verify-cache-params, 17 tools,
+> 16 apply_preset smoke assertions. BK-010 stays closed; BK-027 phase
+> 2 flips to shipped. Next: P5-011 tool-description audit items 1/4/5
+> + the AM4-depth queue (P1-012 channel-aware param writes, advanced-
+> controls capture session, second unit-extension pass).)
+> Prior context (Session 27 cont — Sailing-transcript
 > UX polish. Two observations from the founder's Christopher-Cross
 > "Sailing" Claude-Desktop test closed: (1) `apply_preset` now accepts
 > an optional top-level `name` that writes the working-buffer name
@@ -205,27 +226,26 @@ float32. One open question remains before the IR can cover full presets:
 
 ## The single next action
 
-**BK-027 phase 2 — scenes support in `apply_preset`.** HW-011 decoded
-(bypass = WRITE at pidHigh=0x0003 / float32; scene-channel = existing
-channel-switch under an active scene). Compose at the orchestrator
-layer: for each `scenes[i]` with overrides, emit `switch_scene(i)`
-→ channel-switch per block (`scenes[i].channels`) → `set_block_bypass`
-per block (`scenes[i].bypass`). The input schema and execution order
-are already spec'd in `04-BACKLOG.md` §BK-027 "Proposed shape." Also
-fold in the apply_preset response-text honesty fix from HW-012
-(report actual final active-channel-per-block, don't narrate
-idealized scene layouts).
+**P5-011 MCP tool-description audit — remaining items (1), (4), (5).**
+Release-gate work. (2) and (3) partially shipped Session 27 cont and
+fully cleared by Session 28's apply_preset response-text fix for the
+working-buffer reversibility story. Still to land:
+1. **Call-to-action lead for every mutation tool.** `apply_preset` /
+   `set_param` / `set_params` / `switch_preset` / `switch_scene` /
+   `save_preset` / `save_to_location` / `set_preset_name` /
+   `set_scene_name` / `set_block_type` / `set_block_bypass` /
+   `reconnect_midi` first sentence → *"Use this tool to {…} on the
+   user's AM4. Do not produce a written spec unless the user
+   explicitly asks for a dry run."*
+4. **Top-of-tool-list sanity note** in `list_params` or
+   `list_midi_ports` confirming the connector is live, so the model
+   can't slide into "I don't have the connector" on Desktop (HW-012
+   failure mode).
+5. **Manual Claude-Desktop smoke test** (hard-to-automate): "make my
+   amp louder" prompt → first-turn tool call, not spec.
 
-**Also release-gate work** — **P5-011 MCP tool-description audit**.
-HW-012 + the Sailing transcript (Session 27 cont) proved two Desktop
-failure modes: (a) spec-only output when the deferred tool schemas
-aren't loaded (HW-012), and (b) auto-chaining `save_preset` after a
-try-it-out ask ("build me a preset for X" — not a save ask; Sailing).
-(b) is partially closed — `save_to_location` / `save_preset` /
-`apply_preset` descriptions now carry save-intent and reversibility
-language. (a) and the remaining tool descriptions are still to-do.
-Full 5-item rubric in 04-BACKLOG.md §P5-011 with partial-ship status
-flags (✅ partial / ⏳ not started) per item.
+Full rubric in 04-BACKLOG.md §P5-011 with ✅ partial / ⏳ not-started
+flags per item.
 
 **Remaining AM4-depth queue (non-HW, gates Wave 1 device expansion
 per `memory/feedback_am4_depth_gates_wave_expansion.md`):**

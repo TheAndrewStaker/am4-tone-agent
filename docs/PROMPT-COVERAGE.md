@@ -60,8 +60,8 @@ LLM-generation per link).
 | *"Build a clean preset with comp/amp/delay/reverb"* | 1 × `apply_preset` | ~10 | ~600 ms | ✅ |
 | *"Build the above with amp gain 6, delay 350 ms, reverb mix 30"* | 1 × `apply_preset` (with params) | ~13 | ~800 ms | ✅ |
 | *"Build a preset for 'Sailing' by Christopher Cross"* | 1 × `apply_preset` (with `name`) | ~22 | ~1.2 s | ✅ Shipped Session 27 — `name?` field on apply_preset writes the working-buffer name in the same call. |
-| *"Set up all 4 amp channels with different types and gains"* | 1 × `apply_preset` with `slots[i].channels` | ~20 | ~1.1 s | ⚠ BK-027 phase 1 (kitchen-sink apply_preset, no new decodes — shippable now) |
-| *"Build a preset with clean/crunch/rhythm/solo scenes on channels A/B/C/D"* | 1 × `apply_preset` kitchen-sink | ~40–60 | ~2.5 s (warn user) | ⚠ BK-027 phase 2 (all decodes landed Session 27; only the handler wiring remains — single-session work) |
+| *"Set up all 4 amp channels with different types and gains"* | 1 × `apply_preset` with `slots[i].channels` | ~20 | ~1.1 s | ✅ Shipped Session 24 (phase 1); HW-verified Session 27 (HW-012). |
+| *"Build a preset with clean/crunch/rhythm/solo scenes on channels A/B/C/D"* | 1 × `apply_preset` kitchen-sink with `scenes[]` | ~40–60 | ~2.5 s (warn user) | ✅ Shipped Session 28 (phase 2) — orchestrator composes `switch_scene` → channel-switch → `set_block_bypass` → `set_scene_name` per scene entry. Hardware round-trip deferred (primitives HW-verified individually). |
 | *"Copy preset A03 and tweak the reverb"* | 1 × `switch_preset` + 1 × `set_param` + 1 × `save_preset` | 3 | ~500 ms chained (3 MCP calls × ~3 s LLM-gen ≈ ~10 s total) | ⚠ Chain length crosses the 5-MCP-call warning threshold; tolerable but not great |
 
 ## Persistence

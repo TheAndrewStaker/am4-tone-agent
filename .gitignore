@@ -36,3 +36,9 @@ samples/factory/*.txt
 # Captured traffic from sniffing sessions — may contain debug noise and
 # firmware-specific data. Local-only.
 samples/captured/
+
+# SPD-SX reverse-engineering scratch work (BK-019 feasibility probe).
+# Local-only until the format decode stabilizes and we decide what belongs
+# in the repo.
+scripts/spdsx-td0/
+docs/spdsx-kits/

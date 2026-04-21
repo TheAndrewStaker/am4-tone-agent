@@ -19,8 +19,9 @@
 > collection (replaced by the Hydrasynth Explorer) and is now a
 > community-support item with no founder-hardware validation.
 >
-> Last updated: 2026-04-21 (Session 27 — HW-011 captures landed,
-> HW-012 round-tripped; see archive for both.)
+> Last updated: 2026-04-21 (Session 28 — BK-027 phase 2 orchestration
+> shipped; HW-013 queued for a round-trip round-trip of the `scenes[]`
+> path on the device.)
 
 ## Status key
 
@@ -38,11 +39,49 @@ Claude picks up from there and moves the item to ⏳ or ✅.
 
 ## Pending — next up
 
-**No AM4 hardware tasks pending.** Session 27 decoded HW-011 and
-archived HW-012. Active AM4 work (BK-027 phase 2 — scenes in
-`apply_preset`; P5-011 — MCP tool-description audit) is tool-side
-and doesn't need device time. When new HW-NNN items arise they land
-here.
+### HW-013 — Round-trip `apply_preset` with `scenes[]` 🔜
+
+- **For:** BK-027 phase 2 hardware verification (Session 28 shipped
+  the orchestrator but the end-to-end scene-switch + scene-channel +
+  scene-bypass + scene-name sequence has only been wire-verified via
+  the individual primitives — HW-011 captures + the HW-012 phase 1
+  round-trip). This is the first full-stack exercise of the new
+  `scenes[]` path.
+- **Why:** catches ordering, ack-shape, and response-text honesty
+  bugs that static tests can't. Specifically confirms that (a) the
+  AM4 ends up on the last-configured scene, (b) each scene's
+  channel-pointer writes stick across the scene-switch boundary,
+  (c) bypass state is preserved per-scene, (d) the response text's
+  "active scene after this call: N" claim matches the device's
+  display.
+- **Steps:**
+  1. Ensure `Z04` is free (or acceptable to overwrite). In Claude
+     Desktop with the connector attached, ask Claude to build a
+     4-scene preset, e.g.:
+     > "Build me a 4-scene preset on Z04 called 'scene test': amp
+     > (with channel A tuned clean: gain 3, channel D tuned lead:
+     > gain 8), reverb mix 30 on channel A. Scene 1 'clean' uses
+     > amp channel A with reverb active. Scene 2 'crunch' uses amp
+     > channel D with reverb bypassed. Scene 3 'lead' uses amp
+     > channel D with reverb active. Scene 4 'ambient' uses amp
+     > channel A with reverb active. Do not save."
+  2. Confirm on the device: the AM4 should be on scene 4 when the
+     call returns (last configured). Check the display shows the
+     correct scene name.
+  3. Cycle through scenes 1 → 2 → 3 → 4 on the device (or via
+     `switch_scene`) and audibly verify: scene 1 is clean + wet,
+     scene 2 is lead + dry (reverb bypassed), scene 3 is lead + wet,
+     scene 4 is clean + wet.
+  4. Ask Claude to rename scene 4 to "verify4" via a separate
+     `set_scene_name` call, then switch back to scene 1 and to
+     scene 4, and confirm the name persists in-session.
+  5. Signal "HW-013 done" with observed behavior. If anything
+     differs from the narrative above, quote the `apply_preset`
+     response text exactly so the discrepancy can be traced.
+- **Priority:** high — release-gate for BK-027. No new primitives
+  are expected; this is end-to-end verification. Failure here points
+  at ordering / stateful-scoping bugs in the tool layer that static
+  tests miss.
 
 ---
 
