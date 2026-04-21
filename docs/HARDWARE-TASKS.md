@@ -1,9 +1,13 @@
 # Hardware Tasks Queue
 
-> Physical actions the founder needs to perform at the device (USB
-> captures, round-trip tests, reference dumps). Claude Code appends to
-> this file when hardware work is required and cannot perform it alone.
-> Check this file at the start of each session.
+> **Single queue for all founder-owed verification tasks.** Includes
+> physical actions at the device (USB captures, round-trips, reference
+> dumps, knob-wiggle spot-checks) AND non-device tests Claude can't
+> self-verify (Claude Desktop conversational smoke tests, release-gate
+> behavioural checks). Claude Code appends to this file whenever a
+> task is identified, without waiting for explicit prompting. Check
+> this file at the start of each session; check it again before
+> heading to the device so related items can be batched.
 >
 > **Active focus:** AM4, Axe-Fx II XL+, and ASM Hydrasynth Explorer
 > (founder-owned, Wave 1 RE). Device priority order for Wave 1:
@@ -19,9 +23,9 @@
 > collection (replaced by the Hydrasynth Explorer) and is now a
 > community-support item with no founder-hardware validation.
 >
-> Last updated: 2026-04-21 (Session 28 — BK-027 phase 2 orchestration
-> shipped; HW-013 queued for a round-trip round-trip of the `scenes[]`
-> path on the device.)
+> Last updated: 2026-04-21 (Session 28 cont 2 — HW-014 / HW-015 /
+> HW-016 queued alongside HW-013. AM4-depth-gate verification work
+> is now fully enumerated in this file.)
 
 ## Status key
 
@@ -82,6 +86,139 @@ Claude picks up from there and moves the item to ⏳ or ✅.
   are expected; this is end-to-end verification. Failure here points
   at ordering / stateful-scoping bugs in the tool layer that static
   tests miss.
+
+### HW-014 — P1-010 Session D: spot-check 39 structurally-decoded params 🔜
+
+- **For:** closes P1-010 Session B + Session 28 cont 2 unit-extension
+  pass. Every param shipped on structural (cache signature + Blocks
+  Guide) evidence alone needs one knob-wiggle to promote from
+  "probably-correct" to "hardware-verified."
+- **Why:** 39 params are currently marked *"awaits Session D
+  hardware spot-check"* in `src/protocol/params.ts`. Any
+  misclassification (wrong pidHigh → wrong knob, wrong unit →
+  wrong scale) surfaces immediately when the user watches the AM4
+  display not match the value they asked Claude to set.
+- **Setup:** AM4 plugged in, Claude Desktop with the connector
+  attached. No captures needed — this is *ear + display* verification,
+  not USBPcap. Can run from any preset; Z04 recommended (scratch).
+- **Steps:** Conversational — tell Claude: *"Spot-check my P1-010
+  Session D params. Build a preset on Z04 with every block placed,
+  then walk through each unverified param setting it to a
+  known-distinct value. I'll read back each expected display
+  value and confirm."* Claude should sequence block placement +
+  sequential writes, pausing after each one for you to verify on
+  the device.
+- **Param checklist (39 total):**
+  - Amp tone stack (3): `amp.mid`, `amp.treble`, `amp.presence`.
+  - Drive controls (3): `drive.tone`, `drive.level`, `drive.mix`.
+  - Reverb (2): `reverb.predelay`, `reverb.time`.
+  - Universal Mix on 8 blocks: `chorus.mix`, `flanger.mix`,
+    `phaser.mix`, `compressor.mix`, `filter.mix`, `tremolo.mix`,
+    `enhancer.mix`, `drive.mix`.
+  - LFO rates (4): `chorus.rate`, `flanger.rate`, `phaser.rate`,
+    `tremolo.rate`.
+  - Modulation depths (3): `chorus.depth`, `flanger.depth`,
+    `tremolo.depth`.
+  - Filter freq (1): `filter.freq`.
+  - Universal Balance (15 — Session 28 cont 2): one per confirmed
+    block — `amp.balance`, `compressor.balance`, `geq.balance`,
+    `reverb.balance`, `delay.balance`, `chorus.balance`,
+    `flanger.balance`, `phaser.balance`, `wah.balance`,
+    `tremolo.balance`, `filter.balance`, `drive.balance`,
+    `enhancer.balance`, `gate.balance`, `volpan.balance`.
+- **Pass criterion:** each set_param produces the expected display
+  value on the AM4. Balance params should pan audibly L/R as the
+  value moves between -100 and +100.
+- **Signal completion:** *"HW-014 done"* + any params that didn't
+  verify (with the observed vs expected values). Claude promotes
+  the verified params by removing the *"pending Session D"*
+  qualifier from their comments in `params.ts`.
+- **Priority:** high — release-gate for AM4-depth quality bar;
+  the Balance params (15) are the freshest and most important to
+  confirm. Good bundle candidate with HW-013 (both working-buffer
+  scoped, no saves required).
+
+### HW-015 — Advanced-controls capture session (Amp Master/Depth/Output Boost + Feedback knobs) 🔜
+
+- **For:** unlocks the remaining high-value Amp + time-effects
+  params that cache signatures alone can't disambiguate.
+- **Why:** several knob_0_10 records in the Amp cache have identical
+  signatures and the Blocks Guide names multiple candidates (Master,
+  Depth, Output Boost). Each needs a wire capture to pin the label
+  to a specific pidHigh. Same for per-block Feedback knobs
+  (delay.feedback, flanger.feedback, phaser.feedback).
+- **Setup:** AM4 plugged in, AM4-Edit open, USBPcap running on the
+  USB interface the AM4 is on. Same capture methodology as HW-011.
+- **Steps (per knob):**
+  1. In AM4-Edit, load Z04 or any scratch preset.
+  2. Navigate to the target block's page that has the knob.
+  3. Start a fresh USBPcap recording.
+  4. Move the target knob from its current value to a clearly-
+     different value (e.g. 5.0 → 7.5). Move it ONCE — don't
+     sweep, don't touch any other knob.
+  5. Stop the recording. Save as
+     `samples/captured/session-29-<block>-<knob>.pcapng`.
+  6. Repeat for each knob listed below.
+- **Capture targets (8 knobs):**
+  - Amp: Master, Depth, Output Boost (3 captures)
+  - Delay: Feedback knob on a Digital Mono-type delay (1 capture)
+  - Flanger: Feedback (1)
+  - Phaser: Feedback (1)
+  - Reverb: tail/decay adjustments beyond `time`/`predelay` if the
+    current type exposes any (2 — optional, defer if time-boxed).
+- **Signal completion:** *"HW-015 done"* + list of saved paths.
+  Claude processes captures via `scripts/parse-capture.ts`,
+  decodes pidHigh per capture, and registers the params in
+  `KNOWN_PARAMS` + `paramNames.ts` with byte-exact verify-msg
+  goldens.
+- **Priority:** medium — unlocks ~8 params, but less urgent than
+  HW-013/HW-014. Do after HW-013 + HW-014 clear.
+
+### HW-016 — Claude Desktop first-turn-tool-call smoke (P5-011 item 5) 🔜
+
+- **For:** release-gate verification that the Session 28 cont tool-
+  description rewrites (call-to-action leads + list_params sanity
+  note) actually eliminated the Claude-Desktop spec-output failure
+  mode observed on HW-012.
+- **Why:** HW-012's root cause was Claude Desktop responding with
+  a written spec instead of calling the tool, because (a) deferred
+  tool schemas weren't loaded and (b) the Claude.ai project prompt
+  biased toward spec output. We fixed (b) via the prompt rewrite
+  (Session 27 cont) and (a) via the mutation-tool call-to-action
+  leads (Session 28 cont). This test confirms the fix holds in a
+  fresh conversation.
+- **Setup:** Open a brand-new Claude Desktop conversation (not a
+  continuation of an existing one — deferred-tool schemas load
+  per-conversation). AM4 can be plugged in or not — this test is
+  about Claude's *first-turn behaviour*, not whether the write
+  succeeds. If plugged in, bonus: confirms the full execute-path
+  too.
+- **Prompts to try (one per conversation):**
+  1. *"Make my amp louder."* — expected first-turn: a tool call
+     (`set_param amp.gain <higher value>` or `set_param
+     amp.level <higher value>`), not a spec explaining what
+     command you'd need.
+  2. *"Build me a clean preset."* — expected first-turn:
+     `apply_preset` call, not a markdown preset-spec.
+  3. *"What's on Z04 right now?"* — expected first-turn: a read
+     attempt (`switch_preset Z04` + visual confirmation ask, or
+     a `list_params`-based sanity note). Some spec output here
+     is OK since we don't have a READ primitive; what's NOT OK
+     is Claude claiming the connector is unavailable.
+- **Pass criterion:** for prompts 1 + 2, first-turn message is a
+  tool call. For prompt 3, first-turn engages the tools or asks
+  the user to confirm on the device, but does NOT claim the
+  connector isn't attached.
+- **Fail criterion:** first-turn response is a prose spec with no
+  tool calls, or claims the connector isn't attached without
+  having attempted a tool call. If this happens, Claude owes
+  another iteration on tool descriptions.
+- **Signal completion:** *"HW-016 done"* + copy-paste of Claude's
+  first-turn response for each prompt so we can tighten the
+  descriptions if needed.
+- **Priority:** medium — release-gate but bounded in impact. If
+  it fails, we iterate on tool descriptions rather than block
+  shipping on it.
 
 ---
 
