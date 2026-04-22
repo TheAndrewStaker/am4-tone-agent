@@ -52,26 +52,74 @@ public class FindParamTable extends GhidraScript {
     private static final String OUTPUT_PATH =
         "C:\\dev\\am4-tone-agent\\samples\\captured\\decoded\\ghidra-paramtable.txt";
 
-    // Curated needles. High-confidence enum values first, then generic
-    // param labels, then block-type labels.
+    // Curated needles. Expanded 2026-04-21 for BK-032 — every BG-documented
+    // knob label we want to deduce without a hardware capture. Each must
+    // live somewhere in .rdata if AM4-Edit binds labels to pidHighs at
+    // compile time (already proven for "Gain"/"Bass"/"Master" at 50 hits
+    // each, clustered at 0x140559b20).
     private static final String[] NEEDLES = {
-        // Known drive-type enum (int 8 → TS808). Neighbors should be
-        // other drive types if this is the Drive Type string array.
+        // Session 05 anchor — TS808 is pidHigh 8 on Drive, proven by wire.
+        // Finding it here lets us validate any label→pidHigh extraction
+        // technique against a known binding.
         "TS808",
-        // Likely drive-type neighbors — if they show up adjacent to TS808
-        // we have confirmed the enum.
-        "Fat Rat", "FatRat", "Shred", "Bender", "Klon", "Tube Drive",
-        "Esoteric", "Treble Boost", "Eric", "Octavia",
-        // Generic param labels — common on every amp model.
+
+        // Amp / drive / compressor shared knob labels.
         "Gain", "Bass", "Mid", "Treble", "Presence", "Master",
-        "Level", "Bypass", "Mix", "Depth", "Rate", "Feedback",
-        // Block/type labels.
+        "Depth", "Level", "Mix", "Drive", "Tone", "Rate", "Feedback",
+        "Manual", "Order", "Tempo", "Threshold", "Ratio", "Attack",
+        "Release", "Compression", "Dynamics", "Knee", "Knee Type",
+        "Auto Makeup", "Detector", "Look Ahead", "Light Type",
+        "Mid Frequency", "High Mid", "Low Cut", "High Cut", "Bass Focus",
+        "Clip Type", "Clip Shape", "Bias", "Slew Rate", "Bass Response",
+        "Dry Level", "Diode", "Bit Reduce", "Bit Reduction", "Sample Rate",
+
+        // Reverb-block specific (BG §Reverb Basic Page + Spring section).
+        "Time", "Size", "Predelay", "Pre Delay", "Pre-Delay",
+        "Crossover", "Crossover Frequency", "Low Freq Time",
+        "High Freq Time", "Early Level", "Late Level",
+        "Number Of Springs", "Spring Tone", "Spring Drive", "Boiiinnng!",
+        "Shimmer", "Shimmer Intensity", "Shift 1", "Shift 2",
+
+        // Delay-block specific (BG §Delay Config Page).
+        "Master Feedback", "Echo Pan", "Spread", "Right Post Delay",
+        "Motor Speed", "Head 1 Time", "Head 2 Ratio",
+        "L/R Time Ratio", "Number Of Taps", "Taps",
+        "Start Freq", "Stop Freq", "Sweep Rate", "Sweep Phase",
+        "Run", "Trigger Restart", "Crossfade Time",
+
+        // Modulation blocks (chorus / flanger / phaser / tremolo).
+        "Number Of Voices", "Voices", "Delay Time",
+        "LFO Type", "LFO Phase", "LFO Duty Cycle", "LFO Quantize",
+        "LFO Hicut", "Auto Depth", "Phase Reverse", "Thru-Zero",
+        "VCR Type", "VCR Bias", "Exponent", "Astable Beta",
+        "Feedback Point", "Minimum Frequency", "Maximum Frequency",
+        "Minimum Time", "Maximum Time",
+
+        // Wah / Filter / Gate / GEQ block-specific.
+        "Frequency", "Resonance", "Min Freq", "Max Freq",
+        "Band 1", "Band 2", "Band 3", "Band 4", "Band 5",
+        "Band 6", "Band 7", "Band 8", "Band 9", "Band 10",
+        "Hold Time",
+
+        // Amp Advanced-page candidates (cross-reference our Session 29
+        // cont 2 additions + remaining first-page amp candidates).
+        "Out Boost", "Output Boost", "Out Boost Level", "Amp Section",
+        "Tonestack Type", "Tonestack Location", "Master Vol Location",
+        "Power Amp Modeling", "Supply Sag", "Preamp Sag",
+        "Negative Feedback",
+
+        // Block-type labels (not per-knob but useful for context).
         "Reverb", "Delay", "Chorus", "Phaser", "Tremolo", "Flanger",
-        "Compressor", "Pitch", "Wah", "Filter",
-        // Reverb types (educated guesses — Fractal's lineage).
+        "Compressor", "Pitch", "Wah", "Filter", "Amp", "Cab",
+        "Enhancer", "Gate", "Volume", "Pan", "Looper",
+
+        // Reverb type variants.
         "Plate", "Hall", "Spring", "Room", "Cave", "Chamber",
-        // Delay types.
+        "Plex", "Plex Verb", "Shimmer Verb",
+
+        // Delay type variants.
         "Digital", "Analog", "Tape", "Ping Pong", "Multi Tap",
+        "Ducking", "Reverse", "Sweep", "Vintage Digital",
     };
 
     // When two needle hits are within this many bytes, flag as a cluster.
