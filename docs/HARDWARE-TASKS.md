@@ -23,15 +23,25 @@
 > collection (replaced by the Hydrasynth Explorer) and is now a
 > community-support item with no founder-hardware validation.
 >
-> Last updated: 2026-04-21 (Session 29 cont 5 — HW-018..HW-023
-> rewritten as one-pcapng-per-block with sequential wiggles.
-> Capture count 58 → 13 (2 reverb + 1 drive + 1 delay + 1 comp +
-> 4 modulation + 4 secondary). AM4-Edit.exe binary inspection
-> exhausted — labels not present as plain strings, so wire
-> captures remain the only deduction path. HW-017 partially
-> absorbed into HW-020 / HW-022 / HW-023. Priority order:
-> HW-013 > HW-018 > HW-019 > HW-020 > HW-014 > HW-016 > HW-021 >
-> HW-022 > HW-023 > HW-017 residual.)
+> Last updated: 2026-04-21 (Session 29 cont 7 — HW-014 closed
+> with structured findings. 28 params hardware-verified, 5
+> confirmed bugs (1 dead address: `reverb.predelay`; 4 encoding
+> divergences: `chorus.rate`, `flanger.mix`, `flanger.feedback`,
+> `phaser.mix`), 27 hidden on the AM4 hardware display (not
+> failures — AM4-Edit would show them), 16 untested (Round 4
+> blocks not reached + 2 placement-only blocks). BK-033 + BK-034
+> queued for the bug fixes. HW-024 queued for the remaining
+> spot-check coverage (Round 4 + re-tests + missed params).
+> HW-025 queued for the 5 bug-investigation captures. Headline
+> non-bug findings: (a) Session 29's `amp.master`/`amp.depth`/
+> `amp.presence` re-mapping is correct; (b) `geq.balance`
+> displayed at -67, proving the universal Balance register works
+> at wire-layer (other blocks just hide it from the hardware
+> display); (c) the Session 29 worry about other knob_0_10 amp
+> mis-inferences cleared — `amp.mid`/`treble`/`presence`/`bass`
+> all hardware-verified. Priority order: HW-018 > HW-019 >
+> HW-024 > HW-025 > HW-020 > HW-016 > HW-021 > HW-022 >
+> HW-023 > HW-017 residual.)
 
 ## Status key
 
@@ -49,100 +59,89 @@ Claude picks up from there and moves the item to ⏳ or ✅.
 
 ## Pending — next up
 
-### HW-013 — Round-trip `apply_preset` with `scenes[]` 🔜
+### HW-024 — Complete HW-014 spot-check (Round 4 + re-tests + missed params) 🔜
 
-- **For:** BK-027 phase 2 hardware verification (Session 28 shipped
-  the orchestrator but the end-to-end scene-switch + scene-channel +
-  scene-bypass + scene-name sequence has only been wire-verified via
-  the individual primitives — HW-011 captures + the HW-012 phase 1
-  round-trip). This is the first full-stack exercise of the new
-  `scenes[]` path.
-- **Why:** catches ordering, ack-shape, and response-text honesty
-  bugs that static tests can't. Specifically confirms that (a) the
-  AM4 ends up on the last-configured scene, (b) each scene's
-  channel-pointer writes stick across the scene-switch boundary,
-  (c) bypass state is preserved per-scene, (d) the response text's
-  "active scene after this call: N" claim matches the device's
-  display.
-- **Steps:**
-  1. Ensure `Z04` is free (or acceptable to overwrite). In Claude
-     Desktop with the connector attached, ask Claude to build a
-     4-scene preset, e.g.:
-     > "Build me a 4-scene preset on Z04 called 'scene test': amp
-     > (with channel A tuned clean: gain 3, channel D tuned lead:
-     > gain 8), reverb mix 30 on channel A. Scene 1 'clean' uses
-     > amp channel A with reverb active. Scene 2 'crunch' uses amp
-     > channel D with reverb bypassed. Scene 3 'lead' uses amp
-     > channel D with reverb active. Scene 4 'ambient' uses amp
-     > channel A with reverb active. Do not save."
-  2. Confirm on the device: the AM4 should be on scene 4 when the
-     call returns (last configured). Check the display shows the
-     correct scene name.
-  3. Cycle through scenes 1 → 2 → 3 → 4 on the device (or via
-     `switch_scene`) and audibly verify: scene 1 is clean + wet,
-     scene 2 is lead + dry (reverb bypassed), scene 3 is lead + wet,
-     scene 4 is clean + wet.
-  4. Ask Claude to rename scene 4 to "verify4" via a separate
-     `set_scene_name` call, then switch back to scene 1 and to
-     scene 4, and confirm the name persists in-session.
-  5. Signal "HW-013 done" with observed behavior. If anything
-     differs from the narrative above, quote the `apply_preset`
-     response text exactly so the discrepancy can be traced.
-- **Priority:** high — release-gate for BK-027. No new primitives
-  are expected; this is end-to-end verification. Failure here points
-  at ordering / stateful-scoping bugs in the tool layer that static
-  tests miss.
-
-### HW-014 — P1-010 Session D: spot-check 39 structurally-decoded params 🔜
-
-- **For:** closes P1-010 Session B + Session 28 cont 2 unit-extension
-  pass. Every param shipped on structural (cache signature + Blocks
-  Guide) evidence alone needs one knob-wiggle to promote from
-  "probably-correct" to "hardware-verified."
-- **Why:** 39 params are currently marked *"awaits Session D
-  hardware spot-check"* in `src/protocol/params.ts`. Any
-  misclassification (wrong pidHigh → wrong knob, wrong unit →
-  wrong scale) surfaces immediately when the user watches the AM4
-  display not match the value they asked Claude to set.
+- **For:** closes the residual coverage gaps from HW-014. HW-014's
+  Round 4 (enhancer/gate/volpan) wasn't reached, `filter.freq`
+  needs a re-test on a non-Envelope filter type, `amp.level`
+  needs a non-default test value, and `flanger.rate` /
+  `phaser.rate` weren't called out in readback.
+- **Why:** finishes the structurally-decoded-param coverage so
+  every shipped knob has a hardware datapoint, not just the 28
+  HW-014 verified.
 - **Setup:** AM4 plugged in, Claude Desktop with the connector
-  attached. No captures needed — this is *ear + display* verification,
-  not USBPcap. Can run from any preset; Z04 recommended (scratch).
-- **Steps:** Conversational — tell Claude: *"Spot-check my P1-010
-  Session D params. Build a preset on Z04 with every block placed,
-  then walk through each unverified param setting it to a
-  known-distinct value. I'll read back each expected display
-  value and confirm."* Claude should sequence block placement +
-  sequential writes, pausing after each one for you to verify on
-  the device.
-- **Param checklist (39 total):**
-  - Amp tone stack (3): `amp.mid`, `amp.treble`, `amp.presence`.
-  - Drive controls (3): `drive.tone`, `drive.level`, `drive.mix`.
-  - Reverb (2): `reverb.predelay`, `reverb.time`.
-  - Universal Mix on 8 blocks: `chorus.mix`, `flanger.mix`,
-    `phaser.mix`, `compressor.mix`, `filter.mix`, `tremolo.mix`,
-    `enhancer.mix`, `drive.mix`.
-  - LFO rates (4): `chorus.rate`, `flanger.rate`, `phaser.rate`,
-    `tremolo.rate`.
-  - Modulation depths (3): `chorus.depth`, `flanger.depth`,
-    `tremolo.depth`.
-  - Filter freq (1): `filter.freq`.
-  - Universal Balance (15 — Session 28 cont 2): one per confirmed
-    block — `amp.balance`, `compressor.balance`, `geq.balance`,
-    `reverb.balance`, `delay.balance`, `chorus.balance`,
-    `flanger.balance`, `phaser.balance`, `wah.balance`,
-    `tremolo.balance`, `filter.balance`, `drive.balance`,
-    `enhancer.balance`, `gate.balance`, `volpan.balance`.
-- **Pass criterion:** each set_param produces the expected display
-  value on the AM4. Balance params should pan audibly L/R as the
-  value moves between -100 and +100.
-- **Signal completion:** *"HW-014 done"* + any params that didn't
-  verify (with the observed vs expected values). Claude promotes
-  the verified params by removing the *"pending Session D"*
-  qualifier from their comments in `params.ts`.
-- **Priority:** high — release-gate for AM4-depth quality bar;
-  the Balance params (15) are the freshest and most important to
-  confirm. Good bundle candidate with HW-013 (both working-buffer
-  scoped, no saves required).
+  attached. No captures needed — *ear + display* verification.
+  Z04 recommended (scratch).
+- **Steps:** Conversational — tell Claude: *"Run HW-024 — finish
+  HW-014's Round 4. Build a preset on Z04 with enhancer + gate +
+  volpan blocks, write distinctive values to every mapped param,
+  and I'll read them back. Then re-test `filter.freq` on a
+  Low-Pass filter type, re-test `amp.level` at +8 dB, confirm
+  `flanger.rate` and `phaser.rate` from the previous run, and
+  test `reverb.springs` + `reverb.spring_tone` on a Spring
+  reverb."* Claude paces the writes for sequential verification.
+- **Param checklist (~13 params):**
+  - Round 4: `enhancer.type`, `enhancer.mix`, `enhancer.balance`,
+    `gate.type`, `gate.balance`, `volpan.mode`, `volpan.balance`.
+  - Re-tests: `filter.freq` (on Low-Pass), `amp.level` (+8 dB),
+    `flanger.rate`, `phaser.rate`.
+  - Spring-reverb-only: `reverb.springs`, `reverb.spring_tone`.
+- **Pass criterion:** each `set_param` produces the expected
+  display value on the AM4. Balance params should pan audibly
+  L/R as the value moves between -100 and +100. Hidden-on-display
+  params (likely `enhancer.balance`, `gate.balance`,
+  `volpan.balance`, `enhancer.mix`) noted as such — not failures.
+- **Signal completion:** *"HW-024 done"* + readback values
+  (verified / hidden / mismatch). Claude promotes the verified
+  params by removing the "pending HW-014" qualifier from
+  `params.ts` comments and updates PROMPT-COVERAGE.md rows.
+- **Priority:** medium — coverage completion. Lower urgency than
+  the bug-fix HW-025 captures because none of these are known
+  to be broken; they just lack a datapoint.
+
+### HW-025 — Bug-investigation captures for HW-014 findings 🔜
+
+- **For:** unlocks BK-033 (`reverb.predelay` dead address) and
+  BK-034 (per-block float encoding divergence cluster). Without
+  these captures, the bugs are observed but unresolvable —
+  AM4-Edit's wire bytes are the only oracle for "what should we
+  have sent."
+- **Why:** HW-014 proved the buggy params were broken on
+  hardware but couldn't decode the actual right encoding. Each
+  capture takes ~30 seconds and pins one of the 5 bugs to a
+  specific wire-byte difference.
+- **Setup:** AM4 plugged in, AM4-Edit open, USBPcap recording.
+  Same methodology as HW-015 / HW-018..HW-023.
+- **Captures: 5 pcapngs.** Each capture wiggles ONE knob from
+  its current value to a clearly-different value (use the same
+  values our HW-014 test wrote, so the comparison is apples-
+  to-apples).
+  1. **`samples/captured/session-30-reverb-predelay.pcapng`** —
+     load any reverb type, set Pre-Delay to **85 ms**. This is
+     the dead-address bug — we want AM4-Edit's actual pidHigh
+     for predelay so we can fix the param map.
+  2. **`samples/captured/session-30-chorus-rate.pcapng`** —
+     load any chorus type, set Rate to **3.4 Hz**. Compare wire
+     value bytes against our `packFloat32LE(3.4)`. If AM4-Edit
+     sends a normalized 0..1 knob position instead of 3.4 Hz,
+     that confirms the log-scaling hypothesis.
+  3. **`samples/captured/session-30-flanger-mix.pcapng`** — load
+     any flanger type, set Mix to **54%**. Compare wire bytes.
+  4. **`samples/captured/session-30-flanger-feedback.pcapng`** —
+     load any flanger type, set Feedback to **-61%**. The
+     hardware showed 0% — capture should reveal whether AM4-Edit
+     uses a different sign-encoding than `packFloat32LE(-0.61)`.
+  5. **`samples/captured/session-30-phaser-mix.pcapng`** — load
+     any phaser type, set Mix to **88%**. We sent 0.88; hardware
+     showed 53%. Capture should reveal what 0.88 actually means
+     to the firmware vs what AM4-Edit sends to display 88%.
+- **Signal completion:** *"HW-025 done"* + 5 saved paths.
+  Decode happens against the captures the same way HW-015 did.
+- **Priority:** high — release-gate. Without these, 5 known-
+  broken params either ship as-is (ugly UX), get yanked from
+  the param registry (loss of coverage), or get dummy
+  validation that rejects them at MCP-tool layer (worse UX
+  than just fixing them). HW-024 + HW-025 can be batched.
 
 <!-- HW-015 completed 2026-04-21 — see Archive below -->
 
@@ -797,6 +796,93 @@ highest numbers.
   because Session 29 surfaced a mis-inference (`amp.presence`→Master)
   that cache-signature-only naming missed. Mid/Treble at
   0x000D/0x000E remain structural and need HW-014 to close.
+
+### HW-014 — P1-010 Session D structurally-decoded param spot-check ✅ (with bug findings)
+
+- **Tested 2026-04-21** — built `P1010-D SPOT CHECK` preset on Z04
+  with 4 rounds of distinctive-value writes across 15 of 17 block
+  types. **28 params hardware-verified, 5 confirmed bugs, 27
+  hidden on hardware display (not failures), 16 untested (Round
+  4 enhancer/gate/volpan + 2 placement-only blocks). Bugs queued
+  to BK-033 + BK-034; remainder coverage to HW-024 + HW-025.**
+- **Verified correct (28 params)** — see
+  Round-1..Round-3 readbacks in SESSIONS.md Session 29 cont 7.
+  Headlines: (a) Session 29's `amp.master` (0x000F) /
+  `amp.depth` (0x001A) / `amp.presence` (0x001E) re-mapping
+  confirmed correct on a 5153 50W Blue (knobs were hidden on
+  the original 1959SLP test because Plexis don't have a
+  Master). (b) `amp.mid` / `treble` / `presence` / `bass` —
+  all hardware-verified, clearing the Session-29 worry that
+  other knob_0_10 amp registers might be cache-signature
+  mis-inferences. The 0x000F Master-vs-Presence mistake was a
+  one-off, not systemic. (c) `geq.balance` displayed at -67 —
+  proves the universal Balance register works at the wire-layer
+  (other blocks just hide it from the AM4 hardware display).
+  (d) All 9 type enums verified (amp/drive/reverb/delay/
+  chorus/tremolo/wah/filter/geq) — the cache-derived enum
+  catalog is solid.
+- **Bug 1 — `reverb.predelay` dead address (BK-033).** Three
+  writes (85, 0, 250 ms) all wire-acked, display stayed at 20.0
+  ms default. Sending the maximum value still didn't move it.
+  Address (`pidLow=0x0042 / pidHigh=0x0010`) is wrong, or that
+  register is something else (write-only diagnostic? hidden
+  field?) and predelay lives elsewhere. Fixed via HW-025
+  capture #1.
+- **Bug 2 — per-block float encoding divergence (BK-034).**
+  Four params: `chorus.rate` (3.4 Hz → 0.5 Hz), `flanger.mix`
+  (54% → 50%), `flanger.feedback` (-61% → 0; +99% → 90%),
+  `phaser.mix` (88% → 53%). Pattern: address verified
+  (extreme values land), mid-range values land somewhere
+  unrelated. The same `packFloat32LE` encoder works correctly
+  for `delay.feedback`, `delay.mix`, `tremolo.rate`,
+  `chorus.mix`, `reverb.mix`. So the bug is per-block
+  firmware behavior, not the encoder. Most diagnostic
+  observation: `chorus.rate` 3.4 → 0.5 Hz looks like
+  log-knob mapping (knob 0.34 → 0.479 Hz on a 0.1..10 Hz log
+  curve). Fix needs HW-025 captures #2..#5 to compare
+  AM4-Edit's wire bytes against ours.
+- **Hidden on hardware display (27 params, not failures).**
+  Most balance/mix params on most blocks, plus
+  `amp.tonestack_location`, `amp.master_vol_location`,
+  `reverb.shift_1/2`, `reverb.springs/spring_tone` (non-spring
+  type). These wrote and wire-acked but the AM4's hardware
+  screen doesn't expose them. AM4-Edit would. Verifying via
+  AM4-Edit is queued under HW-024 (not blocking release since
+  `geq.balance` proved the Balance register works).
+- **Cosmetic — model-specific drive labels.** On Klone Chiron,
+  `drive.tone` displays as "Treble" and `drive.level` as
+  "Output". Underlying register is the same, behavior matches
+  the real Klon Centaur. Not a bug; worth a `params.ts`
+  comment so future readers don't get confused.
+
+### HW-013 — Round-trip `apply_preset` with `scenes[]` ✅
+
+- **Tested 2026-04-21** — first attempt blocked: server saw only the
+  Windows wavetable synth, no AM4. The connection-failure response
+  named the four likely causes (off / unplugged / AM4-Edit grabbing
+  the port / driver) and pointed at `list_midi_ports` +
+  `reconnect_midi`. Founder reconnected, signaled "connected now,"
+  and the second attempt completed cleanly: the kitchen-sink
+  4-scene `apply_preset` on Z04 ("scene test") landed end-to-end
+  and all changes were applied and verified on the device.
+  Subsequent `set_scene_name` rename of scene 4 also persisted
+  across in-session scene switches. **BK-027 phase 2 is now
+  hardware-verified end-to-end.**
+- **Bonus signal for HW-016 (deferred Claude Desktop smoke).**
+  Claude Desktop called `apply_preset` first-turn on the multi-
+  scene preset prompt — no fall-back to a written spec, even
+  on the first attempt that hit the connection failure. This is
+  effectively prompt #2 of HW-016 ("Build me a clean preset.")
+  passing on its tool-call criterion, against a more-demanding
+  prompt than the test plan called for. Prompts #1 ("Make my
+  amp louder.") and #3 ("What's on Z04 right now?") are still
+  owed for HW-016 closure.
+- **Diagnostic side-finding worth noting.** The user-facing
+  diagnostic from `connectAM4` failing read cleanly: it named
+  AM4-Edit exclusivity as a likely cause, which is the most
+  common reason in practice (the founder almost certainly had
+  AM4-Edit open). P5-009 #2 (graceful "AM4 not found" error)
+  is doing what it was designed to do.
 
 ### HW-012 — Round-trip `apply_preset` with the per-slot `channels` shape ✅
 

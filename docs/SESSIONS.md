@@ -6,6 +6,175 @@ file is the chronological trail that reference is built from.
 
 ---
 
+## 2026-04-21 cont — Session 29 cont 7 — HW-014 P1-010 Session D spot-check
+
+### What ran
+
+Founder ran the HW-014 conversational spot-check via Claude Desktop on
+Z04. Built `P1010-D SPOT CHECK` preset, walked through 4 rounds of
+distinctive-value writes across 15 of 17 block types. Each write was
+verified by reading the AM4 hardware display (not AM4-Edit). Round 4
+(enhancer / gate / volpan) wasn't reached before the founder ended the
+session.
+
+### Headline outcome
+
+**28 params hardware-verified, 5 confirmed bugs, 27 hidden on
+hardware display (not failures), 16 untested.** Bugs queued to BK-033
++ BK-034 with 5 AM4-Edit captures (HW-025) needed to decode the right
+encoding. Residual coverage queued as HW-024.
+
+### The 5 bugs
+
+**Bug 1 — `reverb.predelay` dead address (BK-033).** Three writes
+(85, 0, 250 ms) all wire-acked but display stayed at 20.0 ms default.
+Sending the maximum value still didn't move it — that rules out an
+encoding bug and points at the wrong pidHigh. Currently registered
+at `pidHigh=0x0010`; either that record isn't actually predelay or
+it's a write-only diagnostic register and predelay lives elsewhere.
+HW-025 capture #1 will decode the actual address.
+
+**Bugs 2–5 — per-block float encoding divergence (BK-034).**
+Four params: `chorus.rate` (3.4 Hz → 0.5 Hz), `flanger.mix`
+(54% → 50%), `flanger.feedback` (-61% → 0%; +99% → +90%),
+`phaser.mix` (88% → 53%). Pattern: address verified (extreme
+values land), mid-range values land somewhere unrelated. The
+same `packFloat32LE` + `DISPLAY_TO_INTERNAL` chain works
+correctly for `delay.feedback`, `delay.mix`, `tremolo.rate`,
+`chorus.mix`, `reverb.mix` — so the bug is per-block firmware
+behavior, not the encoder. Most diagnostic clue: `chorus.rate`
+3.4 → 0.5 Hz fits a log-knob mapping exactly (knob position
+0.34 on a 0.1..10 Hz log curve = ~0.479 Hz). HW-025 captures
+#2..#5 will compare AM4-Edit's wire bytes to ours.
+
+### Non-bug headlines
+
+**Session 29's amp re-mapping confirmed.** `amp.master` (0x000F),
+`amp.depth` (0x001A), `amp.presence` (0x001E) all displayed
+correctly on a 5153 50W Blue (knobs were hidden on the original
+1959SLP test because Plexis don't have a Master). The Session-29
+worry that other knob_0_10 amp registers might be cache-signature
+mis-inferences cleared — `amp.mid` / `treble` / `presence` /
+`bass` all hardware-verified, so the 0x000F Master-vs-Presence
+mistake was a one-off, not systemic.
+
+**Universal Balance register works.** `geq.balance` displayed
+correctly at -67. This is the only balance param the AM4 hardware
+display shows; the other 14 wrote and wire-acked but stay hidden
+from the hardware screen. AM4-Edit verification of those 14 owed
+under HW-024, but the register itself is now confirmed.
+
+**Drive label cosmetic.** On Klone Chiron, `drive.tone` displays as
+"Treble" and `drive.level` as "Output" — model-specific UI labels
+matching the real Klon Centaur. Underlying register is unchanged
+across drive types. Annotated in `params.ts`.
+
+### Verified per-param breakdown
+
+- **AMP (Channel A):** type, gain, bass, mid, treble, master,
+  depth, presence, out_boost, out_boost_level, level — 11/14
+  visible. Hidden on display: tonestack_location,
+  master_vol_location, balance.
+- **DRIVE:** type, drive, tone (labeled "Treble"), level (labeled
+  "Output") — 4/6 visible. Hidden: mix, balance.
+- **REVERB:** type, mix, time, size — 4/10 visible. Hidden:
+  shift_1, shift_2, balance, springs (non-Spring), spring_tone
+  (non-Spring). Bug: predelay.
+- **DELAY:** type, time, mix, feedback — 4/5 visible. Hidden:
+  balance.
+- **CHORUS:** type, mix — 2/5 visible. Hidden: depth, balance.
+  Bug: rate.
+- **TREMOLO:** type, rate, depth — 3/5 visible. Hidden: mix,
+  balance.
+- **WAH:** type — 1/2 visible. Hidden: balance.
+- **GEQ:** type, balance — 2/2 visible. **First confirmed Balance
+  on hardware display.**
+- **FILTER:** type — 1/4 visible. Hidden: mix, balance. Inconclusive:
+  freq (test was on Envelope Filter; needs Low-Pass re-test under
+  HW-024).
+- **FLANGER:** type — 1/6 visible. Hidden: depth, balance. Bugs:
+  mix, feedback. Unverified: rate.
+- **PHASER:** type — 1/5 visible. Hidden: feedback, balance. Bug:
+  mix. Unverified: rate.
+- **COMPRESSOR:** type — 1/3 visible. Hidden: mix, balance.
+- **ENHANCER / GATE / VOLPAN:** untested (Round 4 not reached).
+
+### Doc updates this session
+
+- `HARDWARE-TASKS.md`: HW-014 archived with structured findings;
+  HW-024 (residual) + HW-025 (bug captures) queued.
+- `04-BACKLOG.md`: BK-033 (predelay address fix) + BK-034
+  (per-block encoding cluster) added; BK-032 cross-references
+  updated.
+- `STATE.md`: Last-updated header rewritten; "single next action"
+  reorganized — bug-fix wave first (HW-025 → BK-033 → BK-034),
+  then HW-024 + BK-032 first-page captures + HW-016.
+- `params.ts`: `// BUG (HW-014)` warning comments added above
+  the 5 buggy entries; "pending Session D" qualifiers replaced
+  with HW-014 verification status across the verified params;
+  drive label cosmetic note added.
+- `PROMPT-COVERAGE.md`: structural-pending qualifiers dropped
+  on rows that verified; new BK-033/BK-034 caveats on rows
+  touching buggy params.
+- `SESSIONS.md`: this entry.
+
+---
+
+## 2026-04-21 cont — Session 29 cont 6 — HW-013 four-scene `apply_preset` round-trip
+
+### What ran
+
+Founder ran the HW-013 test plan via Claude Desktop on Z04. The
+prompt was the kitchen-sink 4-scene preset described in the test
+queue: amp + reverb in slots 1–2, channel A tuned clean (gain 3),
+channel D tuned lead (gain 8), reverb mix 30 on channel A; scenes
+1/2/3/4 = clean+wet / crunch+dry / lead+wet / ambient+wet.
+
+### First attempt — connection-failure recovery loop
+
+The first `apply_preset` attempt failed in `connectAM4()` with the
+P5-009 #2 diagnostic firing cleanly: the response named the four
+likely causes (off / unplugged / AM4-Edit grabbing the port /
+driver) and pointed at `list_midi_ports` + `reconnect_midi`. The
+founder reconnected the device and signaled "connected now." The
+second attempt completed end-to-end.
+
+### Second attempt — what verified
+
+- All four scenes' channel assignments and bypass states behaved
+  exactly as the orchestrator narrated. Audible per-scene
+  cycling matched (clean+wet / lead+dry / lead+wet / clean+wet).
+- A subsequent `set_scene_name` rename of scene 4 persisted
+  across in-session scene switches.
+- BK-027 phase 2 (`apply_preset` `scenes[]` orchestrator) is now
+  hardware-verified end-to-end. Until this run the orchestrator
+  was only wire-verified via its individual primitives (HW-011
+  captures + HW-012 phase 1 round-trip).
+
+### Bonus — HW-016 prompt #2 partial-credit signal
+
+Claude Desktop called `apply_preset` on the first turn even on
+the failed-connection attempt. No fall-back to a written spec,
+which is exactly the failure mode HW-012 surfaced and HW-016 was
+queued to re-verify after the Session 28 cont tool-description
+rewrites. Effective pass for HW-016 prompt #2 ("Build me a clean
+preset.") on its tool-call criterion, against a more demanding
+prompt than the test plan called for. Prompts #1 ("Make my amp
+louder.") and #3 ("What's on Z04 right now?") are still owed
+for full HW-016 closure.
+
+### Doc updates this session
+
+- `HARDWARE-TASKS.md`: HW-013 moved Pending → Archive; priority
+  order line at top of file updated to drop HW-013.
+- `STATE.md`: Last-updated header rewritten; "single next action"
+  drops HW-013 and notes the HW-016 prompt #2 partial pass.
+- `PROMPT-COVERAGE.md`: scenes-row "Hardware round-trip deferred"
+  caveat removed; row now reads HW-verified end-to-end.
+- `SESSIONS.md`: this entry.
+
+---
+
 ## 2026-04-21 — Session 29 — HW-015 advanced-controls capture
 
 ### Captures

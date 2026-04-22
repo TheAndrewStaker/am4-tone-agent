@@ -5,7 +5,28 @@
 > hardware tasks (USB captures, round-trip tests, reference dumps) live
 > in **`docs/HARDWARE-TASKS.md`** — check that file alongside this one at
 > session start.
-> Last updated: **2026-04-21** (Session 29 — HW-015 captured and
+> Last updated: **2026-04-21** (Session 29 cont 7 — HW-014
+> closed with structured findings. 28 params hardware-verified,
+> 5 confirmed bugs (1 dead address: `reverb.predelay`; 4
+> encoding divergences: `chorus.rate`, `flanger.mix`,
+> `flanger.feedback`, `phaser.mix`), 27 hidden on the AM4
+> hardware display (not failures — AM4-Edit would show them),
+> 16 untested. **BK-033** (predelay fix) + **BK-034** (per-block
+> float encoding divergence) queued for the bug work, with
+> **HW-025** = 5 AM4-Edit wire captures to decode the right
+> encoding for each. **HW-024** = residual coverage (Round 4 +
+> re-tests + missed params). Non-bug headlines: (a) Session 29's
+> `amp.master`/`amp.depth`/`amp.presence` re-mapping confirmed
+> correct on a 5153 50W Blue; (b) `geq.balance` displayed at -67,
+> proving the universal Balance register works at the wire-layer
+> (other blocks hide it from the hardware screen); (c) the
+> Session 29 worry about other knob_0_10 amp mis-inferences
+> cleared — `amp.mid`/`treble`/`presence`/`bass` all
+> hardware-verified. `// BUG (HW-014)` warning comments added
+> above the 5 buggy params in `params.ts`. Pre-existing context — Session 29 cont 6 — HW-013 closed:
+> 4-scene `apply_preset` round-trip on Z04 verified end-to-end on
+> hardware after the founder reconnected past a first-attempt
+> connection failure. Pre-prior context — Session 29 — HW-015 captured and
 > decoded. 12 pcapngs processed; 10 new pidHighs registered + 1
 > structural correction. Headline finding: `pidHigh=0x000F` on the
 > Amp block was wrongly registered as `amp.presence` in Session 26
@@ -281,12 +302,35 @@ float32. One open question remains before the IR can cover full presets:
 
 ## The single next action
 
-**Pick from the AM4-depth queue below OR run the founder-side manual
-tests** (P5-011 item 5 smoke + HW-013 scenes round-trip — both need
-the device). P5-011 items 1 + 4 landed Session 28 cont; items 2 + 3
-cleared Session 27 cont / Session 28. The only non-AM4-depth work
-left on the release-gate is (5), which is a manual Claude Desktop
-check and can't be done from the tool layer.
+**Bug-fix wave first — HW-025 captures unblock BK-033 + BK-034.**
+Session 29 cont 7's HW-014 spot-check surfaced 5 confirmed bugs
+that need fixing before release. Bug fix order:
+
+1. **HW-025** — 5 AM4-Edit USBPcap captures (one per buggy param:
+   reverb predelay, chorus rate, flanger mix, flanger feedback,
+   phaser mix). ~3 min of founder time. Without these, the bugs
+   are observed but unresolvable.
+2. **BK-033 fix** — once HW-025 #1 lands, decode actual
+   `reverb.predelay` pidHigh and update the param map. ~30 min.
+3. **BK-034 fix** — once HW-025 #2..#5 land, decode the per-block
+   encoding rules (likely log-knob mapping for at least
+   `chorus.rate`) and add per-param `encode/decode` overrides
+   to `Param`. ~1 day; release blocker for the
+   Conversational Presets / MCP MIDI Tools rename.
+
+**Then or in parallel — remaining queue:**
+
+- **HW-024** — finish HW-014 spot-check coverage (Round 4 =
+  enhancer/gate/volpan, re-test `filter.freq` on Low-Pass,
+  re-test `amp.level` non-default, confirm
+  `flanger.rate`/`phaser.rate`, test `reverb.springs`/
+  `spring_tone` on Spring reverb).
+- **BK-032 first-page captures** — HW-018 (reverb) > HW-019
+  (drive) > HW-020 (delay) > HW-021 (compressor) > HW-022
+  (modulation bundle) > HW-023 (secondary). Same priority as
+  before HW-014.
+- **HW-016 prompts #1 + #3** for P5-011 item 5 closure (Claude
+  Desktop smoke). Prompt #2 effectively passed during HW-013.
 
 **Remaining AM4-depth queue (non-HW, gates Wave 1 device expansion
 per `memory/feedback_am4_depth_gates_wave_expansion.md`):**

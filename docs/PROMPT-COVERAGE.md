@@ -37,11 +37,14 @@ LLM-generation per link).
 | *"Change amp gain to 5"* | 1 × `set_param` | 1 | ~150 ms | ✅ |
 | *"More low end on the drive"* | 1 × `set_param drive.*` | 1 | ~150 ms | ✅ |
 | *"Set reverb mix to 30 and delay time to 400 ms"* | 1 × `set_params` (2 writes) | 2 | ~250 ms | ✅ |
-| *"Boost the mids"* | 1 × `set_param amp.mid` | 1 | ~150 ms | ✅ Registered Session 26; structural (HW-014 spot-check pending for absolute confirmation) |
+| *"Boost the mids"* | 1 × `set_param amp.mid` | 1 | ~150 ms | ✅ Registered Session 26; HW-014 verified Session 29 cont 7 |
 | *"Set the amp to a Marshall JCM800"* | 1 × `set_param amp.type` | 1 | ~150 ms | ✅ (amp.type enum covers all 248 models) |
 | *"Swap the reverb for a delay"* | 1 × `set_block_type` | 1 | ~150 ms | ✅ |
 | *"Add a compressor before the amp"* | 1–2 × `set_block_type` | 1–2 | ~250 ms | ✅ |
-| *"Give me more feedback on the delay"* | 1 × `set_param delay.feedback` | 1 | ~150 ms | ✅ Shipped Session 29 (HW-015 wire-verified, bipolar_percent ±100) |
+| *"Give me more feedback on the delay"* | 1 × `set_param delay.feedback` | 1 | ~150 ms | ✅ Shipped Session 29 (HW-015 wire-verified); HW-014 verified -47% on hardware display Session 29 cont 7 |
+| *"Give me more feedback on the flanger / phaser"* | 1 × `set_param flanger.feedback` / `phaser.feedback` | 1 | ~150 ms | ⚠ flanger.feedback HW-014 surfaced encoding bug (BK-034) — wrote -61, displayed 0; phaser.feedback hidden on hardware display (untested at wire layer). Register via flanger.feedback works at extremes only. |
+| *"Speed up the chorus / slow down the flanger"* | 1 × `set_param chorus.rate` / `flanger.rate` | 1 | ~150 ms | ⚠ chorus.rate HW-014 surfaced encoding bug (BK-034) — likely log-knob mapping (3.4 → 0.5 Hz). flanger.rate unverified in HW-014; queued under HW-024. tremolo.rate works correctly. |
+| *"Set reverb predelay to 80 ms"* | 1 × `set_param reverb.predelay` | 1 | ~150 ms | ⚠ HW-014 surfaced dead-address bug (BK-033) — pidHigh 0x0010 doesn't move the displayed value. Awaits HW-025 capture #1. |
 | *"Crank the amp's master volume"* | 1 × `set_param amp.master` | 1 | ~150 ms | ✅ Shipped Session 29 (HW-015 — wire-verified on two Marshall amps; catches and corrects Session-26 mis-inference) |
 | *"Add depth and presence to the amp"* | 1 × `set_params` (2 writes) | 2 | ~250 ms | ✅ Shipped Session 29 (HW-015 wire-verified `amp.depth` @ 0x1A and `amp.presence` @ 0x1E) |
 | *"Turn on the out boost"* + *"set boost to 2 dB"* | `set_param amp.out_boost ON` then `set_param amp.out_boost_level 2` | 2 | ~250 ms | ✅ Shipped Session 29 (toggle + level both wire-verified) |
@@ -66,7 +69,7 @@ LLM-generation per link).
 | *"Build the above with amp gain 6, delay 350 ms, reverb mix 30"* | 1 × `apply_preset` (with params) | ~13 | ~800 ms | ✅ |
 | *"Build a preset for 'Sailing' by Christopher Cross"* | 1 × `apply_preset` (with `name`) | ~22 | ~1.2 s | ✅ Shipped Session 27 — `name?` field on apply_preset writes the working-buffer name in the same call. |
 | *"Set up all 4 amp channels with different types and gains"* | 1 × `apply_preset` with `slots[i].channels` | ~20 | ~1.1 s | ✅ Shipped Session 24 (phase 1); HW-verified Session 27 (HW-012). |
-| *"Build a preset with clean/crunch/rhythm/solo scenes on channels A/B/C/D"* | 1 × `apply_preset` kitchen-sink with `scenes[]` | ~40–60 | ~2.5 s (warn user) | ✅ Shipped Session 28 (phase 2) — orchestrator composes `switch_scene` → channel-switch → `set_block_bypass` → `set_scene_name` per scene entry. Hardware round-trip deferred (primitives HW-verified individually). |
+| *"Build a preset with clean/crunch/rhythm/solo scenes on channels A/B/C/D"* | 1 × `apply_preset` kitchen-sink with `scenes[]` | ~40–60 | ~2.5 s (warn user) | ✅ Shipped Session 28 (phase 2); HW-verified end-to-end Session 29 cont 6 (HW-013 — 4-scene round-trip on Z04 with rename persistence confirmed). |
 | *"Copy preset A03 and tweak the reverb"* | 1 × `switch_preset` + 1 × `set_param` + 1 × `save_preset` | 3 | ~500 ms chained (3 MCP calls × ~3 s LLM-gen ≈ ~10 s total) | ⚠ Chain length crosses the 5-MCP-call warning threshold; tolerable but not great |
 
 ## Persistence

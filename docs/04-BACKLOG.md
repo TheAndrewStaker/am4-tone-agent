@@ -2611,17 +2611,105 @@ Skip until explicit user demand materializes.
   reflects new param count and BK-032 flips to ✅. Then Wave 1
   device expansion (BK-030 / BK-029 / BK-014 / BK-031) is
   formally unblocked.
-- **Relation to HW-014 and HW-017.** HW-014 (39-param spot-check)
-  stays a separate release-gate item — it validates params we've
-  already registered structurally (cache-signature-only). HW-017
-  (count-type disambiguation) gets partially absorbed into HW-020
-  (resolves delay id=64 via Bit Reduction capture), HW-022
-  (resolves phaser id=22 via Order capture), and HW-023 (resolves
-  filter id=28 via Order capture). The remaining HW-017 items
-  (drive id=24, gate id=14) can stay as a separate low-priority
-  bucket.
+- **Relation to HW-014 / HW-024 / HW-025 and HW-017.** HW-014
+  (Session D structurally-decoded spot-check) closed Session 29
+  cont 7 with 28 verified + 5 bugs; remaining coverage queued
+  as HW-024 (Round 4 + re-tests) and the bug-fix work as BK-033
+  + BK-034 (driven by HW-025 captures). HW-017 (count-type
+  disambiguation) gets partially absorbed into HW-020 (resolves
+  delay id=64 via Bit Reduction capture), HW-022 (resolves
+  phaser id=22 via Order capture), and HW-023 (resolves filter
+  id=28 via Order capture). The remaining HW-017 items (drive
+  id=24, gate id=14) can stay as a separate low-priority bucket.
 - **Relation to AM4-depth-gate.** Was previously informally "amp
   depth + the structurally-decoded params." BK-032 formalizes the
   full scope across every block. The Wave 1 device expansion
   (BK-014 Axe-Fx II, BK-031 Hydrasynth) remains gated on BK-032
   clearing.
+
+### BK-033 `reverb.predelay` dead-address fix
+
+- **Discovered:** Session 29 cont 7 via HW-014 spot-check. Three
+  writes (85 ms, 0 ms, 250 ms) all wire-acked but the AM4
+  hardware display stayed at 20.0 ms default. Sending the maximum
+  value still didn't move it — that rules out an encoding bug
+  and points squarely at the wrong pidHigh.
+- **Current state.** `reverb.predelay` is registered at
+  `pidLow=0x0042 / pidHigh=0x0010` per `src/protocol/params.ts`,
+  with a Blocks Guide comment "Cache 0x10 (0..0.25s × 1000 =
+  0..250 ms)". Either the cache id=16 record we mapped to
+  predelay is actually a different reverb knob, or it's a
+  write-only diagnostic register the device accepts but doesn't
+  surface, or the predelay live-write goes via a different
+  pidHigh than the stored-preset cache id.
+- **Fix path.** Decode the actual pidHigh from a USBPcap capture
+  of AM4-Edit setting Pre-Delay to a distinctive value (queued
+  as HW-025 capture #1). Update the param entry, regenerate
+  `cacheParams.ts`, add a `verify-msg` golden against the
+  captured bytes. Keep a `// BUG (HW-014)` warning on the
+  current entry until the fix lands.
+- **Severity.** Medium — predelay is a real first-page reverb
+  control users will reach for. Not a release blocker because
+  Mix / Time / Size / Springs / Spring Tone all work, but it's
+  a gap in user-trust if a `set_param reverb.predelay 80` does
+  nothing.
+- **Effort.** ~30 min — one capture, one decode, one param-map
+  edit, one new golden. Cheap.
+
+### BK-034 Per-block float encoding divergence (4-param cluster)
+
+- **Discovered:** Session 29 cont 7 via HW-014 spot-check. Four
+  params have address verified (extreme values land) but
+  mid-range values land somewhere unrelated:
+  - `chorus.rate` — wrote 3.4 Hz, displayed 0.5 Hz; max 10 OK.
+  - `flanger.mix` — wrote 54%, displayed 50%; min 0 OK.
+  - `flanger.feedback` — wrote -61%, displayed 0; max +99
+    displayed +90.
+  - `phaser.mix` — wrote 88%, displayed 53%; min 0 OK.
+- **Why this is per-block, not encoder.** The same `packFloat32LE`
+  + `DISPLAY_TO_INTERNAL` chain works correctly for
+  `delay.feedback` (-47% → -47%), `delay.mix`, `tremolo.rate`
+  (7.8 Hz), `chorus.mix`, `reverb.mix`. So the bug is per-block
+  firmware behavior — different blocks interpret the float at
+  the same `pidHigh` differently — not a flat encoder issue.
+- **Most diagnostic clue.** `chorus.rate` 3.4 → 0.5 Hz fits a
+  log-knob mapping exactly: knob position 0.34 (i.e. 3.4/10)
+  on a 0.1..10 Hz log curve = `0.1 * 10^(0.34 * log10(100))` =
+  ~0.479 Hz. So chorus.rate's wire value is probably a
+  normalized 0..1 knob position with the firmware doing log-Hz
+  internally. Tremolo.rate works because (hypothesis) it's
+  linear. AM4-Edit is the oracle on what each block actually
+  expects.
+- **Fix path.** Capture AM4-Edit setting each of the 4 buggy
+  params at the same mid-range value our HW-014 test wrote
+  (queued as HW-025 captures #2..#5). Compare wire bytes to
+  ours. Decode the actual encoding rule per param. Most likely
+  shape:
+  - **Option A (simple):** add per-param `encode` /  `decode`
+    overrides on the `Param` record. Each param gets a
+    `displayToInternal(display) → number` function plus the
+    inverse. Default falls back to the current
+    `DISPLAY_TO_INTERNAL` table.
+  - **Option B (more invariant):** add new `Unit` variants
+    like `hz_log` / `percent_compressed` / `bipolar_scaled`
+    so the catalog stays declarative. Worth doing if HW-025
+    surfaces 3+ params sharing the same non-linear curve.
+  - Pick the option after HW-025 reveals whether the curves
+    are per-param-unique or share a small handful of patterns.
+- **Severity.** High — these are common knobs (chorus rate,
+  flanger feedback) that users will absolutely set. A user
+  asking *"set the flanger feedback to -50"* and getting 0 is
+  silent failure of the worst kind. **Release blocker for the
+  Conversational Presets / MCP MIDI Tools rename** — can't
+  ship a "natural-language amp control" product where modulation
+  feedback knobs silently no-op.
+- **Effort.** ~1 day — captures (HW-025) + per-param decoding
+  + plumbing the encode/decode overrides through `params.ts`,
+  `setParam.ts`, and `verify-msg`. The plumbing is the bulk.
+- **Until fixed.** Each affected param carries a `// BUG
+  (HW-014)` warning comment in `params.ts`. Optionally,
+  `apply_preset` and `set_param` validation could reject these
+  keys outright until the fix lands — deferred to founder
+  decision (current default: callable with the warning comment
+  as the signal, since rejecting them would also cripple any
+  partial-preset build that incidentally references them).

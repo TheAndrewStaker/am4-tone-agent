@@ -156,8 +156,8 @@ export const KNOWN_PARAMS = {
   // (knob_0_10, 0..1 range, display-scale 10). Named per AM4 Owner's
   // Manual line 1563 "Gain, Bass, Mid, Treble, Presence, Level" and
   // the Fractal Blocks Guide tone-stack order (§Tone Page, pp. 9–10).
-  // Pending P1-010 Session D hardware spot-check for absolute
-  // confirmation, but structural evidence is strong.
+  // HW-014 verified (Session 29 cont 7): mid / treble / presence / bass
+  // all wrote and displayed correctly on hardware.
   'amp.mid': {
     block: 'amp', name: 'mid',
     pidLow: 0x003a, pidHigh: 0x000d,
@@ -214,9 +214,10 @@ export const KNOWN_PARAMS = {
   // Guide text (structural — wire indexing assumed from cache enum
   // order). Out-of-band from the cache generator for the same reason
   // amp.out_boost is: the generator emits only the block's Type enum,
-  // not its other enum records. HW-014-style spot-check still needed
-  // to confirm each value index lands the labeled state on the
-  // device.
+  // not its other enum records. HW-014 couldn't verify these from
+  // the hardware display alone (both labels are hidden by the AM4
+  // hardware UI); AM4-Edit would show them. Structural-only until
+  // an AM4-Edit-side verification pass.
   //
   // Tonestack Location (not Type — Type is a separate 69-value enum).
   // Blocks Guide: "POST places the stack between the preamp and
@@ -272,7 +273,11 @@ export const KNOWN_PARAMS = {
   // P1-010 Session B (2026-04-20) — AM4 Owner's Manual line 1330:
   // "Page Right and dial in Drive, Tone, and Level." Cache records
   // at 0x0C/0x0D/0x0E have canonical pedal-layout signatures.
-  // Pending P1-010 Session D hardware spot-check.
+  // HW-014 verified: address + value land correctly on Klone Chiron.
+  // Note: AM4 hardware display labels these registers per drive
+  // model (Klone Chiron shows `tone`→"Treble" and `level`→"Output",
+  // matching the real Klon Centaur). The underlying register is
+  // unchanged across drive types.
   'drive.tone': {
     block: 'drive', name: 'tone',
     pidLow: 0x0076, pidHigh: 0x000c,
@@ -317,6 +322,10 @@ export const KNOWN_PARAMS = {
     unit: 'seconds', displayMin: 0.1, displayMax: 100,
   },
   'reverb.predelay': {
+    // BUG (HW-014, BK-033): dead address. Three writes (85, 0, 250 ms)
+    // wire-acked on hardware but display stayed at 20.0 ms default.
+    // Sending the max didn't move it either — pidHigh 0x0010 is wrong
+    // or points at a write-only register. Awaits HW-025 capture #1.
     // Blocks Guide §Reverb Basic Page: "Predelay — Adds extra delay
     // before the reverb starts." Cache 0x10 (0..0.25s × 1000 = 0..250 ms).
     block: 'reverb', name: 'predelay',
@@ -349,8 +358,10 @@ export const KNOWN_PARAMS = {
   // 1–8" as detune amounts within ±24 semitones ("this is where
   // 'Shimmer' is born"). AM4's reverb exposes two such voices at
   // cache ids 56/57 — structural registration (cache signature
-  // matches BG exactly: a=-24, b=24, c=1, step=1). Not yet wire-
-  // verified; HW spot-check still required for absolute confirmation.
+  // matches BG exactly: a=-24, b=24, c=1, step=1). HW-014 couldn't
+  // verify on hardware display (both shifts hidden on the Plate
+  // reverb type tested); awaits a Shimmer-type hardware spot-check
+  // or AM4-Edit-side verification.
   'reverb.shift_1': {
     block: 'reverb', name: 'shift_1',
     pidLow: 0x0042, pidHigh: 0x0038,
@@ -421,8 +432,11 @@ export const KNOWN_PARAMS = {
   // block with a wet/dry concept exposes Mix at pidHigh 0x01 with the
   // same percent signature as the confirmed reverb.mix. Skipped for
   // Wah/GEQ/Gate/Volume-Pan (AM4 manual p. 34: "Effects with no mix,
-  // such as Wah, GEQ, etc., will show 'NA'"). Pending Session D
-  // hardware spot-check.
+  // such as Wah, GEQ, etc., will show 'NA'"). HW-014 partial: delay
+  // / chorus / reverb mix verified correct; flanger.mix and
+  // phaser.mix surfaced the BK-034 encoding bug (see entries below);
+  // tremolo.mix / compressor.mix / filter.mix hidden on hardware
+  // display (awaits AM4-Edit verification).
   // Modulation-block LFO rates + depths (Session 26 Unit-extension pass).
   // Rate uses the 'hz' unit (raw passthrough, c=1 in cache). Depth is a
   // standard percent knob. Blocks Guide §Chorus/Flanger/Phaser document
@@ -439,6 +453,12 @@ export const KNOWN_PARAMS = {
     enumValues: CHORUS_TYPES_VALUES,
   },
   'chorus.rate': {
+    // BUG (HW-014, BK-034): encoding mismatch. Wrote 3.4 Hz, hardware
+    // displayed 0.5 Hz; max 10 Hz lands correctly. Looks like a
+    // log-knob mapping (knob 0.34 on a 0.1..10 Hz log curve = 0.479 Hz).
+    // Likely the firmware expects a normalized 0..1 knob position here,
+    // not raw Hz. tremolo.rate at the same pidHigh works on its block
+    // — divergence is per-block. Awaits HW-025 capture #2.
     block: 'chorus', name: 'rate',
     pidLow: 0x004e, pidHigh: 0x000c,
     unit: 'hz', displayMin: 0.1, displayMax: 10,
@@ -449,6 +469,10 @@ export const KNOWN_PARAMS = {
     unit: 'percent', displayMin: 0, displayMax: 100,
   },
   'flanger.mix': {
+    // BUG (HW-014, BK-034): encoding mismatch. Wrote 54%, hardware
+    // displayed 50%; min 0 lands correctly. Same `pidHigh=0x01`
+    // universal-Mix register works on delay/chorus/reverb. Awaits
+    // HW-025 capture #3.
     block: 'flanger', name: 'mix',
     pidLow: 0x0052, pidHigh: 0x0001,
     unit: 'percent', displayMin: 0, displayMax: 100,
@@ -470,12 +494,20 @@ export const KNOWN_PARAMS = {
     unit: 'percent', displayMin: 0, displayMax: 100,
   },
   'flanger.feedback': {
+    // BUG (HW-014, BK-034): encoding mismatch. Wrote -61%, hardware
+    // displayed 0; wrote +99%, displayed +90. Same `pidHigh=0x0E`
+    // bipolar feedback register works on delay.feedback (-47% verified).
+    // Awaits HW-025 capture #4.
     block: 'flanger', name: 'feedback',
     pidLow: 0x0052, pidHigh: 0x000e,
     // Cache caps internal range at ±0.995 — display scale 100 ⇒ ±99%.
     unit: 'bipolar_percent', displayMin: -99, displayMax: 99,
   },
   'phaser.mix': {
+    // BUG (HW-014, BK-034): encoding mismatch. Wrote 88%, hardware
+    // displayed 53%; min 0 lands correctly. Same `pidHigh=0x01`
+    // universal-Mix register works on delay/chorus/reverb. Awaits
+    // HW-025 capture #5.
     block: 'phaser', name: 'mix',
     pidLow: 0x005a, pidHigh: 0x0001,
     unit: 'percent', displayMin: 0, displayMax: 100,
@@ -602,9 +634,12 @@ export const KNOWN_PARAMS = {
   // lines 899 (Amp), 1233 (Chorus), 1430 (Flanger), 1733 (Delay),
   // 1883 (Phaser). Cache signature is identical across all 15
   // confirmed blocks: id=2, a=-1, b=1, c=100 (display = internal ×
-  // 100, so -100..+100%). Awaits Session D hardware spot-check for
-  // absolute confirmation; structural evidence across 15 independent
-  // blocks is extremely strong.
+  // 100, so -100..+100%). HW-014 verified on `geq.balance` = -67
+  // (the only Balance param AM4's hardware display exposes); other
+  // block Balances wrote and wire-acked but are hidden from the
+  // hardware screen. AM4-Edit verification owed for the 14 hidden
+  // ones; structural evidence across all 15 blocks is extremely
+  // strong.
   'amp.balance':       { block: 'amp',        name: 'balance', pidLow: 0x003a, pidHigh: 0x0002, unit: 'bipolar_percent', displayMin: -100, displayMax: 100 },
   'compressor.balance':{ block: 'compressor', name: 'balance', pidLow: 0x002e, pidHigh: 0x0002, unit: 'bipolar_percent', displayMin: -100, displayMax: 100 },
   'geq.balance':       { block: 'geq',        name: 'balance', pidLow: 0x0032, pidHigh: 0x0002, unit: 'bipolar_percent', displayMin: -100, displayMax: 100 },
