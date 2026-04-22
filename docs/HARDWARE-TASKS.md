@@ -23,14 +23,15 @@
 > collection (replaced by the Hydrasynth Explorer) and is now a
 > community-support item with no founder-hardware validation.
 >
-> Last updated: 2026-04-21 (Session 29 cont 4 — BK-032 "AM4-Edit
-> first-page coverage" release-gate scope formalized. HW-018
-> through HW-023 queued to cover every missing first-page knob
-> per block type (~58 captures across reverb / drive / delay /
-> compressor / modulation / secondary blocks). HW-017 partially
-> absorbed into HW-020 / HW-022 / HW-023. Priority order now:
+> Last updated: 2026-04-21 (Session 29 cont 5 — HW-018..HW-023
+> rewritten as one-pcapng-per-block with sequential wiggles.
+> Capture count 58 → 13 (2 reverb + 1 drive + 1 delay + 1 comp +
+> 4 modulation + 4 secondary). AM4-Edit.exe binary inspection
+> exhausted — labels not present as plain strings, so wire
+> captures remain the only deduction path. HW-017 partially
+> absorbed into HW-020 / HW-022 / HW-023. Priority order:
 > HW-013 > HW-018 > HW-019 > HW-020 > HW-014 > HW-016 > HW-021 >
-> HW-022 > HW-023 > HW-017 (residual).)
+> HW-022 > HW-023 > HW-017 residual.)
 
 ## Status key
 
@@ -151,206 +152,238 @@ Claude picks up from there and moves the item to ⏳ or ✅.
   task family, scoped 2026-04-21 by founder direction: the release target
   is every parameter on AM4-Edit's first page of every block type, because
   "those are the primary options an intermediate-to-advanced user would
-  want to use." These come ahead of HW-017 in priority because they cover
-  front-panel user intent for every block, not just edge-case count knobs.
-  See `docs/04-BACKLOG.md` BK-032 for the full scope rationale.
+  want to use." See `docs/04-BACKLOG.md` BK-032 for scope rationale.
+
+  Optimized 2026-04-21 cont: one-pcapng-per-block with sequential wiggles
+  replaces the original per-knob-per-file plan. Capture count dropped
+  from 58 → 13. Each knob produces a unique pidHigh in the wire; the
+  decoder reads the pidHigh transitions in order and aligns them to the
+  BG-documented Basic Page sequence listed below. Post-decode cross-
+  checks against known pidHighs (where overlaps exist) validate the
+  alignment before registering new entries.
+
+  ## Capture discipline (applies to all HW-018..HW-023)
+
+  1. Start USBPcap recording on the AM4's USB interface (same as HW-015).
+  2. Load the target block and preset described in each task.
+  3. **Wiggle each knob in the order listed, one at a time.** Move
+     each knob from its current value to a clearly-different value
+     (e.g. 3 → 7, or rotate through a few enum options). Don't
+     sweep — a couple of discrete moves per knob is cleanest.
+  4. **Pause ~1 second between knobs** — the gap gives the decoder
+     clean separation when the wire traffic from knob N ends and
+     knob N+1 begins. Without the gap, overlapping writes get harder
+     to disambiguate.
+  5. For enum selectors (Type / Mode / OFF/ON), click through 2-3
+     options in sequence; the wire will show the pidHigh transition
+     on each click.
+  6. Stop recording. Save as the filename shown in each task.
+  7. Signal "HW-NNN done" with the saved path.
 
   Priority order (most-used block first):
-    HW-018 Reverb   → HW-019 Drive  → HW-020 Delay
-    HW-021 Compressor → HW-022 Modulation (chorus/flanger/phaser/tremolo)
-    HW-023 Secondary (wah/filter/gate/geq)
+    HW-018 Reverb → HW-019 Drive → HW-020 Delay
+    HW-021 Compressor → HW-022 Modulation → HW-023 Secondary
 -->
 
 ### HW-018 — Reverb first-page completion 🔜
 
-- **For:** BK-032 (AM4-Edit first-page coverage) — highest priority
-  because reverb is already partially covered from HW-015 and the
-  gaps are well-understood.
-- **Why:** Blocks Guide §Reverb Basic Page names 8 universal knobs
-  (3 registered: Time / Predelay / Size) plus 4 Spring-specific
-  (2 registered: Number Of Springs / Spring Tone). 7 gaps to fill.
-- **Setup:** AM4 plugged in, AM4-Edit open, USBPcap running. Same
-  methodology as HW-015.
-- **Captures (one knob per recording; load a preset whose reverb
-  is on each target type):**
-  1. Load a Spring reverb. Wiggle **Spring Drive** →
-     `session-30-reverb-spring-drive.pcapng`.
-  2. Same Spring preset. Wiggle **Boiiinnng!** →
-     `session-30-reverb-boiiinnng.pcapng`.
-  3. Load a Hall or Room reverb (they expose the multi-band decay
-     controls most cleanly). Wiggle **Crossover Frequency** (Hz) →
-     `session-30-reverb-crossover-freq.pcapng`.
-  4. Same Hall/Room. Wiggle **Low Freq Time** (seconds) →
-     `session-30-reverb-low-freq-time.pcapng`.
-  5. Same Hall/Room. Wiggle **High Freq Time** (seconds) →
-     `session-30-reverb-high-freq-time.pcapng`.
-  6. Any non-Spring type. Wiggle **Early Level** (dB or %) →
-     `session-30-reverb-early-level.pcapng`.
-  7. Any non-Spring type. Wiggle **Late Level** (dB or %) →
-     `session-30-reverb-late-level.pcapng`.
-- **Signal completion:** *"HW-018 done"* + list of saved paths.
-- **Priority:** high — #1 in the BK-032 release-gate queue.
+- **For:** BK-032 (AM4-Edit first-page coverage) — #1 priority.
+- **Why:** BG §Reverb Basic Page names 8 universal knobs (3
+  registered: Time / Predelay / Size) plus 4 Spring-specific
+  (2 registered: Springs / Spring Tone). 7 gaps to fill.
+- **Captures: 2 pcapngs.**
+
+  **Capture A — Hall or Room reverb (5 universal Basic-Page knobs):**
+  `samples/captured/session-30-reverb-basic-hall.pcapng`
+
+  Load any Hall or Room reverb type. Wiggle in this order:
+  1. Crossover Frequency (Hz)
+  2. Low Freq Time (seconds)
+  3. High Freq Time (seconds)
+  4. Early Level (dB or %)
+  5. Late Level (dB or %)
+
+  **Capture B — Spring reverb (2 type-specific knobs):**
+  `samples/captured/session-30-reverb-spring.pcapng`
+
+  Load any Spring reverb type. Wiggle in this order:
+  1. Spring Drive
+  2. Boiiinnng!
+
+- **Signal:** *"HW-018 done"* + saved paths.
 
 ### HW-019 — Drive first-page completion 🔜
 
-- **For:** BK-032. Drive block is the most popular effect after amp.
-- **Why:** Blocks Guide §Drive calls out that the Basic Page shows
-  "parameters you would expect to find according to the current
-  drive type" — universal ones are Drive / Tone / Level (all
-  registered) but drive-type-specific knobs vary. The EQ 1 + Advanced
-  pages also carry Basic-tier user intent: Low Cut, High Cut, Bass,
-  Mid, High Mid, Treble, Mid Frequency, Bias Response, Dry Level,
-  Bias, Slew Rate, Clip Type, Clip Shape.
-- **Setup:** same as HW-018.
-- **Captures (one knob per recording, on a TS808 or similar drive
-  type that exposes all of them):**
-  1. **Low Cut** (Hz) → `session-30-drive-low-cut.pcapng`.
-  2. **High Cut** (Hz) → `session-30-drive-high-cut.pcapng`.
-  3. **Bass** (dB ±12) → `session-30-drive-bass.pcapng`.
-  4. **Mid** (dB ±12) → `session-30-drive-mid.pcapng`.
-  5. **Mid Frequency** (Hz) → `session-30-drive-mid-freq.pcapng`.
-  6. **Treble** (dB ±12) → `session-30-drive-treble.pcapng`.
-  7. **High Mid** (dB ±12, if exposed on Drive EQ 1) →
-     `session-30-drive-high-mid.pcapng`.
-  8. Switch to Advanced. **Clip Type** (enum switch, Soft → Hard) →
-     `session-30-drive-clip-type.pcapng`.
-  9. **Bass Response** (knob) → `session-30-drive-bass-response.pcapng`.
-  10. **Dry Level** → `session-30-drive-dry-level.pcapng`.
-  11. **Bias** (if exposed) → `session-30-drive-bias.pcapng`.
-  12. **Slew Rate** → `session-30-drive-slew-rate.pcapng`.
-- **Signal completion:** *"HW-019 done"* + saved paths. If some knobs
-  aren't exposed on TS808, flag which ones and try a different drive
-  type.
-- **Priority:** high — #2 in BK-032.
+- **For:** BK-032 — #2 priority. Drive is the most popular effect
+  after amp.
+- **Why:** BG §Drive Basic Page is type-dependent; EQ 1 + Advanced
+  pages carry the rest of Basic-tier user intent (Low/High Cut,
+  tone-stack shaping, clipping behavior).
+- **Captures: 1 pcapng.**
+
+  **Capture — TS808 drive type (covers all common EQ/Advanced knobs):**
+  `samples/captured/session-30-drive-basic-ts808.pcapng`
+
+  Load a TS808 drive type. Wiggle in this order:
+  1. Low Cut (EQ 1 page, Hz)
+  2. High Cut (EQ 1 page, Hz)
+  3. Bass (EQ 1 page, dB)
+  4. Mid (EQ 1 page, dB)
+  5. Mid Frequency (EQ 1 page, Hz)
+  6. Treble (EQ 1 page, dB)
+  7. High Mid (if exposed on TS808, dB)
+  8. Switch to Advanced page. Wiggle Clip Type through 2-3 enum
+     options (Soft → Hard → Silicon, etc.)
+  9. Bass Response
+  10. Dry Level
+  11. Bias (if exposed)
+  12. Slew Rate
+
+  If any knob isn't exposed on TS808, skip it and note which ones —
+  I'll queue a follow-up capture on a different drive type.
+
+- **Signal:** *"HW-019 done"* + path + any skipped-knob notes.
 
 ### HW-020 — Delay first-page completion 🔜
 
-- **For:** BK-032. Delay's Config Page is the user-facing Basic set.
-- **Why:** BG §Delay Config names ~9 universal knobs (2 registered:
-  Time / Feedback). Delay is type-rich (Digital Mono / Stereo /
-  Analog / Tape / Ping-Pong / Dual / Reverse / Sweep / Multi-Tap)
-  with type-specific knobs — HW-020 covers the universal-on-
-  Digital-Mono subset; type-specific knobs (Motor Speed, L/R Time
-  Ratio, Sweep Start/Stop Freq, etc.) can land in a later pass if
-  needed.
-- **Setup:** same as HW-018. Load a Digital Mono delay for the
-  universal captures.
-- **Captures on Digital Mono:**
-  1. **Tempo** (enum NONE / 1/4 / 1/8 / etc.) →
-     `session-30-delay-tempo.pcapng`.
-  2. **Master Feedback** (percent 0..200) →
-     `session-30-delay-master-feedback.pcapng`.
-  3. **Drive** (knob_0_10) → `session-30-delay-drive.pcapng`.
-  4. **Bit Reduction** (0..24) →
-     `session-30-delay-bit-reduction.pcapng`. (Also resolves the
-     HW-017 delay id=64 ambiguity — Taps vs Bit Reduction.)
-  5. **Echo Pan** → `session-30-delay-echo-pan.pcapng`.
-  6. **Spread** → `session-30-delay-spread.pcapng`.
-  7. **Right Post Delay** → `session-30-delay-right-post.pcapng`.
-- **Signal completion:** *"HW-020 done"* + paths.
-- **Priority:** high — #3 in BK-032. Bundles HW-017 delay resolution.
+- **For:** BK-032 — #3 priority. Also resolves HW-017's delay id=64
+  (Taps vs Bit Reduction) question.
+- **Why:** BG §Delay Config names ~9 universal knobs; 2 registered
+  (Time / Feedback). Type-specific knobs (Tape / Reverse / Sweep)
+  are deferred.
+- **Captures: 1 pcapng.**
+
+  **Capture — Digital Mono delay:**
+  `samples/captured/session-30-delay-basic-digital.pcapng`
+
+  Load a Digital Mono delay type. Wiggle in this order:
+  1. Tempo (enum NONE → 1/4 → 1/8)
+  2. Master Feedback (percent 0..200)
+  3. Drive (knob 0..10)
+  4. Bit Reduction (count 0..24) — **this resolves the HW-017
+     ambiguity on delay pidHigh=0x40**
+  5. Echo Pan
+  6. Spread
+  7. Right Post Delay
+
+- **Signal:** *"HW-020 done"* + path.
 
 ### HW-021 — Compressor first-page completion 🔜
 
-- **For:** BK-032. Compressor is currently minimal: only `mix`,
-  `balance`, and `type` are registered. Every user-facing control
-  is missing.
-- **Why:** BG §Compressor Config Page enumerates Threshold, Ratio /
-  Compression / Dynamics, Attack Time, Release Time, Auto Attack/
-  Release, Look Ahead Time, Detector Type, Knee Type, Auto Makeup,
-  Light Type (Optical only). The most-used subset is Threshold,
-  Ratio, Attack, Release, Mix (registered) — this captures those.
-- **Setup:** same. Load any compressor type (Studio FF is fine for
-  most controls; switch to Optical for Light Type).
-- **Captures:**
-  1. **Threshold** (dB) → `session-30-comp-threshold.pcapng`.
-  2. **Ratio** (e.g. 2:1 → 4:1) →
-     `session-30-comp-ratio.pcapng`.
-  3. **Attack Time** (ms) → `session-30-comp-attack.pcapng`.
-  4. **Release Time** (ms) → `session-30-comp-release.pcapng`.
-  5. **Knee Type** (enum soft/hard) →
-     `session-30-comp-knee-type.pcapng`.
-  6. **Auto Makeup** (OFF/ON enum) →
-     `session-30-comp-auto-makeup.pcapng`.
-  7. **Detector Type** (RMS / PEAK / RMS+PEAK) →
-     `session-30-comp-detector-type.pcapng`.
-  8. Switch to Optical Compressor type. **Light Type** (enum) →
-     `session-30-comp-light-type.pcapng`.
-- **Signal completion:** *"HW-021 done"* + paths.
-- **Priority:** high — #4 in BK-032. Big coverage jump for a
-  commonly-used block.
+- **For:** BK-032 — #4 priority. Biggest coverage jump — comp is
+  nearly empty right now.
+- **Why:** BG §Compressor Config Page has ~10 universal controls; 0
+  currently registered beyond Type/Mix/Balance.
+- **Captures: 1 pcapng.**
+
+  **Capture — Studio FF Compressor type, switching to Optical at end:**
+  `samples/captured/session-30-comp-basic-studio.pcapng`
+
+  Load a Studio FF Compressor type. Wiggle in this order:
+  1. Threshold (dB)
+  2. Ratio (2:1 → 4:1 → ∞)
+  3. Attack Time (ms)
+  4. Release Time (ms)
+  5. Knee Type (enum — click through options)
+  6. Auto Makeup (OFF/ON toggle)
+  7. Detector Type (enum — RMS → PEAK → RMS+PEAK)
+  8. **Switch Type dropdown to Optical Compressor.** Wiggle Light
+     Type through its enum options — this is the only type-
+     specific knob in the capture.
+
+- **Signal:** *"HW-021 done"* + path.
 
 ### HW-022 — Modulation blocks first-page completion 🔜
 
-- **For:** BK-032. Bundle chorus / flanger / phaser / tremolo since
-  they share a common LFO-based structure and most missing params
-  are shared (Tempo, Manual, LFO Type / Phase / Duty Cycle).
-- **Why:** Each modulation block has Rate + Depth + Mix registered,
-  but Tempo (the BPM-sync selector) and waveform-shape controls are
-  missing — users ask for those regularly ("sync the chorus to
-  1/4 notes").
-- **Setup:** same. Four mini-sessions, one per block, on whichever
-  Type the user prefers.
-- **Chorus captures (load any Chorus type):**
-  1. **Number Of Voices** (2..8) →
-     `session-30-chorus-voices.pcapng`.
-  2. **Tempo** (enum) → `session-30-chorus-tempo.pcapng`.
-  3. **Delay Time** (0.01..50 ms) →
-     `session-30-chorus-delay-time.pcapng`.
-- **Flanger captures:**
-  4. **Tempo** → `session-30-flanger-tempo.pcapng`.
-  5. **Manual** (0.01..10 ms) →
-     `session-30-flanger-manual.pcapng`.
-  6. **Low Cut / High Cut** (Hz) → bundle as
-     `session-30-flanger-low-cut.pcapng` +
-     `session-30-flanger-high-cut.pcapng`.
-- **Phaser captures:**
-  7. **Tempo** → `session-30-phaser-tempo.pcapng`.
-  8. **Depth** → `session-30-phaser-depth.pcapng`.
-  9. **Manual** → `session-30-phaser-manual.pcapng`.
-  10. **Tone** → `session-30-phaser-tone.pcapng`.
-  11. **Order / Stages** → `session-30-phaser-order.pcapng`
-      (resolves HW-017 phaser id=22 question).
-- **Tremolo captures:**
-  12. **Tempo** → `session-30-tremolo-tempo.pcapng`.
-  13. **LFO Type** (waveform enum) →
-      `session-30-tremolo-lfo-type.pcapng`.
-  14. **LFO Duty Cycle** →
-      `session-30-tremolo-lfo-duty.pcapng`.
-- **Signal completion:** *"HW-022 done"* + paths grouped by block.
-- **Priority:** medium — #5 in BK-032. Bundled to share one
-  AM4-Edit session.
+- **For:** BK-032 — #5 priority. Bundles chorus / flanger / phaser
+  / tremolo since they share LFO-based structure.
+- **Why:** Each has Rate / Depth / Mix registered; Tempo, Manual,
+  LFO controls, block-specific structure (chorus.voices,
+  phaser.order) missing.
+- **Captures: 4 pcapngs** (one per block — each has its own pidLow
+  so they must be in separate recordings).
 
-### HW-023 — Secondary-blocks first-page completion 🔜
+  **Capture A — Chorus:**
+  `samples/captured/session-30-chorus-basic.pcapng`
 
-- **For:** BK-032. Catches wah / filter / gate / GEQ, all of which
-  currently have only `type` + `balance` registered.
-- **Why:** Less-popular blocks individually, but user-facing. Wah is
-  used live; Gate for noise control; GEQ for final-tone shaping;
-  Filter for creative effects.
-- **Setup:** same.
-- **Wah captures:**
-  1. **Frequency** (pedal position; Hz) →
-     `session-30-wah-frequency.pcapng`.
-  2. **Resonance** (Q) → `session-30-wah-resonance.pcapng`.
-  3. **Min / Max Frequency** — scope range set in Expert page.
-     Bundle: `session-30-wah-min-freq.pcapng` +
-     `session-30-wah-max-freq.pcapng`.
-- **Filter captures:**
-  4. **Order** (12 dB/oct vs 24 dB/oct — 2nd/4th) →
-     `session-30-filter-order.pcapng` (resolves HW-017 filter
-     id=28 question).
-  5. **Q / Resonance** → `session-30-filter-q.pcapng`.
-- **Gate captures:**
-  6. **Threshold** (dB) → `session-30-gate-threshold.pcapng`.
-  7. **Ratio** → `session-30-gate-ratio.pcapng`.
-  8. **Attack** (ms) → `session-30-gate-attack.pcapng`.
-  9. **Release** (ms) → `session-30-gate-release.pcapng`.
-- **GEQ captures:**
-  10. Bands 1–10. Wiggle each band gain once:
-      `session-30-geq-band-{1..10}.pcapng`.
-- **Signal completion:** *"HW-023 done"* + paths.
-- **Priority:** medium — #6 in BK-032. Less urgent than modulation.
+  Load any Chorus type. Wiggle in this order:
+  1. Number Of Voices (count 2..8)
+  2. Tempo (enum)
+  3. Delay Time (ms)
+
+  **Capture B — Flanger:**
+  `samples/captured/session-30-flanger-basic.pcapng`
+
+  Load any Flanger type. Wiggle in this order:
+  1. Tempo (enum)
+  2. Manual (ms)
+  3. Low Cut (Hz)
+  4. High Cut (Hz)
+  5. Bass Focus (if exposed)
+  6. Drive (if exposed)
+
+  **Capture C — Phaser:**
+  `samples/captured/session-30-phaser-basic.pcapng`
+
+  Load any Phaser type. Wiggle in this order:
+  1. Tempo (enum)
+  2. Depth (%)
+  3. Manual
+  4. Tone
+  5. Order / Stages — **this resolves the HW-017 phaser id=22
+     ambiguity**
+
+  **Capture D — Tremolo:**
+  `samples/captured/session-30-tremolo-basic.pcapng`
+
+  Load any Tremolo/Panner type. Wiggle in this order:
+  1. Tempo (enum)
+  2. LFO Type (waveform enum)
+  3. LFO Duty Cycle
+
+- **Signal:** *"HW-022 done"* + 4 saved paths.
+
+### HW-023 — Secondary blocks first-page completion 🔜
+
+- **For:** BK-032 — #6 priority. Catches wah / filter / gate / GEQ.
+  Also resolves HW-017's filter id=28 question.
+- **Why:** These blocks currently have only Type + Balance (+
+  Filter Freq). User-facing knobs missing for each.
+- **Captures: 4 pcapngs** (one per block).
+
+  **Capture A — Wah:**
+  `samples/captured/session-30-wah-basic.pcapng`
+
+  Load any Wah type. Wiggle in this order:
+  1. Frequency (Hz — move the wah-pedal position simulation)
+  2. Resonance / Q
+  3. Min Frequency (Expert page)
+  4. Max Frequency (Expert page)
+
+  **Capture B — Filter:**
+  `samples/captured/session-30-filter-basic.pcapng`
+
+  Load any Filter type. Wiggle in this order:
+  1. Order — **resolves HW-017 filter id=28** (2nd vs 4th order)
+  2. Q / Resonance
+
+  **Capture C — Gate/Expander:**
+  `samples/captured/session-30-gate-basic.pcapng`
+
+  Load any Gate/Expander type. Wiggle in this order:
+  1. Threshold (dB)
+  2. Ratio
+  3. Attack (ms)
+  4. Release / Hold Time (ms)
+
+  **Capture D — Graphic EQ:**
+  `samples/captured/session-30-geq-basic.pcapng`
+
+  Load a Graphic EQ. Wiggle each of the 10 band-gain sliders in
+  order (lowest frequency band first, highest last). One wiggle per
+  band, then move to the next.
+
+- **Signal:** *"HW-023 done"* + 4 saved paths.
 
 ---
 

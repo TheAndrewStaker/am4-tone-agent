@@ -2580,13 +2580,27 @@ Skip until explicit user demand materializes.
     HW-022 closes.
   - **Wah / Filter / Gate / GEQ** 🔴 minimal — only Type + Balance
     (+ Filter Freq). HW-023 closes.
-- **HW tasks queued (see `docs/HARDWARE-TASKS.md`):**
-  - HW-018 Reverb first-page (7 captures)
-  - HW-019 Drive first-page + EQ 1 + Advanced clip controls (~12)
-  - HW-020 Delay first-page (7)
-  - HW-021 Compressor Config Page (8)
-  - HW-022 Modulation bundle (chorus/flanger/phaser/tremolo, ~14)
-  - HW-023 Secondary blocks (wah/filter/gate/geq, ~10)
+- **HW tasks queued (see `docs/HARDWARE-TASKS.md`):** optimized 2026-
+  04-21 cont to one-pcapng-per-block with sequential wiggles — each
+  knob produces a unique pidHigh transition in the wire; the
+  decoder aligns them to the BG Basic Page order listed in each
+  task. Total capture count: **13** (was 58 with per-knob files).
+  - HW-018 Reverb — 2 captures (Hall + Spring)
+  - HW-019 Drive — 1 capture (TS808)
+  - HW-020 Delay — 1 capture (Digital Mono)
+  - HW-021 Compressor — 1 capture (Studio FF + Optical end)
+  - HW-022 Modulation — 4 captures (chorus / flanger / phaser /
+    tremolo, one per block since each has its own pidLow)
+  - HW-023 Secondary — 4 captures (wah / filter / gate / GEQ)
+
+  **Why not fewer captures?** Binary inspection of AM4-Edit.exe
+  (Session 29 cont 5) confirmed the knob labels are NOT stored as
+  plain strings anywhere on disk — not in the exe, not in
+  english.laxml, not in effectDefinitions_15_2p0.cache, not in
+  existing inbound SysEx traffic. Wire captures are the only
+  deduction path. The 58→13 optimization comes from batching knobs
+  per block; 13 is the floor for this methodology given one block
+  (with its own pidLow) per capture.
 - **Priority order.** HW-018 → HW-019 → HW-020 → HW-021 → HW-022 →
   HW-023 (by block popularity). Each is cheap capture-wise
   (5–15 min per block group); the founder can batch them across
