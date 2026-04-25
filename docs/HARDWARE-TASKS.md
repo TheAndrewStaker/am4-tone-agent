@@ -163,34 +163,47 @@ Claude picks up from there and moves the item to ⏳ or ✅.
   on Drive's first page; Blackglass 7K shows 9; Klone Chiron
   relabels Tone→"Treble" / Level→"Output"). Today we have no
   committed map of which type exposes which first-page knobs, so
-  every HW capture spec ends up partial. Recommended sequence:
-- **Step 1 — try cache-side decode first** (cheap, ~1 session,
-  no founder hardware). Fractal's metadata cache likely encodes
-  per-type knob visibility somewhere we haven't decoded yet — the
-  AM4-Edit UI has to know which knobs to show per type, and that
-  info has to live on disk. Look for a per-type subset table or
-  a per-record visibility bitmap in the cache. If found, dump as
-  a `type → knob-id-list` map and ship as `docs/TYPE-KNOBS.md`.
-- **Step 2 — AM4-Edit screenshot pass** (founder hardware) for the
-  blocks/types where step 1 doesn't yield a clean answer. Open
-  each type in AM4-Edit, screenshot the Edit page, transcribe
-  knob list. Bulk founder work; ~15 blocks × 5–80 types each but
-  one pass per block, not per knob.
-- **Why:** HW-019/020/021 each surfaced "spec said N knobs, capture
-  showed M ≠ N." Without this map, HW-022 (modulation) and HW-023
-  (secondary blocks) will hit the same surprises and queue HW-NNN
-  follow-ups for missed knobs. Doing this upfront makes BK-032
-  closure deterministic.
-- **Pass criterion:** committed `docs/TYPE-KNOBS.md` table such
-  that "knobs exposed when X type is loaded" is answerable for
-  every (block, type) without re-reading the Blocks Guide or
-  re-running AM4-Edit.
-- **Signal completion:** *"HW-030 done"* + path. (If step 1 yields
-  a clean cache decode, no hardware action; flip to ⏳ awaiting
-  decode and Claude finishes alone.)
-- **Priority:** medium — gates HW-022 and HW-023 from being
-  written cleanly. Without it, those tasks would be written with
-  the same "spec vs reality" gap that surprised us this session.
+  every HW capture spec ends up partial.
+- **Step 1 (cache-side decode) — DONE, partial fail.** Session 30
+  cont investigation ruled out the simplest hypotheses: (a) no
+  per-type subset table after section 3 (only 2 bytes unparsed
+  in a 129 KB file), (b) `english.laxml` is just UI string
+  translations, (c) AM4-Edit installs no other metadata files.
+  The remaining `extra` field per cache record gives a partial
+  signal (extra=1 correlates with universal-knob status; extra=0
+  with type-dependent) but isn't a complete per-type map. The
+  per-type rendering logic appears compiled into AM4-Edit.exe
+  (21.7 MB binary). Findings written up in `docs/TYPE-KNOBS.md`
+  with the universal-knob set + Drive/Delay/Compressor/Reverb
+  per-type rows seeded from existing captures.
+- **Step 2 — Lazy AM4-Edit screenshot pass** (founder hardware,
+  ongoing). Don't try to enumerate all 700+ block-type
+  combinations upfront. Instead, when you next have AM4-Edit
+  open at the device, screenshot the Edit page for 2–3 types per
+  block (one minimalist + one feature-rich + one outlier), append
+  rows to `docs/TYPE-KNOBS.md`'s per-type tables. ~15 blocks × 3
+  types × ~5 min each = ~4 hours total spread across sessions.
+- **Why:** lazy population is enough for MVP. Claude can use
+  TYPE-KNOBS.md to give "knob X isn't on type Y, switch types
+  first" hints for the captured types, and fall back to a
+  permissive write-anyway behaviour for uncatalogued types
+  (preserving the wire-permissive nature we know from HW-014's
+  `geq.balance` finding). Full coverage doesn't gate release.
+- **Pass criterion:** `docs/TYPE-KNOBS.md` has at least 2–3 type
+  rows per block for the 5 most-used blocks (Amp, Drive, Delay,
+  Reverb, Compressor). Modulation + secondary blocks queued
+  behind HW-022/023.
+- **Signal completion:** *"HW-030 step 2 partial — added
+  {block}/{type} rows"* + path to AM4-Edit screenshot screenshots
+  if helpful. No single done-signal — file grows opportunistically.
+- **Priority:** medium — useful but not gating. HW-022/023 can
+  proceed in parallel (capture whatever AM4-Edit exposes for the
+  type the founder picks, document it as we go).
+- **Optional — HW-031 (Ghidra investigation of AM4-Edit.exe).**
+  If lazy step 2 turns out to be too tedious or Claude wants
+  full coverage automatically, queue a Ghidra session to look
+  for per-type Qt page-template resources inside the .exe. Not
+  scoped here — would need its own HW-NNN.
 
 ### HW-029 — Resolve unidentified Drive `pidHigh=0x002d` (knob_0_10) 🔜
 

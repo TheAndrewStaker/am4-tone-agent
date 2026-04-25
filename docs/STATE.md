@@ -335,28 +335,33 @@ float32. One open question remains before the IR can cover full presets:
 
 ## The single next action
 
-**Address HW-030 (type → knob-list map) before HW-022/023.**
-Session 30 cont closed Drive (HW-019), Delay (HW-020), and
-Compressor (HW-021) for the knobs AM4-Edit exposed on the captured
-types — TS808 OD / Blackglass 7K / Digital Mono / JFET Studio.
-But the captures revealed that AM4-Edit's UI is type-dependent
-in ways we didn't anticipate, so HW-022 (modulation bundle) and
-HW-023 (secondary blocks) would re-hit the same "spec said N
-knobs, capture showed M ≠ N" surprise without an upfront type→
-knob map. **Recommended next action: HW-030 step 1** — try
-decoding per-type knob visibility from the metadata cache before
-spending founder hardware time on screenshots.
+**HW-030 step 1 done — partial fail. Pivot to HW-016 + lazy
+HW-030 step 2.** Session 30 cont (continued) ruled out the
+simplest cache-decode hypotheses for per-type knob visibility:
+no per-type subset table after section 3 (only 2 bytes unparsed
+in a 129 KB file), `english.laxml` is just UI strings, no other
+metadata files installed by AM4-Edit. Per-type rendering logic
+appears compiled into AM4-Edit.exe (21.7 MB). Partial signal:
+the `extra` field per cache record correlates with "universal vs
+type-dependent" knob status, but isn't a complete per-type map.
+Findings + seeded type rows in **`docs/TYPE-KNOBS.md`** (new
+this session). Lazy growth strategy adopted: Claude collects
+type→knob rows opportunistically as captures land, doesn't try
+to enumerate all 700+ block-type combos upfront. HW-022 and
+HW-023 unblocked — they just append rows as new types are
+encountered.
 
-1. **HW-030 step 1 — cache-side per-type visibility decode**
-   (Claude action, no founder hardware). Look for a per-type
-   subset table or per-record visibility bitmap in the cache
-   (sections we haven't decoded yet). AM4-Edit has to know
-   which knobs to show per type, and that info has to live on
-   disk somewhere. If found, dump as `type → knob-id-list`
-   and ship as `docs/TYPE-KNOBS.md`.
-2. **HW-030 step 2 — AM4-Edit screenshot pass** (founder
-   action) for blocks/types where step 1 doesn't yield a
-   clean answer.
+**Recommended next action: HW-016 prompts #1 + #3** (10 min
+founder action) — closes the last P5-011 release gate. After
+that, HW-022/023 can run any time and grow TYPE-KNOBS.md.
+
+1. **HW-016 prompts #1 + #3 (founder, ~10 min)** — Claude
+   Desktop first-turn smoke. Three prompts in three fresh
+   conversations. Closes P5-011 item 5 (the last release gate
+   before BK-029 rename / BK-030 generic-MIDI / BK-014 Axe-Fx II).
+2. **HW-024 (founder, ~20 min)** — finish HW-014 spot-check
+   residuals. Lower priority than HW-016 since none are known-
+   broken; just lacks datapoints.
 
 **Then or in parallel — remaining queue:**
 
