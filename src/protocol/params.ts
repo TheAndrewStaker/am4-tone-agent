@@ -43,11 +43,15 @@ import {
  *                      display = internal (scale 1)
  *   semitones        — UI integer semitones (pitch shift);
  *                      display = internal (scale 1)
+ *   ratio            — UI compression ratio (e.g. 4 ⇒ 4:1); display =
+ *                      internal (scale 1). Fractional values valid
+ *                      (1.5:1 etc.) — semantic label so Claude reads
+ *                      "ratio 4" as 4:1 not 4 dB.
  *   ms               — UI milliseconds, internal seconds (÷1000)
  *   enum             — UI dropdown name, internal int-as-float (per-param table)
  *
- * Note: `db`, `hz`, `seconds`, `count`, and `semitones` all pass
- * display=internal (scale 1). They're distinct unit tags so tool
+ * Note: `db`, `hz`, `seconds`, `count`, `semitones`, and `ratio` all
+ * pass display=internal (scale 1). They're distinct unit tags so tool
  * descriptions can label values accurately — Claude interprets "set
  * rate to 3" as 3 Hz when it sees `unit: 'hz'`, not 3 dB, and "8
  * voices" as a count rather than 8 dB. Semantic labels matter for
@@ -62,6 +66,7 @@ export type Unit =
   | 'bipolar_percent'
   | 'count'
   | 'semitones'
+  | 'ratio'
   | 'ms'
   | 'enum';
 
@@ -84,6 +89,7 @@ const DISPLAY_TO_INTERNAL: Record<Exclude<Unit, 'enum'>, number> = {
   bipolar_percent: 100,
   count: 1,
   semitones: 1,
+  ratio: 1,
   ms: 1000,
 };
 
@@ -293,6 +299,42 @@ export const KNOWN_PARAMS = {
     pidLow: 0x0076, pidHigh: 0x000e,
     unit: 'percent', displayMin: 0, displayMax: 100,
   },
+  // HW-019 (Session 30, 2026-04-25): Drive EQ-page knobs from
+  // session-30-drive-basic-blackglass-7k. T808 OD only exposed
+  // Drive/Tone/Level on its first page (session-30-drive-basic-t808-od
+  // capture confirmed) — the EQ controls below are absent on simpler
+  // pedal types and only surface on amp-emu drive types like
+  // Blackglass 7K. Cache signatures pin the unit + range; sequence in
+  // the cache (id 16/17 = Low/High Cut Hz, id 20/21/23 = Bass/Mid/
+  // Treble knobs flanking id 22 = Mid Frequency) matches the AM4-Edit
+  // EQ-1-page layout. Captured wiggle order on Blackglass differed
+  // from the spec order; mapping is by cache-id sequence + signature
+  // not capture order.
+  'drive.low_cut': {
+    block: 'drive', name: 'low_cut',
+    pidLow: 0x0076, pidHigh: 0x0010,
+    unit: 'hz', displayMin: 20, displayMax: 2000,
+  },
+  'drive.bass': {
+    block: 'drive', name: 'bass',
+    pidLow: 0x0076, pidHigh: 0x0014,
+    unit: 'knob_0_10', displayMin: 0, displayMax: 10,
+  },
+  'drive.mid': {
+    block: 'drive', name: 'mid',
+    pidLow: 0x0076, pidHigh: 0x0015,
+    unit: 'knob_0_10', displayMin: 0, displayMax: 10,
+  },
+  'drive.mid_freq': {
+    block: 'drive', name: 'mid_freq',
+    pidLow: 0x0076, pidHigh: 0x0016,
+    unit: 'hz', displayMin: 200, displayMax: 2000,
+  },
+  'drive.treble': {
+    block: 'drive', name: 'treble',
+    pidLow: 0x0076, pidHigh: 0x0017,
+    unit: 'knob_0_10', displayMin: 0, displayMax: 10,
+  },
   'drive.channel': {
     block: 'drive', name: 'channel',
     pidLow: 0x0076, pidHigh: 0x07d2,
@@ -496,6 +538,35 @@ export const KNOWN_PARAMS = {
     pidLow: 0x0046, pidHigh: 0x000e,
     unit: 'bipolar_percent', displayMin: -100, displayMax: 100,
   },
+  // HW-020 (Session 30, 2026-04-25): Delay first-page registers from
+  // session-30-delay-basic-digital-mono. `level` follows the universal
+  // pidHigh=0x0000 "Level" pattern shared with amp.level (no cache
+  // record at id=0; out-of-band hand-author). `stack_hold` and
+  // `ducking` mirror the same registers found on Reverb (HW-018).
+  // `tempo` (pidHigh=0x0013) is captured but deferred — registering
+  // it requires extracting the 79-entry tempo-division enum from cache
+  // (queued as HW-027 follow-up).
+  'delay.level': {
+    block: 'delay', name: 'level',
+    pidLow: 0x0046, pidHigh: 0x0000,
+    unit: 'db', displayMin: -80, displayMax: 20,
+  },
+  'delay.stack_hold': {
+    block: 'delay', name: 'stack_hold',
+    pidLow: 0x0046, pidHigh: 0x001f,
+    // Cache id=31: enum [OFF|STACK|HOLD]. Hand-authored — generator
+    // can't emit per-block non-Type enums (it would mis-import the
+    // block's TYPES_VALUES instead of these three).
+    unit: 'enum', displayMin: 0, displayMax: 2,
+    enumValues: { 0: 'OFF', 1: 'STACK', 2: 'HOLD' },
+  },
+  'delay.ducking': {
+    block: 'delay', name: 'ducking',
+    pidLow: 0x0046, pidHigh: 0x002e,
+    // Cache id=46: float a=0 b=80 c=1 → raw dB 0..80 attenuation.
+    // Same signature as reverb.ducking (HW-018).
+    unit: 'db', displayMin: 0, displayMax: 80,
+  },
   'delay.channel': {
     block: 'delay', name: 'channel',
     pidLow: 0x0046, pidHigh: 0x07d2,
@@ -636,6 +707,57 @@ export const KNOWN_PARAMS = {
     block: 'compressor', name: 'mix',
     pidLow: 0x002e, pidHigh: 0x0001,
     unit: 'percent', displayMin: 0, displayMax: 100,
+  },
+  // HW-021 (Session 30, 2026-04-25): Compressor first-page registers
+  // from session-30-comp-basic-jfet-studio. Cache ids 10..15 are the
+  // canonical comp-config knobs (Threshold, Ratio, Attack, Release,
+  // Knee Type enum, Auto Makeup OFF/ON). `level` follows the universal
+  // pidHigh=0x0000 "Level" pattern (out-of-band hand-author).
+  // Two more registers wiggled in the capture remain unidentified
+  // (pidHigh=0x0017 cache id=23 float; pidHigh=0x0029 cache id=41
+  // knob_0_10 with value 1.2 exceeding cache cap b=1) — queued as
+  // HW-028 follow-up. The Optical/JFET-specific Light Type knob
+  // wasn't reached in this capture.
+  'compressor.level': {
+    block: 'compressor', name: 'level',
+    pidLow: 0x002e, pidHigh: 0x0000,
+    unit: 'db', displayMin: -80, displayMax: 20,
+  },
+  'compressor.threshold': {
+    block: 'compressor', name: 'threshold',
+    pidLow: 0x002e, pidHigh: 0x000a,
+    // Cache id=10: float a=-60 b=20 c=1 → dB -60..+20 (capture wrote
+    // -30 dB).
+    unit: 'db', displayMin: -60, displayMax: 20,
+  },
+  'compressor.ratio': {
+    block: 'compressor', name: 'ratio',
+    pidLow: 0x002e, pidHigh: 0x000b,
+    // Cache id=11: float a=1 b=20 c=1 step=0.01 → 1.0..20.0 ratio
+    // (e.g. 4.0 ⇒ 4:1). Uses the `ratio` unit semantically; math is
+    // identical to db/hz/seconds (display = internal, scale 1) but
+    // the label tells Claude "4 means 4:1, not 4 dB".
+    unit: 'ratio', displayMin: 1, displayMax: 20,
+  },
+  'compressor.attack': {
+    block: 'compressor', name: 'attack',
+    pidLow: 0x002e, pidHigh: 0x000c,
+    // Cache id=12: float a=0.0001 b=0.1 c=1000 → 0.1..100 ms.
+    unit: 'ms', displayMin: 0.1, displayMax: 100,
+  },
+  'compressor.release': {
+    block: 'compressor', name: 'release',
+    pidLow: 0x002e, pidHigh: 0x000d,
+    // Cache id=13: float a=0.002 b=2 c=1000 → 2..2000 ms.
+    unit: 'ms', displayMin: 2, displayMax: 2000,
+  },
+  'compressor.auto_makeup': {
+    block: 'compressor', name: 'auto_makeup',
+    pidLow: 0x002e, pidHigh: 0x000f,
+    // Cache id=15: enum [OFF|ON]. Hand-authored — see delay.stack_hold
+    // for why per-block non-Type enums skip the generator.
+    unit: 'enum', displayMin: 0, displayMax: 1,
+    enumValues: { 0: 'OFF', 1: 'ON' },
   },
   'compressor.type': {
     block: 'compressor', name: 'type',

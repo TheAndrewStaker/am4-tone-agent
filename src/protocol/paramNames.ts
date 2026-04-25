@@ -105,6 +105,17 @@ export const PARAM_NAMES: Readonly<Record<string, Readonly<Record<number, ParamN
     12: 'tone',
     13: 'level',
     14: 'mix',
+    // HW-019 (Session 30, 2026-04-25): EQ-page knobs decoded from
+    // session-30-drive-basic-blackglass-7k. Cache ids 16/17 are the
+    // Hz cuts (raw passthrough — c=1 default would mis-classify as dB),
+    // ids 20/21/23 are the knob_0_10 Bass/Mid/Treble flanking id 22
+    // (mid frequency in Hz). T808 OD doesn't expose these — the
+    // session-30-drive-basic-t808-od capture only had drive/tone/level.
+    16: { name: 'low_cut', unit: 'hz', displayMin: 20, displayMax: 2000 },
+    20: 'bass',
+    21: 'mid',
+    22: { name: 'mid_freq', unit: 'hz', displayMin: 200, displayMax: 2000 },
+    23: 'treble',
   },
   reverb: {
     1: 'mix',
@@ -166,6 +177,13 @@ export const PARAM_NAMES: Readonly<Record<string, Readonly<Record<number, ParamN
     // c=100) is bipolar — negative feedback inverts the phase of the
     // repeats, a standard Fractal delay feature.
     14: { name: 'feedback', unit: 'bipolar_percent', displayMin: -100, displayMax: 100 },
+    // HW-020 (Session 30, 2026-04-25): Ducking attenuation amount,
+    // session-30-delay-basic-digital-mono capture. Cache id=46 a=0
+    // b=80 c=1 → raw dB 0..80. Same signature as reverb.ducking
+    // (HW-018). delay.level (out-of-band, pidHigh=0x0000) and
+    // delay.stack_hold (per-block non-Type enum, pidHigh=0x001f) are
+    // hand-authored in params.ts directly.
+    46: 'ducking',
   },
   // Universal `mix` at pidHigh 0x01 across every effect block that
   // exposes a Mix Page per the Blocks Guide (p. 7). Skipped for
@@ -219,7 +237,22 @@ export const PARAM_NAMES: Readonly<Record<string, Readonly<Record<number, ParamN
   compressor: {
     1: 'mix',
     2: BALANCE,
+    // HW-021 (Session 30, 2026-04-25): Compressor first-page knobs from
+    // session-30-comp-basic-jfet-studio. Cache ids 10..15 are the
+    // canonical comp-config registers per Blocks Guide §Compressor:
+    // Threshold (dB), Ratio (1..20:1, new `ratio` unit), Attack (ms),
+    // Release (ms), Knee Type enum (id 14, not yet wiggled), Auto
+    // Makeup OFF/ON (id 15, hand-authored in params.ts because per-
+    // block non-Type enums skip the generator). compressor.level
+    // (pidHigh=0x0000) is out-of-band hand-authored.
+    10: { name: 'threshold', unit: 'db', displayMin: -60, displayMax: 20 },
+    12: { name: 'attack', unit: 'ms', displayMin: 0.1, displayMax: 100 },
+    13: { name: 'release', unit: 'ms', displayMin: 2, displayMax: 2000 },
     19: 'type',
+    // Ratio uses the new `ratio` unit (display = internal, scale 1) so
+    // Claude reads "ratio 4" as 4:1 not 4 dB. Cache c=1 default would
+    // mis-classify as dB; full override required.
+    11: { name: 'ratio', unit: 'ratio', displayMin: 1, displayMax: 20 },
   },
   geq: {
     2: BALANCE,

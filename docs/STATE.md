@@ -5,7 +5,29 @@
 > hardware tasks (USB captures, round-trip tests, reference dumps) live
 > in **`docs/HARDWARE-TASKS.md`** — check that file alongside this one at
 > session start.
-> Last updated: **2026-04-25** (Session 30 — HW-025 + HW-018
+> Last updated: **2026-04-25** (Session 30 cont — HW-019 +
+> HW-020 + HW-021 decoded and archived. **14 new params**: 5
+> drive (low_cut / bass / mid / mid_freq / treble), 3 delay
+> (level / stack_hold / ducking), 6 compressor (level /
+> threshold / ratio / attack / release / auto_makeup). **New
+> unit `ratio`** added for compression ratios (display = internal,
+> scale 1; semantic label so Claude reads "ratio 4" as 4:1 not 4
+> dB). KNOWN_PARAMS 79 → 93; verify-msg goldens 60 → 74;
+> CACHE_PARAMS 69 → 79.
+> **Methodology finding**: AM4-Edit's UI is type-dependent —
+> different types expose different first-page knobs. TS808 OD
+> showed only drive/tone/level (3 knobs); Blackglass 7K added
+> 6 EQ-page knobs. Compressor JFET Studio exposed 8 knobs
+> including JFET-specific ones not in the canonical comp spec.
+> Caught us off-guard; queued as **HW-030** = research task to
+> map "type → exposed first-page knobs" for every block before
+> HW-022/023 are written. Three residual addresses queued as
+> HW-027 (delay tempo enum extraction; no hardware), HW-028
+> (compressor 0x17 + 0x29 unidentified), HW-029 (drive 0x2d
+> unidentified). **BK-032 drive + delay + compressor lines
+> all hardware-verified for the knobs each AM4-Edit type
+> exposed**; full first-page coverage gated on HW-030 mapping.
+> Pre-existing context — Session 30: HW-025 + HW-018
 > decoded and archived. **BK-033 fixed** (predelay address
 > 0x10 → 0x13; AM4-Edit byte-exact). **BK-034 cleared as
 > not-a-code-bug** — captures show our wire is byte-identical
@@ -13,9 +35,8 @@
 > screen-rendering quirk, not a wire bug. **HW-018 added 10 new
 > reverb registers**: high_cut / low_cut / input_gain / density /
 > dwell / stereo_spread / ducking / quality / stack_hold / drip.
-> KNOWN_PARAMS 69 → 79; goldens 53 → 60; cacheParams 69
-> (unchanged — new entries hand-authored). One residual register
-> at pidHigh=0x0000 queued as HW-026 (likely `reverb.level`).
+> One residual register at pidHigh=0x0000 queued as HW-026 (likely
+> `reverb.level`).
 > **BK-032 reverb-line ✅ first-page complete.** Pre-existing
 > context — Session 29 cont 7:
 > HW-014 closed with structured findings. 28 params hardware-verified,
@@ -314,22 +335,28 @@ float32. One open question remains before the IR can cover full presets:
 
 ## The single next action
 
-**Continue BK-032 first-page coverage — Reverb done, Drive next.**
-Session 30 closed Reverb (HW-018), the predelay bug (BK-033), and
-proved the per-block encoding cluster (BK-034) was a hardware-
-screen rendering quirk rather than a wire-layer bug. Next block in
-priority order is Drive (BK-032 #2). Bug-fix wave is now empty —
-no known-broken params, the per-block-encoding-overrides plumbing
-proposed for BK-034 is unnecessary and not built.
+**Address HW-030 (type → knob-list map) before HW-022/023.**
+Session 30 cont closed Drive (HW-019), Delay (HW-020), and
+Compressor (HW-021) for the knobs AM4-Edit exposed on the captured
+types — TS808 OD / Blackglass 7K / Digital Mono / JFET Studio.
+But the captures revealed that AM4-Edit's UI is type-dependent
+in ways we didn't anticipate, so HW-022 (modulation bundle) and
+HW-023 (secondary blocks) would re-hit the same "spec said N
+knobs, capture showed M ≠ N" surprise without an upfront type→
+knob map. **Recommended next action: HW-030 step 1** — try
+decoding per-type knob visibility from the metadata cache before
+spending founder hardware time on screenshots.
 
-1. **HW-019 — Drive first-page capture** (founder action). Single
-   pcapng on a TS808 drive type; ~5 min. Decoder yields ~12 new
-   drive registers (Low/High Cut, Bass/Mid/Treble, Mid Frequency,
-   Clip Type, Bass Response, Dry Level, Bias, Slew Rate). See
-   `docs/HARDWARE-TASKS.md` for the exact wiggle order.
-2. **HW-020 — Delay first-page capture** (founder action). Single
-   pcapng on Digital Mono delay; resolves HW-017 delay id=64
-   ambiguity (Taps vs Bit Reduction) along the way.
+1. **HW-030 step 1 — cache-side per-type visibility decode**
+   (Claude action, no founder hardware). Look for a per-type
+   subset table or per-record visibility bitmap in the cache
+   (sections we haven't decoded yet). AM4-Edit has to know
+   which knobs to show per type, and that info has to live on
+   disk somewhere. If found, dump as `type → knob-id-list`
+   and ship as `docs/TYPE-KNOBS.md`.
+2. **HW-030 step 2 — AM4-Edit screenshot pass** (founder
+   action) for blocks/types where step 1 doesn't yield a
+   clean answer.
 
 **Then or in parallel — remaining queue:**
 
@@ -338,14 +365,25 @@ proposed for BK-034 is unnecessary and not built.
   re-test `amp.level` non-default, confirm
   `flanger.rate`/`phaser.rate`, test `reverb.springs`/
   `spring_tone` on Spring reverb).
-- **BK-032 first-page captures (remaining)** — HW-019 (drive) >
-  HW-020 (delay) > HW-021 (compressor) > HW-022 (modulation
-  bundle) > HW-023 (secondary). HW-018 closed Session 30.
+- **BK-032 first-page captures (remaining)** — HW-022
+  (modulation bundle) > HW-023 (secondary). Both should wait
+  on HW-030 so they can be specced from a real
+  type→knob-list map, not Blocks Guide guesswork. HW-019/020/021
+  closed Session 30 cont.
 - **HW-016 prompts #1 + #3** for P5-011 item 5 closure (Claude
   Desktop smoke). Prompt #2 effectively passed during HW-013.
 - **HW-026** — single-knob capture to disambiguate the Reverb
   `pidHigh=0x0000` register left over from HW-018 (likely
   `reverb.level`). Low priority; doesn't block release.
+- **HW-027** — extend `gen-cache-enums.ts` to emit a shared
+  `TEMPO_DIVISIONS_VALUES` const so `delay.tempo` (and
+  potentially chorus/flanger/phaser/tremolo/drive tempos)
+  can be registered. No hardware action; Claude-side only.
+- **HW-028** — single-knob capture to disambiguate
+  `compressor.0x0017` and `compressor.0x0029` (Knee/Detector
+  Type or JFET-specific knobs).
+- **HW-029** — single-knob capture to disambiguate
+  `drive.0x002d` (knob_0_10 in cache id=45 tail zone).
 
 **Remaining AM4-depth queue (non-HW, gates Wave 1 device expansion
 per `memory/feedback_am4_depth_gates_wave_expansion.md`):**
@@ -477,7 +515,13 @@ sub-block 1 = Delay (89 recs, id=10 enum × 29), sub-block 9 = Drive
 ## Decoded parameters and unit conventions
 
 Live source of truth: `src/protocol/params.ts` (`KNOWN_PARAMS` + `Unit`
-union). **78 hand-authored params** (Session 29 cont 2 added Amp
+union). **93 hand-authored params** (Session 30 cont added 14:
+5 drive EQ-page knobs (low_cut, bass, mid, mid_freq, treble) +
+3 delay registers (level, stack_hold, ducking) + 6 compressor
+registers (level, threshold, ratio, attack, release, auto_makeup);
+**new unit `ratio`** added for compression ratios.
+Session 30 added 10 reverb registers (HW-018) + corrected
+predelay address (BK-033). Session 29 cont 2 added Amp
 Advanced-panel enums `amp.tonestack_location` + `amp.master_vol_location`;
 Session 29 cont added `reverb.shift_1` / `reverb.shift_2` semitones
 from Blocks Guide cross-reference; Session 29 added 10 wire-verified
@@ -492,12 +536,13 @@ level/mix, reverb predelay + time, universal Mix across 8 effect
 blocks, LFO rates for chorus/flanger/phaser/tremolo, filter freq,
 and modulation depths; Session 25 shipped P1-010 Session A generator
 + 20 seeds)
-across 15 confirmed blocks, using **10 unit conventions** (`knob_0_10`,
+across 15 confirmed blocks, using **11 unit conventions** (`knob_0_10`,
 `db`, `hz`, `seconds`, `percent`, `bipolar_percent`, `count`,
-`semitones`, `ms`, `enum`). `count` and `semitones` are typing-
-only today — cache has candidates (phaser stages, delay voices,
-reverb shimmer shifts, drive bit depth) but each needs a specific
-Blocks-Guide page cross-reference before naming.
+`semitones`, `ratio`, `ms`, `enum`). `count` and `semitones` are
+typing-only today — cache has candidates (phaser stages, delay
+voices, reverb shimmer shifts, drive bit depth) but each needs a
+specific Blocks-Guide page cross-reference before naming. `ratio`
+is in active use for `compressor.ratio` (1..20:1).
 `pidLow` = block ID, `pidHigh` = parameter index within block;
 address is preset-independent. `CACHE_PARAMS` mirrors every
 cache-derivable entry (verify-cache-params = 44/44 byte-match against
@@ -812,7 +857,7 @@ Session 08 highlights (still load-bearing):
 - Preset dump format (`0x77/0x78/0x79`) + slot addressing — **🟢 confirmed**.
 - `0x01` SET_PARAM message format + value encoding — **🟢 fully decoded**.
 - Parameter ID structure — **🟢 (Session 06, preset-independent)**.
-- 78 hand-authored params / 15 confirmed blocks / 10 units — **🟢 in `params.ts`** (Session 29 cont 2: HW-015 decode + count/semitones follow-up + Amp Advanced enums).
+- 93 hand-authored params / 15 confirmed blocks / 11 units — **🟢 in `params.ts`** (Session 30 cont: HW-019/020/021 — drive EQ + delay/comp universal + comp config; new `ratio` unit).
 - Channel A/B/C/D addressing — **🟢 (Session 08: Amp `pidHigh=0x07D2`,
   float32 index 0..3; other blocks' channel pidHigh unverified)**.
 - Drive Type enum table — **🟡 only `8 → TS808` known**.

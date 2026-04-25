@@ -6,6 +6,58 @@ file is the chronological trail that reference is built from.
 
 ---
 
+## 2026-04-25 — Session 30 cont — HW-019 + HW-020 + HW-021 decode (14 new params; type-dependent UI surprise; `ratio` unit added)
+
+Founder captured 4 pcapngs covering the next BK-032 priorities:
+drive (TS808 OD + Blackglass 7K), delay (Digital Mono), and
+compressor (JFET Studio — not the spec'd Studio FF). Founder
+flagged that "the same options are not present with each device";
+across types, exposed knob sets diverge.
+
+**14 new params landed**:
+- 5 drive EQ-page knobs (low_cut / bass / mid / mid_freq /
+  treble) — Blackglass 7K exposes these; TS808 OD doesn't expose
+  any of them (the TS808 capture only had the basic drive/tone/
+  level, confirming TS808's 3-knob Tube Screamer circuit).
+- 3 delay registers — `delay.level` (universal pidHigh=0x0000
+  Level pattern), `delay.stack_hold` (enum OFF/STACK/HOLD),
+  `delay.ducking` (db 0..80, mirrors `reverb.ducking`).
+- 6 compressor registers — `level` / `threshold` / `ratio` /
+  `attack` / `release` / `auto_makeup` covering the canonical
+  comp-config controls.
+- **New unit `ratio`** added to `Unit` union (display = internal,
+  scale 1; semantic label so Claude reads "ratio 4" as 4:1 not
+  4 dB). Used by `compressor.ratio` (1..20:1).
+
+**Residuals queued**:
+- `delay.tempo` (0x0013, 79-entry tempo division enum) — captured
+  but registering requires `gen-cache-enums.ts` to emit a shared
+  `TEMPO_DIVISIONS_VALUES`. HW-027.
+- `compressor.0x0017` + `0x0029` — unidentified knobs, queued as
+  HW-028 for single-knob isolation captures.
+- `drive.0x002d` — unidentified knob in Blackglass 7K capture
+  (cache id=45 tail zone), queued as HW-029.
+- HW-020 didn't write to the HW-017 ambiguity address
+  (`pidHigh=0x0040` Bit Reduction vs Taps); Digital Mono apparently
+  has neither knob. HW-017 stays pending.
+
+**Methodology finding — type-dependent first-page UI**: across
+all four captures the spec'd knob list diverged from what
+AM4-Edit actually exposed. Without a committed `type → exposed-
+first-page-knob-list` map, HW-022 (modulation bundle) and
+HW-023 (secondary blocks) will hit the same surprise. Queued
+as **HW-030**, a two-phase research task: (1) cache-side
+per-type visibility decode (Claude-only, no founder hardware);
+(2) AM4-Edit screenshot pass where step 1 leaves gaps. STATE.md
+"single next action" reset to HW-030 step 1 ahead of HW-022/023.
+
+**Pipeline**: 14 new entries in `KNOWN_PARAMS`, 10 new in
+`paramNames.ts`, `cacheParams.ts` regenerated. 14 new byte-exact
+goldens in `verify-msg` (74/74 green). `verify-cache-params` 79/79.
+Preflight green.
+
+---
+
 ## 2026-04-25 — Session 30 — HW-025 + HW-018 decode (BK-033 fixed, BK-034 cleared, 10 reverb params landed)
 
 ### What ran
