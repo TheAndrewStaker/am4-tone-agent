@@ -2563,8 +2563,11 @@ Skip until explicit user demand materializes.
 - **Current state (per `src/protocol/params.ts`, 2026-04-21):**
   - **Amp** ✅ front-panel complete (Session 29). Advanced page is
     post-MVP per CLAUDE.md section "What's still deferred".
-  - **Reverb** 🟡 partial — 3 of 8 universal + 2 of 4 Spring-specific.
-    HW-018 closes the gap.
+  - **Reverb** ✅ first-page complete (HW-018 / Session 30). 10 new
+    registers landed: high_cut / low_cut / input_gain / density /
+    dwell / stereo_spread / ducking / quality / stack_hold / drip.
+    One register (`pidHigh=0x0000`, likely `reverb.level`) deferred
+    to HW-026 as a low-priority disambiguation.
   - **Drive** 🟡 partial — Type / Drive / Tone / Level / Mix +
     Balance + Channel registered. EQ 1 + Advanced page (Low/High
     Cut, Bass/Mid/Treble, Clip Type, Bias) missing. HW-019 closes.
@@ -2585,7 +2588,7 @@ Skip until explicit user demand materializes.
   knob produces a unique pidHigh transition in the wire; the
   decoder aligns them to the BG Basic Page order listed in each
   task. Total capture count: **13** (was 58 with per-knob files).
-  - HW-018 Reverb — 2 captures (Hall + Spring)
+  - HW-018 Reverb — 2 captures (Hall + Spring) ✅ Session 30
   - HW-019 Drive — 1 capture (TS808)
   - HW-020 Delay — 1 capture (Digital Mono)
   - HW-021 Compressor — 1 capture (Studio FF + Optical end)
@@ -2627,89 +2630,58 @@ Skip until explicit user demand materializes.
   (BK-014 Axe-Fx II, BK-031 Hydrasynth) remains gated on BK-032
   clearing.
 
-### BK-033 `reverb.predelay` dead-address fix
+### BK-033 `reverb.predelay` dead-address fix ✅ (closed Session 30)
 
-- **Discovered:** Session 29 cont 7 via HW-014 spot-check. Three
-  writes (85 ms, 0 ms, 250 ms) all wire-acked but the AM4
-  hardware display stayed at 20.0 ms default. Sending the maximum
-  value still didn't move it — that rules out an encoding bug
-  and points squarely at the wrong pidHigh.
-- **Current state.** `reverb.predelay` is registered at
-  `pidLow=0x0042 / pidHigh=0x0010` per `src/protocol/params.ts`,
-  with a Blocks Guide comment "Cache 0x10 (0..0.25s × 1000 =
-  0..250 ms)". Either the cache id=16 record we mapped to
-  predelay is actually a different reverb knob, or it's a
-  write-only diagnostic register the device accepts but doesn't
-  surface, or the predelay live-write goes via a different
-  pidHigh than the stored-preset cache id.
-- **Fix path.** Decode the actual pidHigh from a USBPcap capture
-  of AM4-Edit setting Pre-Delay to a distinctive value (queued
-  as HW-025 capture #1). Update the param entry, regenerate
-  `cacheParams.ts`, add a `verify-msg` golden against the
-  captured bytes. Keep a `// BUG (HW-014)` warning on the
-  current entry until the fix lands.
-- **Severity.** Medium — predelay is a real first-page reverb
-  control users will reach for. Not a release blocker because
-  Mix / Time / Size / Springs / Spring Tone all work, but it's
-  a gap in user-trust if a `set_param reverb.predelay 80` does
-  nothing.
-- **Effort.** ~30 min — one capture, one decode, one param-map
-  edit, one new golden. Cheap.
+- **Closed 2026-04-25** — HW-025 capture #1
+  (`session-30-reverb-predelay.pcapng`, Pre-Delay → 85 ms) revealed
+  AM4-Edit writes to `pidLow=0x0042 / pidHigh=0x0013` with
+  `float32(0.085)`. The cache id=16 record we'd been using
+  (`pidHigh=0x0010`) was structurally plausible (range 0..0.25s,
+  scale ×1000) but firmware-dead — writes ack and disappear.
+- **Fix landed.** One-byte address swap in `params.ts`; existing
+  `unit: 'ms'` ÷1000 scale is correct. `paramNames.ts` cache
+  mapping `16: 'predelay'` removed so the auto-generator no
+  longer emits the wrong cacheParams entry; predelay is now
+  hand-authored in `KNOWN_PARAMS` only. Byte-exact `verify-msg`
+  golden anchors the new address. See SYSEX-MAP §6j and
+  SESSIONS.md Session 30 for the full decode.
 
-### BK-034 Per-block float encoding divergence (4-param cluster)
+### BK-034 Per-block float encoding divergence (4-param cluster) ✅ (closed Session 30 — not-a-code-bug)
 
-- **Discovered:** Session 29 cont 7 via HW-014 spot-check. Four
-  params have address verified (extreme values land) but
-  mid-range values land somewhere unrelated:
-  - `chorus.rate` — wrote 3.4 Hz, displayed 0.5 Hz; max 10 OK.
-  - `flanger.mix` — wrote 54%, displayed 50%; min 0 OK.
-  - `flanger.feedback` — wrote -61%, displayed 0; max +99
-    displayed +90.
-  - `phaser.mix` — wrote 88%, displayed 53%; min 0 OK.
-- **Why this is per-block, not encoder.** The same `packFloat32LE`
-  + `DISPLAY_TO_INTERNAL` chain works correctly for
-  `delay.feedback` (-47% → -47%), `delay.mix`, `tremolo.rate`
-  (7.8 Hz), `chorus.mix`, `reverb.mix`. So the bug is per-block
-  firmware behavior — different blocks interpret the float at
-  the same `pidHigh` differently — not a flat encoder issue.
-- **Most diagnostic clue.** `chorus.rate` 3.4 → 0.5 Hz fits a
-  log-knob mapping exactly: knob position 0.34 (i.e. 3.4/10)
-  on a 0.1..10 Hz log curve = `0.1 * 10^(0.34 * log10(100))` =
-  ~0.479 Hz. So chorus.rate's wire value is probably a
-  normalized 0..1 knob position with the firmware doing log-Hz
-  internally. Tremolo.rate works because (hypothesis) it's
-  linear. AM4-Edit is the oracle on what each block actually
-  expects.
-- **Fix path.** Capture AM4-Edit setting each of the 4 buggy
-  params at the same mid-range value our HW-014 test wrote
-  (queued as HW-025 captures #2..#5). Compare wire bytes to
-  ours. Decode the actual encoding rule per param. Most likely
-  shape:
-  - **Option A (simple):** add per-param `encode` /  `decode`
-    overrides on the `Param` record. Each param gets a
-    `displayToInternal(display) → number` function plus the
-    inverse. Default falls back to the current
-    `DISPLAY_TO_INTERNAL` table.
-  - **Option B (more invariant):** add new `Unit` variants
-    like `hz_log` / `percent_compressed` / `bipolar_scaled`
-    so the catalog stays declarative. Worth doing if HW-025
-    surfaces 3+ params sharing the same non-linear curve.
-  - Pick the option after HW-025 reveals whether the curves
-    are per-param-unique or share a small handful of patterns.
-- **Severity.** High — these are common knobs (chorus rate,
-  flanger feedback) that users will absolutely set. A user
-  asking *"set the flanger feedback to -50"* and getting 0 is
-  silent failure of the worst kind. **Release blocker for the
-  Conversational Presets / MCP MIDI Tools rename** — can't
-  ship a "natural-language amp control" product where modulation
-  feedback knobs silently no-op.
-- **Effort.** ~1 day — captures (HW-025) + per-param decoding
-  + plumbing the encode/decode overrides through `params.ts`,
-  `setParam.ts`, and `verify-msg`. The plumbing is the bulk.
-- **Until fixed.** Each affected param carries a `// BUG
-  (HW-014)` warning comment in `params.ts`. Optionally,
-  `apply_preset` and `set_param` validation could reject these
-  keys outright until the fix lands — deferred to founder
-  decision (current default: callable with the warning comment
-  as the signal, since rejecting them would also cripple any
-  partial-preset build that incidentally references them).
+- **Closed 2026-04-25 — proven not a wire-layer bug.** HW-025
+  captures #2..#5 showed AM4-Edit's wire is **byte-identical**
+  to our builder's output for the four disputed params (modulo
+  the benign action=0x0001 vs 0x0002 quirk documented in
+  SYSEX-MAP §6i). Capture summary:
+
+  | Param | AM4-Edit wire | Display value |
+  |---|---|---|
+  | `chorus.rate` | `0x004e/0x000c`, `float32(3.4)` | 3.4 Hz |
+  | `flanger.mix` | `0x0052/0x0001`, `float32(0.54)` | 54% |
+  | `flanger.feedback` | `0x0052/0x000e`, `float32(-0.61)` | -61% |
+  | `phaser.mix` | `0x005a/0x0001`, `float32(0.88)` | 88% |
+
+  Our `params.ts` entries already produce these exact bytes.
+  HW-014's hardware-display readbacks (3.4→0.5 Hz / 54%→50% /
+  -61%→0% / 88%→53%) therefore can't be encoding bugs in our
+  code. Most likely explanation is an **AM4 hardware-screen
+  rendering quirk** for those specific block+knob combos —
+  AM4-Edit displays the values correctly. Possible alternative
+  is a HW-014 readback channel-state artifact, but the wire
+  equivalence is decisive.
+- **Resolution.** All four `params.ts` entries keep their
+  existing addresses and units. Comments updated to remove the
+  BUG flags and record the wire-equivalence finding. Four new
+  byte-exact `verify-msg` goldens lock the wire bytes. Going
+  forward, verify these four params via AM4-Edit, not the AM4
+  hardware display, until the screen-side rendering is
+  characterised. The "Option A (per-param encode/decode
+  overrides)" plumbing originally proposed for this fix is
+  unnecessary and not implemented. See SYSEX-MAP §6j and
+  SESSIONS.md Session 30 for full detail.
+- **Open follow-up (low priority).** Characterise the AM4
+  hardware-screen rendering quirk so future HW-014-style
+  spot-checks know what to expect when reading these knobs from
+  the hardware display. Could be queued as a future research
+  item but doesn't block release — AM4-Edit is the
+  authoritative readback for these four params.

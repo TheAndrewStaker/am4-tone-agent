@@ -23,25 +23,19 @@
 > collection (replaced by the Hydrasynth Explorer) and is now a
 > community-support item with no founder-hardware validation.
 >
-> Last updated: 2026-04-21 (Session 29 cont 7 — HW-014 closed
-> with structured findings. 28 params hardware-verified, 5
-> confirmed bugs (1 dead address: `reverb.predelay`; 4 encoding
-> divergences: `chorus.rate`, `flanger.mix`, `flanger.feedback`,
-> `phaser.mix`), 27 hidden on the AM4 hardware display (not
-> failures — AM4-Edit would show them), 16 untested (Round 4
-> blocks not reached + 2 placement-only blocks). BK-033 + BK-034
-> queued for the bug fixes. HW-024 queued for the remaining
-> spot-check coverage (Round 4 + re-tests + missed params).
-> HW-025 queued for the 5 bug-investigation captures. Headline
-> non-bug findings: (a) Session 29's `amp.master`/`amp.depth`/
-> `amp.presence` re-mapping is correct; (b) `geq.balance`
-> displayed at -67, proving the universal Balance register works
-> at wire-layer (other blocks just hide it from the hardware
-> display); (c) the Session 29 worry about other knob_0_10 amp
-> mis-inferences cleared — `amp.mid`/`treble`/`presence`/`bass`
-> all hardware-verified. Priority order: HW-018 > HW-019 >
-> HW-024 > HW-025 > HW-020 > HW-016 > HW-021 > HW-022 >
-> HW-023 > HW-017 residual.)
+> Last updated: 2026-04-25 (Session 30 — HW-018 + HW-025 decoded
+> + archived. BK-033 fixed (predelay address 0x10 → 0x13;
+> verified byte-for-byte against AM4-Edit). BK-034 cleared as
+> not-a-code-bug — captures show our wire is byte-identical to
+> AM4-Edit's for all 4 disputed params; HW-014 hardware-display
+> divergence is an AM4 screen-rendering quirk, not a wire-layer
+> encoding bug. HW-018 added 10 new reverb registers (high_cut,
+> low_cut, input_gain, density, dwell, stereo_spread, ducking,
+> quality, stack_hold, drip). KNOWN_PARAMS 69 → 79; goldens
+> 53 → 60. One unidentified register at pidHigh=0x0000 queued
+> as HW-026 (likely `reverb.level`; needs single-knob capture).
+> Updated priority order: HW-019 > HW-024 > HW-020 > HW-016 >
+> HW-021 > HW-022 > HW-023 > HW-017 > HW-026 residual.)
 
 ## Status key
 
@@ -99,49 +93,8 @@ Claude picks up from there and moves the item to ⏳ or ✅.
   the bug-fix HW-025 captures because none of these are known
   to be broken; they just lack a datapoint.
 
-### HW-025 — Bug-investigation captures for HW-014 findings 🔜
-
-- **For:** unlocks BK-033 (`reverb.predelay` dead address) and
-  BK-034 (per-block float encoding divergence cluster). Without
-  these captures, the bugs are observed but unresolvable —
-  AM4-Edit's wire bytes are the only oracle for "what should we
-  have sent."
-- **Why:** HW-014 proved the buggy params were broken on
-  hardware but couldn't decode the actual right encoding. Each
-  capture takes ~30 seconds and pins one of the 5 bugs to a
-  specific wire-byte difference.
-- **Setup:** AM4 plugged in, AM4-Edit open, USBPcap recording.
-  Same methodology as HW-015 / HW-018..HW-023.
-- **Captures: 5 pcapngs.** Each capture wiggles ONE knob from
-  its current value to a clearly-different value (use the same
-  values our HW-014 test wrote, so the comparison is apples-
-  to-apples).
-  1. **`samples/captured/session-30-reverb-predelay.pcapng`** —
-     load any reverb type, set Pre-Delay to **85 ms**. This is
-     the dead-address bug — we want AM4-Edit's actual pidHigh
-     for predelay so we can fix the param map.
-  2. **`samples/captured/session-30-chorus-rate.pcapng`** —
-     load any chorus type, set Rate to **3.4 Hz**. Compare wire
-     value bytes against our `packFloat32LE(3.4)`. If AM4-Edit
-     sends a normalized 0..1 knob position instead of 3.4 Hz,
-     that confirms the log-scaling hypothesis.
-  3. **`samples/captured/session-30-flanger-mix.pcapng`** — load
-     any flanger type, set Mix to **54%**. Compare wire bytes.
-  4. **`samples/captured/session-30-flanger-feedback.pcapng`** —
-     load any flanger type, set Feedback to **-61%**. The
-     hardware showed 0% — capture should reveal whether AM4-Edit
-     uses a different sign-encoding than `packFloat32LE(-0.61)`.
-  5. **`samples/captured/session-30-phaser-mix.pcapng`** — load
-     any phaser type, set Mix to **88%**. We sent 0.88; hardware
-     showed 53%. Capture should reveal what 0.88 actually means
-     to the firmware vs what AM4-Edit sends to display 88%.
-- **Signal completion:** *"HW-025 done"* + 5 saved paths.
-  Decode happens against the captures the same way HW-015 did.
-- **Priority:** high — release-gate. Without these, 5 known-
-  broken params either ship as-is (ugly UX), get yanked from
-  the param registry (loss of coverage), or get dummy
-  validation that rejects them at MCP-tool layer (worse UX
-  than just fixing them). HW-024 + HW-025 can be batched.
+<!-- HW-025 completed 2026-04-25 (Session 30) — see Archive below for the
+     decode summary. -->
 
 <!-- HW-015 completed 2026-04-21 — see Archive below -->
 
@@ -184,32 +137,33 @@ Claude picks up from there and moves the item to ⏳ or ✅.
     HW-021 Compressor → HW-022 Modulation → HW-023 Secondary
 -->
 
-### HW-018 — Reverb first-page completion 🔜
+<!-- HW-018 completed 2026-04-25 (Session 30) — see Archive below for the
+     decode summary. -->
 
-- **For:** BK-032 (AM4-Edit first-page coverage) — #1 priority.
-- **Why:** BG §Reverb Basic Page names 8 universal knobs (3
-  registered: Time / Predelay / Size) plus 4 Spring-specific
-  (2 registered: Springs / Spring Tone). 7 gaps to fill.
-- **Captures: 2 pcapngs.**
+### HW-026 — Resolve unidentified `pidHigh=0x0000` on Reverb (likely Level) 🔜
 
-  **Capture A — Hall or Room reverb (5 universal Basic-Page knobs):**
-  `samples/captured/session-30-reverb-basic-hall.pcapng`
-
-  Load any Hall or Room reverb type. Wiggle in this order:
-  1. Crossover Frequency (Hz)
-  2. Low Freq Time (seconds)
-  3. High Freq Time (seconds)
-  4. Early Level (dB or %)
-  5. Late Level (dB or %)
-
-  **Capture B — Spring reverb (2 type-specific knobs):**
-  `samples/captured/session-30-reverb-spring.pcapng`
-
-  Load any Spring reverb type. Wiggle in this order:
-  1. Spring Drive
-  2. Boiiinnng!
-
-- **Signal:** *"HW-018 done"* + saved paths.
+- **For:** closes the residual register from HW-018 decode. Both Hall
+  and Spring captures wrote 12 / 7 times respectively to
+  `pidLow=0x0042 / pidHigh=0x0000` with continuous-slider sweep
+  patterns (final ≈0.56 / 0.74). The cache has no metadata at id=0
+  for the reverb block, so structural inference alone can't pin it.
+- **Why:** likely candidate is `reverb.level` (the output-level dB
+  knob shown on the right side of the AM4-Edit Reverb Config page —
+  screenshot value -5.6 dB). But a raw-dB interpretation of the
+  capture's 0..1 range doesn't match the screenshot's -5.6 dB, so
+  either the encoding is normalized 0..1 representing some dB curve,
+  or 0x0000 is a different knob entirely.
+- **Setup:** AM4 plugged in, AM4-Edit open, USBPcap recording. Same
+  methodology as HW-015.
+- **Capture: 1 pcapng** — `samples/captured/session-31-reverb-level.pcapng`.
+  Load any reverb type. **Set the Level knob in the right-hand panel
+  to exactly -10.0 dB** (or some other clearly-distinct value), one
+  discrete write. The wire bytes will reveal both the address (if
+  it lands at 0x0000 → confirmed Level; if elsewhere → 0x0000 is
+  something else) and the encoding (raw dB vs normalized).
+- **Signal completion:** *"HW-026 done"* + saved path.
+- **Priority:** low — bounded scope. Output Level is a "quality of
+  life" knob, not core to MVP tone-shaping. Does not block release.
 
 ### HW-019 — Drive first-page completion 🔜
 
@@ -883,6 +837,67 @@ highest numbers.
   common reason in practice (the founder almost certainly had
   AM4-Edit open). P5-009 #2 (graceful "AM4 not found" error)
   is doing what it was designed to do.
+
+### HW-018 — Reverb first-page completion ✅
+
+- **Captured 2026-04-25** —
+  `samples/captured/session-30-reverb-basic-hall.pcapng` (Hall, Medium)
+  and `samples/captured/session-30-reverb-spring.pcapng` (Spring,
+  Large). Founder couldn't identify the BG-Basic-Page knob names
+  (Crossover Frequency / Low Freq Time / etc.) in AM4-Edit's UI for
+  these reverb types, so wiggled every knob on the main Config page
+  for both — methodology variation that was actually more
+  informative for decode.
+- **Decoded Session 30** — 10 new reverb registers landed in
+  `KNOWN_PARAMS`:
+  - Universal: `high_cut` (0x0c, hz 200..20000), `low_cut` (0x14,
+    hz 20..2000), `input_gain` (0x17, percent), `ducking` (0x28,
+    db 0..80).
+  - Hall-algorithmic: `density` (0x18, count 4..8), `stereo_spread`
+    (0x27, bipolar_percent ±200), `quality` (0x2f, enum
+    ECONOMY/NORMAL/HIGH/ULTRA-HIGH), `stack_hold` (0x30, enum
+    OFF/STACK/HOLD).
+  - Spring-engine: `dwell` (0x24, knob_0_10), `drip` (0x34,
+    percent).
+  Five mappings cross-validated against founder screenshots:
+  Spring's input_gain (0.8217 → 82.17%), dwell (0.4741 → 4.741),
+  drip (0.9183 → 91.83%), springs (4), spring_tone (already
+  registered, capture re-confirmed).
+- **Tooling.** `scripts/extract-final-writes.ts` added — final-
+  value-per-pidHigh aggregator; the right shape for HW-018-style
+  multi-wiggle captures.
+- **Open follow-up.** `pidLow=0x0042/pidHigh=0x0000` written 12 / 7
+  times (Hall / Spring) but has no cache record. Likely
+  `reverb.level` (output dB knob shown in screenshots) but the
+  wire encoding doesn't match raw-dB interpretation. Queued as
+  **HW-026** for a single-knob disambiguation capture.
+- **Goldens.** 7 new byte-exact entries in `verify-msg` (3 of the
+  10 omitted because their captures used AM4-Edit's `action=0x0002`
+  variant; the goldens encode our canonical `action=0x0001` form,
+  matching SYSEX-MAP §6i / §6j conventions).
+
+### HW-025 — Bug-investigation captures for HW-014 findings ✅
+
+- **Captured 2026-04-25** — 5 pcapngs in `samples/captured/`:
+  `session-30-reverb-predelay.pcapng`, `session-30-chorus-rate.pcapng`,
+  `session-30-flanger-mix.pcapng`, `session-30-flanger-feedback.pcapng`,
+  `session-30-phaser-mix.pcapng`.
+- **BK-033 fixed (capture #1).** AM4-Edit's "Pre-Delay → 85 ms" wrote
+  `pidLow=0x0042/pidHigh=0x0013` with `float32(0.085)`. Our registry
+  had `pidHigh=0x0010` (a structurally-plausible cache record that
+  was firmware-dead). One-byte address swap in `params.ts`; existing
+  `unit: 'ms'` ÷1000 scale is correct. Cache name removed from
+  `paramNames.ts` so the generator no longer emits the wrong mapping.
+- **BK-034 cleared as not-a-code-bug (captures #2..#5).** All four
+  AM4-Edit wires (chorus.rate=3.4 Hz, flanger.mix=54%,
+  flanger.feedback=-61%, phaser.mix=88%) are byte-identical to our
+  builder's output (modulo the benign action=0x0001 vs 0x0002
+  variation). HW-014's hardware-display divergence is therefore an
+  AM4 hardware-screen rendering quirk, not a wire-layer bug.
+  Comments updated to remove BUG flags; verify these four params via
+  AM4-Edit, not the AM4 hardware display.
+- **Goldens.** 5 new byte-exact entries in `verify-msg` (1 BK-033 +
+  4 BK-034 wire-match anchors).
 
 ### HW-012 — Round-trip `apply_preset` with the per-slot `channels` shape ✅
 

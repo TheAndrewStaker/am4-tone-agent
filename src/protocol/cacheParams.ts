@@ -142,11 +142,6 @@ export const CACHE_PARAMS = {
     pidLow: 0x0042, pidHigh: 0x000f,
     unit: 'percent', displayMin: 0, displayMax: 100,
   },
-  'reverb.predelay': {
-    block: 'reverb', name: 'predelay',
-    pidLow: 0x0042, pidHigh: 0x0010,
-    unit: 'ms', displayMin: 0, displayMax: 250,
-  },
   'reverb.springs': {
     block: 'reverb', name: 'springs',
     pidLow: 0x0042, pidHigh: 0x001b,

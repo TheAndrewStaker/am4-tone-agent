@@ -121,10 +121,16 @@ export const PARAM_NAMES: Readonly<Record<string, Readonly<Record<number, ParamN
     // it's a universal reverb-size knob whose UI label depends on the
     // active reverb type.
     15: 'size',
-    // Blocks Guide §Reverb Basic Page (p. 82): "Predelay — Adds extra
-    // delay before the reverb starts." Cache 0x10 signature (0..0.25s
-    // × 1000 → 0..250 ms) matches the canonical reverb predelay range.
-    16: 'predelay',
+    // BK-033 (HW-025 #1, Session 30): the cache record at id=16 (0x10)
+    // signature LOOKED like predelay (0..0.25s × 1000 = 0..250 ms) but
+    // wire-testing proved it's a dead address — writes ack but the
+    // firmware ignores them. The real predelay register is id=19 (0x13);
+    // AM4-Edit captures wrote there for "Pre-Delay → 85 ms / 111.4 ms".
+    // Skipping id=16 here so the generator doesn't emit the wrong cache
+    // mapping; the corrected entry lives hand-authored in params.ts.
+    // The cache record at 0x13 has no name slot here either — it's
+    // not exposed via the auto-gen path; instead reverb.predelay is
+    // a pure KNOWN_PARAMS hand-authored entry going forward.
     // Session 29 (HW-015): Spring-reverb-specific. Number of Springs
     // (integer count 2..6) at pidHigh=0x1b; cache c=1 structurally
     // ambiguous — needs 'count' override. Spring Tone (knob_0_10) at

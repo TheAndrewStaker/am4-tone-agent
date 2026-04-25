@@ -263,6 +263,70 @@ const cases: { label: string; built: number[]; expected: string }[] = [
     expected: 'f0000174150142000f00010000000400007701437814f7',
   },
   {
+    label: 'buildSetParam("reverb.predelay", 85 ms) — session-30 HW-025 #1 (BK-033 fix)',
+    built: buildSetParam('reverb.predelay', 85),
+    expected: 'f00001741501420013000100000004003d4515636823f7',
+  },
+  {
+    label: 'buildSetParam("chorus.rate", 3.4 Hz) — session-30 HW-025 #2 (BK-034 wire-match)',
+    built: buildSetParam('chorus.rate', 3.4),
+    expected: 'f000017415014e000c000100000004004d262b140002f7',
+  },
+  {
+    label: 'buildSetParam("flanger.mix", 54%) — session-30 HW-025 #3 (BK-034 wire-match)',
+    built: buildSetParam('flanger.mix', 54),
+    expected: 'f0000174150152000100010000000400384f2123784af7',
+  },
+  {
+    label: 'buildSetParam("flanger.feedback", -61%) — session-30 HW-025 #4 (BK-034 wire-match)',
+    built: buildSetParam('flanger.feedback', -61),
+    expected: 'f0000174150152000e000100000004007b0a034b7809f7',
+  },
+  {
+    label: 'buildSetParam("phaser.mix", 88%) — session-30 HW-025 #5 (BK-034 wire-match)',
+    built: buildSetParam('phaser.mix', 88),
+    expected: 'f000017415015a00010001000000040057116c13780ef7',
+  },
+  // HW-018 reverb first-page goldens. Each anchor uses the AM4-Edit-
+  // captured final wire bytes; the displayValue we pass to
+  // buildSetParam is what `decode(param, internal)` produces from the
+  // captured float, so the round-trip is wire→display→wire = identity.
+  {
+    label: 'buildSetParam("reverb.high_cut", 7000 Hz) — session-30 HW-018 hall capture',
+    built: buildSetParam('reverb.high_cut', 7000),
+    expected: 'f0000174150142000c0001000000040000301b24287df7',
+  },
+  {
+    label: 'buildSetParam("reverb.input_gain", 82.17%) — session-30 HW-018 spring capture (action=0x0001 vs cap 0x0002, see SYSEX-MAP §6i)',
+    built: buildSetParam('reverb.input_gain', 82.17452),
+    expected: 'f000017415014200170001000000040072572a237815f7',
+  },
+  {
+    label: 'buildSetParam("reverb.density", 6) — session-30 HW-018 hall capture',
+    built: buildSetParam('reverb.density', 6),
+    expected: 'f0000174150142001800010000000400000018040052f7',
+  },
+  {
+    label: 'buildSetParam("reverb.dwell", 4.741) — session-30 HW-018 spring capture (action=0x0001 vs cap 0x0002, see SYSEX-MAP §6i)',
+    built: buildSetParam('reverb.dwell', 4.741138458251953),
+    expected: 'f0000174150142002400010000000400066f7e237036f7',
+  },
+  {
+    label: 'buildSetParam("reverb.drip", 91.83%) — session-30 HW-018 spring capture (action=0x0001 vs cap 0x0002, see SYSEX-MAP §6i)',
+    built: buildSetParam('reverb.drip', 91.83036684989929),
+    expected: 'f000017415014200340001000000040079452d337838f7',
+  },
+  {
+    label: 'buildSetParam("reverb.quality", 2 = HIGH) — session-30 HW-018 hall capture',
+    built: buildSetParam('reverb.quality', 2),
+    expected: 'f0000174150142002f0001000000040000000004007df7',
+  },
+  {
+    label: 'buildSetParam("reverb.stack_hold", 1 = STACK) — session-30 HW-018 hall capture',
+    built: buildSetParam('reverb.stack_hold', 1),
+    expected: 'f000017415014200300001000000040000001003780df7',
+  },
+  {
     label: 'buildSetParam("reverb.springs", 4) — session-29-reverb-number-of-springs',
     built: buildSetParam('reverb.springs', 4),
     expected: 'f0000174150142001b00010000000400000010040059f7',

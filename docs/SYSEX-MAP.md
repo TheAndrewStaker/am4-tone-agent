@@ -873,6 +873,93 @@ exposes the UI only under Spring.
 
 ---
 
+## 6j. Reverb First-Page Coverage + Predelay Fix (HW-018 / HW-025 / Session 30) 🟢
+
+**Captured 2026-04-25** (7 pcapngs under `samples/captured/session-30-*`).
+Two parallel investigations wrapped in one capture batch:
+
+### BK-033 — `reverb.predelay` address fix
+
+HW-014 had flagged `reverb.predelay` at `pidHigh=0x0010` as a dead
+address (writes wire-acked but firmware ignored them). HW-025 capture
+#1 (`session-30-reverb-predelay.pcapng`, Pre-Delay → 85 ms) revealed
+AM4-Edit writes to **`pidLow=0x0042 / pidHigh=0x0013`** with
+`float32(0.085)` — confirming both the correct address and the
+existing `unit: 'ms'` ÷1000 scale. The cache record at id=16 (0x10)
+that originally pointed at predelay is structurally plausible (range
+0..0.25s, scale ×1000) but firmware-dead; the corrected entry now
+lives hand-authored in `params.ts` and the cache name is removed
+from `paramNames.ts` so the generator no longer emits the wrong
+mapping. Byte-exact golden in `verify-msg`.
+
+### BK-034 — `chorus.rate / flanger.mix / flanger.feedback / phaser.mix` proven not-a-bug
+
+HW-014 reported these four params as encoding mismatches based on
+AM4 hardware-display readbacks. HW-025 captures #2..#5 prove
+**AM4-Edit's wire is byte-identical to our builder's** for the same
+target values:
+
+| Param | Capture | Wire address | Wire value (float32 LE) | Display value |
+|---|---|---|---|---|
+| `chorus.rate` | `session-30-chorus-rate` | `0x004e/0x000c` | `3.4` | 3.4 Hz |
+| `flanger.mix` | `session-30-flanger-mix` | `0x0052/0x0001` | `0.54` | 54% |
+| `flanger.feedback` | `session-30-flanger-feedback` | `0x0052/0x000e` | `-0.61` | -61% |
+| `phaser.mix` | `session-30-phaser-mix` | `0x005a/0x0001` | `0.88` | 88% |
+
+The HW-014 hardware-display divergence is therefore an AM4
+hardware-screen rendering quirk (or HW-014 channel-state artifact),
+**not** a wire-layer encoding bug. All four `params.ts` entries
+keep their existing addresses and units; comments updated to
+record the wire-equivalence. Verify these four params via
+AM4-Edit, not the AM4 hardware display, until the screen-side
+rendering is characterised. Four byte-exact goldens in
+`verify-msg`.
+
+### HW-018 — Reverb Basic-Page first-page completion
+
+`session-30-reverb-basic-hall.pcapng` (Hall, Medium) and
+`session-30-reverb-spring.pcapng` (Spring, Large) captured every
+knob the founder wiggled on AM4-Edit's reverb Config page for both
+types. Cross-referenced against the cache and the founder's
+screenshot inventory; ten new universal/algorithmic-reverb /
+Spring-engine registers landed:
+
+| Block | pidHigh | Param | Unit | Range | Notes |
+|-------|---------|-------|------|-------|-------|
+| reverb | `0x000C` | `high_cut` | hz | 200..20000 | Universal. Hall final 7000 Hz (numeric input field, action=0x0001). |
+| reverb | `0x0014` | `low_cut` | hz | 20..2000 | Universal. |
+| reverb | `0x0017` | `input_gain` | percent | 0..100 | Universal. Spring final 0.8217 → 82.17% matches screenshot 82.2 %. |
+| reverb | `0x0018` | `density` | count | 4..8 | Hall-only (algorithmic). Cache typecode 16 = small-int. |
+| reverb | `0x0024` | `dwell` | knob_0_10 | 0.1..10 | Spring-only. Final 0.4741 → 4.741 matches screenshot 4.74. |
+| reverb | `0x0027` | `stereo_spread` | bipolar_percent | -200..+200 | Hall-only. Cache exposes wider firmware range than the AM4-Edit UI's 0..100 % knob. |
+| reverb | `0x0028` | `ducking` | db | 0..80 | Universal. Cache range matches AM4-Edit's "Ducking 46.9 dB" knob. |
+| reverb | `0x002F` | `quality` | enum | ECONOMY / NORMAL / HIGH / ULTRA-HIGH | Hall-only (algorithmic CPU-quality selector). |
+| reverb | `0x0030` | `stack_hold` | enum | OFF / STACK / HOLD | Hall-only. |
+| reverb | `0x0034` | `drip` | percent | 0..100 | Spring-only. Final 0.9183 → 91.83% matches screenshot 91.8 %. |
+
+**Same `action=0x0002` quirk** as HW-015 — AM4-Edit's continuous
+slider drags use action=0x0002 at bytes 10–11; numeric-input-field
+single-shot writes use action=0x0001. Our builder always emits
+0x0001; goldens encode the builder's canonical form. Both action
+values are firmware-accepted (verified across Sessions 04..29).
+
+**Unidentified register at `pidHigh=0x0000`.** Both Hall and
+Spring captures wrote 12 / 7 times respectively to
+`pidLow=0x0042 / pidHigh=0x0000` with continuous-slider value
+patterns (final ≈0.56 / 0.74). The cache has no metadata at id=0
+for the reverb block. Most likely candidate is `reverb.level` (the
+output-level dB knob shown on the right side of the screenshot
+config page), but the wire encoding doesn't match a raw-dB
+interpretation of the screenshot's -5.6 dB. Left unregistered;
+future single-knob capture would resolve it.
+
+**Tooling addition.** `scripts/extract-final-writes.ts` aggregates
+multi-knob capture sweeps to "final value per pidHigh," which is
+the right shape for HW-018-style multi-wiggle captures (HW-015
+captured one knob per pcapng, where extract-writes.ts is enough).
+
+---
+
 ## 7. Parameter Value Encoding 🟡
 
 ### 14-bit IDs (block ID, parameter ID)

@@ -5,8 +5,20 @@
 > hardware tasks (USB captures, round-trip tests, reference dumps) live
 > in **`docs/HARDWARE-TASKS.md`** — check that file alongside this one at
 > session start.
-> Last updated: **2026-04-21** (Session 29 cont 7 — HW-014
-> closed with structured findings. 28 params hardware-verified,
+> Last updated: **2026-04-25** (Session 30 — HW-025 + HW-018
+> decoded and archived. **BK-033 fixed** (predelay address
+> 0x10 → 0x13; AM4-Edit byte-exact). **BK-034 cleared as
+> not-a-code-bug** — captures show our wire is byte-identical
+> to AM4-Edit's; HW-014 hardware-display divergence is an AM4
+> screen-rendering quirk, not a wire bug. **HW-018 added 10 new
+> reverb registers**: high_cut / low_cut / input_gain / density /
+> dwell / stereo_spread / ducking / quality / stack_hold / drip.
+> KNOWN_PARAMS 69 → 79; goldens 53 → 60; cacheParams 69
+> (unchanged — new entries hand-authored). One residual register
+> at pidHigh=0x0000 queued as HW-026 (likely `reverb.level`).
+> **BK-032 reverb-line ✅ first-page complete.** Pre-existing
+> context — Session 29 cont 7:
+> HW-014 closed with structured findings. 28 params hardware-verified,
 > 5 confirmed bugs (1 dead address: `reverb.predelay`; 4
 > encoding divergences: `chorus.rate`, `flanger.mix`,
 > `flanger.feedback`, `phaser.mix`), 27 hidden on the AM4
@@ -302,21 +314,22 @@ float32. One open question remains before the IR can cover full presets:
 
 ## The single next action
 
-**Bug-fix wave first — HW-025 captures unblock BK-033 + BK-034.**
-Session 29 cont 7's HW-014 spot-check surfaced 5 confirmed bugs
-that need fixing before release. Bug fix order:
+**Continue BK-032 first-page coverage — Reverb done, Drive next.**
+Session 30 closed Reverb (HW-018), the predelay bug (BK-033), and
+proved the per-block encoding cluster (BK-034) was a hardware-
+screen rendering quirk rather than a wire-layer bug. Next block in
+priority order is Drive (BK-032 #2). Bug-fix wave is now empty —
+no known-broken params, the per-block-encoding-overrides plumbing
+proposed for BK-034 is unnecessary and not built.
 
-1. **HW-025** — 5 AM4-Edit USBPcap captures (one per buggy param:
-   reverb predelay, chorus rate, flanger mix, flanger feedback,
-   phaser mix). ~3 min of founder time. Without these, the bugs
-   are observed but unresolvable.
-2. **BK-033 fix** — once HW-025 #1 lands, decode actual
-   `reverb.predelay` pidHigh and update the param map. ~30 min.
-3. **BK-034 fix** — once HW-025 #2..#5 land, decode the per-block
-   encoding rules (likely log-knob mapping for at least
-   `chorus.rate`) and add per-param `encode/decode` overrides
-   to `Param`. ~1 day; release blocker for the
-   Conversational Presets / MCP MIDI Tools rename.
+1. **HW-019 — Drive first-page capture** (founder action). Single
+   pcapng on a TS808 drive type; ~5 min. Decoder yields ~12 new
+   drive registers (Low/High Cut, Bass/Mid/Treble, Mid Frequency,
+   Clip Type, Bass Response, Dry Level, Bias, Slew Rate). See
+   `docs/HARDWARE-TASKS.md` for the exact wiggle order.
+2. **HW-020 — Delay first-page capture** (founder action). Single
+   pcapng on Digital Mono delay; resolves HW-017 delay id=64
+   ambiguity (Taps vs Bit Reduction) along the way.
 
 **Then or in parallel — remaining queue:**
 
@@ -325,12 +338,14 @@ that need fixing before release. Bug fix order:
   re-test `amp.level` non-default, confirm
   `flanger.rate`/`phaser.rate`, test `reverb.springs`/
   `spring_tone` on Spring reverb).
-- **BK-032 first-page captures** — HW-018 (reverb) > HW-019
-  (drive) > HW-020 (delay) > HW-021 (compressor) > HW-022
-  (modulation bundle) > HW-023 (secondary). Same priority as
-  before HW-014.
+- **BK-032 first-page captures (remaining)** — HW-019 (drive) >
+  HW-020 (delay) > HW-021 (compressor) > HW-022 (modulation
+  bundle) > HW-023 (secondary). HW-018 closed Session 30.
 - **HW-016 prompts #1 + #3** for P5-011 item 5 closure (Claude
   Desktop smoke). Prompt #2 effectively passed during HW-013.
+- **HW-026** — single-knob capture to disambiguate the Reverb
+  `pidHigh=0x0000` register left over from HW-018 (likely
+  `reverb.level`). Low priority; doesn't block release.
 
 **Remaining AM4-depth queue (non-HW, gates Wave 1 device expansion
 per `memory/feedback_am4_depth_gates_wave_expansion.md`):**

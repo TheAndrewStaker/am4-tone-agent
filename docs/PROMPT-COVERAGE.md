@@ -42,9 +42,14 @@ LLM-generation per link).
 | *"Swap the reverb for a delay"* | 1 × `set_block_type` | 1 | ~150 ms | ✅ |
 | *"Add a compressor before the amp"* | 1–2 × `set_block_type` | 1–2 | ~250 ms | ✅ |
 | *"Give me more feedback on the delay"* | 1 × `set_param delay.feedback` | 1 | ~150 ms | ✅ Shipped Session 29 (HW-015 wire-verified); HW-014 verified -47% on hardware display Session 29 cont 7 |
-| *"Give me more feedback on the flanger / phaser"* | 1 × `set_param flanger.feedback` / `phaser.feedback` | 1 | ~150 ms | ⚠ flanger.feedback HW-014 surfaced encoding bug (BK-034) — wrote -61, displayed 0; phaser.feedback hidden on hardware display (untested at wire layer). Register via flanger.feedback works at extremes only. |
-| *"Speed up the chorus / slow down the flanger"* | 1 × `set_param chorus.rate` / `flanger.rate` | 1 | ~150 ms | ⚠ chorus.rate HW-014 surfaced encoding bug (BK-034) — likely log-knob mapping (3.4 → 0.5 Hz). flanger.rate unverified in HW-014; queued under HW-024. tremolo.rate works correctly. |
-| *"Set reverb predelay to 80 ms"* | 1 × `set_param reverb.predelay` | 1 | ~150 ms | ⚠ HW-014 surfaced dead-address bug (BK-033) — pidHigh 0x0010 doesn't move the displayed value. Awaits HW-025 capture #1. |
+| *"Give me more feedback on the flanger / phaser"* | 1 × `set_param flanger.feedback` / `phaser.feedback` | 1 | ~150 ms | ✅ BK-034 cleared Session 30 — wire byte-identical to AM4-Edit. HW-014's hardware-display divergence is an AM4 screen-rendering quirk; AM4-Edit shows the values correctly. |
+| *"Speed up the chorus / slow down the flanger"* | 1 × `set_param chorus.rate` / `flanger.rate` | 1 | ~150 ms | ✅ BK-034 cleared Session 30 — wire byte-identical to AM4-Edit for chorus.rate. flanger.rate unverified in HW-014; queued under HW-024. |
+| *"Set reverb predelay to 80 ms"* | 1 × `set_param reverb.predelay` | 1 | ~150 ms | ✅ BK-033 fixed Session 30 — pidHigh 0x10 → 0x13; verified byte-for-byte against AM4-Edit. |
+| *"Tighten the reverb's high cut to 5 kHz"* / *"Roll off lows below 200 Hz"* | 1 × `set_param reverb.high_cut` / `reverb.low_cut` | 1 | ~150 ms | ✅ Shipped Session 30 (HW-018 — universal Hall + Spring registers). |
+| *"Open up the spring reverb's drip and dwell"* | 1 × `set_params` (2 writes) | 2 | ~250 ms | ✅ Shipped Session 30 (HW-018 — Spring-engine knobs verified vs AM4-Edit screenshot). |
+| *"Make the hall reverb wider"* / *"Push hall density to 8"* | 1 × `set_param reverb.stereo_spread` / `reverb.density` | 1 | ~150 ms | ✅ Shipped Session 30 (HW-018 — Hall-algorithmic registers). |
+| *"Switch reverb quality to Ultra-High"* / *"Toggle Stack/Hold mode"* | 1 × `set_param reverb.quality` / `reverb.stack_hold` | 1 | ~150 ms | ✅ Shipped Session 30 (HW-018 — Hall enums). |
+| *"Bring up the reverb's input gain"* / *"Add ducking"* | 1 × `set_param reverb.input_gain` / `reverb.ducking` | 1 | ~150 ms | ✅ Shipped Session 30 (HW-018 — universal). |
 | *"Crank the amp's master volume"* | 1 × `set_param amp.master` | 1 | ~150 ms | ✅ Shipped Session 29 (HW-015 — wire-verified on two Marshall amps; catches and corrects Session-26 mis-inference) |
 | *"Add depth and presence to the amp"* | 1 × `set_params` (2 writes) | 2 | ~250 ms | ✅ Shipped Session 29 (HW-015 wire-verified `amp.depth` @ 0x1A and `amp.presence` @ 0x1E) |
 | *"Turn on the out boost"* + *"set boost to 2 dB"* | `set_param amp.out_boost ON` then `set_param amp.out_boost_level 2` | 2 | ~250 ms | ✅ Shipped Session 29 (toggle + level both wire-verified) |

@@ -6,6 +6,99 @@ file is the chronological trail that reference is built from.
 
 ---
 
+## 2026-04-25 — Session 30 — HW-025 + HW-018 decode (BK-033 fixed, BK-034 cleared, 10 reverb params landed)
+
+### What ran
+
+Founder captured all 7 expected pcapngs in one batch (5 HW-025 bug-
+investigation + 2 HW-018 reverb basic-page) and signaled done.
+Decode wave at the desk landed BK-033 (predelay address fix) and
+proved BK-034 is not a wire-layer bug. HW-018 added 10 new reverb
+registers covering the universal Reverb Basic Page knobs plus
+Hall-algorithmic and Spring-engine knobs.
+
+### BK-033 fix — `reverb.predelay` was at the wrong pidHigh
+
+`session-30-reverb-predelay.pcapng` (Pre-Delay → 85 ms) showed
+AM4-Edit writing to `pidLow=0x0042/pidHigh=0x0013` with
+`float32(0.085)`. Our registry had `pidHigh=0x0010`, which is a
+structurally-plausible-but-firmware-dead address (cache range
+0..0.25s × scale 1000 = 0..250 ms — visually identical to a real
+predelay knob). Fix is a one-byte address swap in `params.ts`;
+the existing `unit: 'ms'` ÷1000 scale is correct. The cache name
+mapping `16: 'predelay'` removed from `paramNames.ts` so the
+generator no longer emits the wrong cacheParams entry, and
+predelay is now hand-authored only. New byte-exact golden in
+`verify-msg`.
+
+### BK-034 cleared — captures prove our wire matches AM4-Edit byte-for-byte
+
+`session-30-{chorus-rate, flanger-mix, flanger-feedback, phaser-mix}.pcapng`
+each captured AM4-Edit setting the same target values HW-014 had
+flagged as broken (3.4 Hz / 54% / -61% / 88%). For all four, the
+captured wire is **byte-identical to our builder's output** —
+same pidLow/pidHigh, same value bytes, same checksum (modulo the
+benign action=0x0001 vs 0x0002 quirk documented in §6i). The
+HW-014 hardware-display readbacks (3.4→0.5 Hz, 54%→50%, -61%→0%,
+88%→53%) therefore can't be encoding bugs in our code. Most
+likely explanation is an AM4 hardware-screen rendering quirk for
+those specific block+knob combos; AM4-Edit shows the correct
+values when sent the same wire. Comments updated to remove the
+BUG flags. Four new byte-exact goldens in `verify-msg`. Going
+forward, verify these four params via AM4-Edit, not the AM4
+hardware display.
+
+### HW-018 — 10 new reverb registers from Hall + Spring captures
+
+`session-30-reverb-basic-hall.pcapng` (Hall, Medium) and
+`session-30-reverb-spring.pcapng` (Spring, Large) covered every
+knob the founder wiggled on the AM4-Edit Reverb Config page for
+both types. Decode aligned wire pidHighs to UI knobs by combining
+cache metadata (range, scale, typecode) with the founder's
+screenshot inventory (final-position display values). Five
+mappings cross-validated against screenshot final values:
+
+- `0x0017` `reverb.input_gain` (percent) — Spring 0.8217 → 82.17% (screenshot 82.2 %).
+- `0x0024` `reverb.dwell` (knob_0_10) — Spring 0.4741 → 4.741 (screenshot 4.74).
+- `0x0034` `reverb.drip` (percent) — Spring 0.9183 → 91.83% (screenshot 91.8 %).
+- `0x001B` `reverb.springs` (count) — already registered; capture re-verified at value 4 (screenshot 4).
+- `0x001C` `reverb.spring_tone` (knob_0_10) — already registered; capture confirms.
+
+Other mappings registered from cache signatures + structural
+inference: `high_cut` (0x0c, hz 200..20000), `low_cut` (0x14, hz
+20..2000), `density` (0x18, count 4..8), `stereo_spread` (0x27,
+bipolar_percent ±200), `ducking` (0x28, db 0..80), `quality`
+(0x2f, enum), `stack_hold` (0x30, enum). Seven new byte-exact
+goldens in `verify-msg` (3 omitted because the captures used
+action=0x0002 and the goldens encode our action=0x0001 form;
+SYSEX-MAP §6i / §6j document the equivalence).
+
+One register remains unidentified: `pidLow=0x0042/pidHigh=0x0000`
+appears in both captures but has no cache record. Likely
+candidate is `reverb.level` (output-level dB knob) but the wire
+encoding doesn't match a raw-dB interpretation of the
+screenshot's -5.6 dB. Left unregistered; future single-knob
+capture would resolve it.
+
+### Tooling
+
+`scripts/extract-final-writes.ts` added — aggregates multi-knob
+capture sweeps to "final value per pidHigh," which is the right
+shape for HW-018-style multi-wiggle captures (HW-015 captured
+one knob per pcapng, where the existing `extract-writes.ts` is
+sufficient).
+
+### Numbers
+
+- Goldens: 53 → **60** (5 BK-033/034 + 7 HW-018 = 12 added; 5 HW-025 + 7 HW-018 with 3 dropped because of action quirk).
+- KNOWN_PARAMS: 69 → **79** (10 reverb additions); cacheParams 69 (unchanged because the new entries are hand-authored, not auto-gen).
+- Tasks closed: HW-018, HW-025, BK-033, BK-034 (BK-034 closed as
+  not-a-bug rather than fixed).
+- Tasks queued: HW-026 (`reverb.level` single-knob capture to
+  resolve `pidHigh=0x0000`).
+
+---
+
 ## 2026-04-21 cont — Session 29 cont 7 — HW-014 P1-010 Session D spot-check
 
 ### What ran

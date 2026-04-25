@@ -322,14 +322,13 @@ export const KNOWN_PARAMS = {
     unit: 'seconds', displayMin: 0.1, displayMax: 100,
   },
   'reverb.predelay': {
-    // BUG (HW-014, BK-033): dead address. Three writes (85, 0, 250 ms)
-    // wire-acked on hardware but display stayed at 20.0 ms default.
-    // Sending the max didn't move it either — pidHigh 0x0010 is wrong
-    // or points at a write-only register. Awaits HW-025 capture #1.
-    // Blocks Guide §Reverb Basic Page: "Predelay — Adds extra delay
-    // before the reverb starts." Cache 0x10 (0..0.25s × 1000 = 0..250 ms).
+    // BK-033 fix (HW-025 #1, Session 30): true address is pidHigh=0x0013,
+    // not 0x0010. AM4-Edit capture for Pre-Delay→85 ms wrote 0x0042/0x0013
+    // with float32(0.085) — confirms the `ms` unit's ÷1000 scale is right.
+    // The 0x0010 register was a cache-derived guess that was structurally
+    // plausible (range matched) but wrote to nothing. See SYSEX-MAP §6j.
     block: 'reverb', name: 'predelay',
-    pidLow: 0x0042, pidHigh: 0x0010,
+    pidLow: 0x0042, pidHigh: 0x0013,
     unit: 'ms', displayMin: 0, displayMax: 250,
   },
   // Session 29 (HW-015): reverb Size at pidHigh=0x000f. Wire-verified
@@ -362,6 +361,95 @@ export const KNOWN_PARAMS = {
   // verify on hardware display (both shifts hidden on the Plate
   // reverb type tested); awaits a Shimmer-type hardware spot-check
   // or AM4-Edit-side verification.
+  // HW-018 (Session 30, 2026-04-25): 10 new universal/algorithmic-reverb
+  // and Spring-specific knobs decoded from session-30-reverb-basic-hall
+  // and session-30-reverb-spring captures. Cache metadata confirmed
+  // pidLow/pidHigh/range for each; capture final values cross-checked
+  // against the founder's AM4-Edit screenshot inventory. Hall + Spring
+  // share the universal registers (high_cut / low_cut / input_gain /
+  // ducking) while Hall-only adds algorithmic controls (density / quality
+  // / stack_hold / stereo_spread) and Spring-only adds Spring-engine
+  // controls (dwell / drip).
+  'reverb.high_cut': {
+    block: 'reverb', name: 'high_cut',
+    pidLow: 0x0042, pidHigh: 0x000c,
+    // Cache: a=200, b=20000, c=1 → raw Hz, 200..20000 Hz. Hall capture
+    // wrote 7000 Hz directly (numeric input field, action=0x0001).
+    unit: 'hz', displayMin: 200, displayMax: 20000,
+  },
+  'reverb.low_cut': {
+    block: 'reverb', name: 'low_cut',
+    pidLow: 0x0042, pidHigh: 0x0014,
+    // Cache: a=20, b=2000, c=1 → raw Hz, 20..2000 Hz.
+    unit: 'hz', displayMin: 20, displayMax: 2000,
+  },
+  'reverb.input_gain': {
+    block: 'reverb', name: 'input_gain',
+    pidLow: 0x0042, pidHigh: 0x0017,
+    // Cache: a=0, b=1, c=100 → percent 0..100. Spring final 0.8217 →
+    // 82.17% matches the AM4-Edit screenshot's "Input Gain 82.2 %".
+    unit: 'percent', displayMin: 0, displayMax: 100,
+  },
+  'reverb.density': {
+    block: 'reverb', name: 'density',
+    pidLow: 0x0042, pidHigh: 0x0018,
+    // Cache: a=4, b=8, c=1, kind=float typecode=16 → integer count
+    // 4..8. Hall-only (algorithmic Hall/Plate/Room knob).
+    unit: 'count', displayMin: 4, displayMax: 8,
+  },
+  'reverb.dwell': {
+    block: 'reverb', name: 'dwell',
+    pidLow: 0x0042, pidHigh: 0x0024,
+    // Cache: a=0.01, b=1, c=10 → knob_0_10 (display = wire × 10).
+    // Spring final 0.4741 → 4.741 matches screenshot "Dwell 4.74".
+    // Spring-engine specific (alongside spring_tone, drip).
+    unit: 'knob_0_10', displayMin: 0.1, displayMax: 10,
+  },
+  'reverb.stereo_spread': {
+    block: 'reverb', name: 'stereo_spread',
+    pidLow: 0x0042, pidHigh: 0x0027,
+    // Cache: a=-2, b=2, c=100 → bipolar_percent allowing -200..+200%.
+    // AM4-Edit screenshot shows Hall Stereo Spread as a positive 0..100%
+    // knob (display value 90.0 %). Cache exposes the wider firmware
+    // range — leave displayMin/displayMax at the cache values; Claude
+    // can clamp to the typical 0..100 range when describing the knob.
+    unit: 'bipolar_percent', displayMin: -200, displayMax: 200,
+  },
+  'reverb.ducking': {
+    block: 'reverb', name: 'ducking',
+    pidLow: 0x0042, pidHigh: 0x0028,
+    // Cache: a=0, b=80, c=1 → raw dB, 0..80 dB attenuation. Universal
+    // (Hall + Spring both wrote here). Screenshot shows "Ducking 46.9 dB"
+    // on both reverb types — typical mid-range attenuation.
+    unit: 'db', displayMin: 0, displayMax: 80,
+  },
+  'reverb.quality': {
+    block: 'reverb', name: 'quality',
+    pidLow: 0x0042, pidHigh: 0x002f,
+    // Cache: enum, values=["ECONOMY","NORMAL","HIGH","ULTRA-HIGH"].
+    // Hall-only (algorithmic CPU-quality selector). Hand-authored enum
+    // map; not yet exported via cacheEnums.ts since cacheEnums is
+    // auto-generated from a different cache section. If a regen pass
+    // adds REVERB_QUALITY_VALUES later, swap this inline map for the
+    // import.
+    unit: 'enum', displayMin: 0, displayMax: 3,
+    enumValues: { 0: 'ECONOMY', 1: 'NORMAL', 2: 'HIGH', 3: 'ULTRA-HIGH' },
+  },
+  'reverb.stack_hold': {
+    block: 'reverb', name: 'stack_hold',
+    pidLow: 0x0042, pidHigh: 0x0030,
+    // Cache: enum, values=["OFF","STACK","HOLD"]. Hall-only. Same
+    // hand-authored caveat as reverb.quality.
+    unit: 'enum', displayMin: 0, displayMax: 2,
+    enumValues: { 0: 'OFF', 1: 'STACK', 2: 'HOLD' },
+  },
+  'reverb.drip': {
+    block: 'reverb', name: 'drip',
+    pidLow: 0x0042, pidHigh: 0x0034,
+    // Cache: a=0, b=1, c=100 → percent 0..100. Spring final 0.9183 →
+    // 91.83% matches screenshot "Drip 91.8 %". Spring-engine specific.
+    unit: 'percent', displayMin: 0, displayMax: 100,
+  },
   'reverb.shift_1': {
     block: 'reverb', name: 'shift_1',
     pidLow: 0x0042, pidHigh: 0x0038,
@@ -453,12 +541,13 @@ export const KNOWN_PARAMS = {
     enumValues: CHORUS_TYPES_VALUES,
   },
   'chorus.rate': {
-    // BUG (HW-014, BK-034): encoding mismatch. Wrote 3.4 Hz, hardware
-    // displayed 0.5 Hz; max 10 Hz lands correctly. Looks like a
-    // log-knob mapping (knob 0.34 on a 0.1..10 Hz log curve = 0.479 Hz).
-    // Likely the firmware expects a normalized 0..1 knob position here,
-    // not raw Hz. tremolo.rate at the same pidHigh works on its block
-    // — divergence is per-block. Awaits HW-025 capture #2.
+    // BK-034 resolved (HW-025 #2, Session 30): NOT an encoding bug.
+    // AM4-Edit wire for Rate→3.4 Hz wrote pidLow=0x004e/pidHigh=0x000c
+    // with float32(3.4) — byte-identical to our `unit: 'hz'` builder.
+    // HW-014's hardware-display readback (3.4→0.5 Hz) is an AM4
+    // hardware-screen rendering quirk for chorus rate, not a wire-
+    // layer bug. Verify chorus rate via AM4-Edit, not the AM4 hardware
+    // display, until the screen-side rendering is characterised.
     block: 'chorus', name: 'rate',
     pidLow: 0x004e, pidHigh: 0x000c,
     unit: 'hz', displayMin: 0.1, displayMax: 10,
@@ -469,10 +558,11 @@ export const KNOWN_PARAMS = {
     unit: 'percent', displayMin: 0, displayMax: 100,
   },
   'flanger.mix': {
-    // BUG (HW-014, BK-034): encoding mismatch. Wrote 54%, hardware
-    // displayed 50%; min 0 lands correctly. Same `pidHigh=0x01`
-    // universal-Mix register works on delay/chorus/reverb. Awaits
-    // HW-025 capture #3.
+    // BK-034 resolved (HW-025 #3, Session 30): NOT an encoding bug.
+    // AM4-Edit wire for Mix→54% wrote pidLow=0x0052/pidHigh=0x0001
+    // with float32(0.54) — byte-identical to our `unit: 'percent'`
+    // builder. HW-014's hardware-display readback (54%→50%) is a
+    // hardware-screen rendering quirk; verify via AM4-Edit.
     block: 'flanger', name: 'mix',
     pidLow: 0x0052, pidHigh: 0x0001,
     unit: 'percent', displayMin: 0, displayMax: 100,
@@ -494,20 +584,22 @@ export const KNOWN_PARAMS = {
     unit: 'percent', displayMin: 0, displayMax: 100,
   },
   'flanger.feedback': {
-    // BUG (HW-014, BK-034): encoding mismatch. Wrote -61%, hardware
-    // displayed 0; wrote +99%, displayed +90. Same `pidHigh=0x0E`
-    // bipolar feedback register works on delay.feedback (-47% verified).
-    // Awaits HW-025 capture #4.
+    // BK-034 resolved (HW-025 #4, Session 30): NOT an encoding bug.
+    // AM4-Edit wire for Feedback→-61% wrote pidLow=0x0052/pidHigh=0x000e
+    // with float32(-0.61) — byte-identical to our `unit: 'bipolar_percent'`
+    // builder. HW-014's hardware-display readbacks (-61%→0; +99%→+90)
+    // are hardware-screen rendering quirks; verify via AM4-Edit.
     block: 'flanger', name: 'feedback',
     pidLow: 0x0052, pidHigh: 0x000e,
     // Cache caps internal range at ±0.995 — display scale 100 ⇒ ±99%.
     unit: 'bipolar_percent', displayMin: -99, displayMax: 99,
   },
   'phaser.mix': {
-    // BUG (HW-014, BK-034): encoding mismatch. Wrote 88%, hardware
-    // displayed 53%; min 0 lands correctly. Same `pidHigh=0x01`
-    // universal-Mix register works on delay/chorus/reverb. Awaits
-    // HW-025 capture #5.
+    // BK-034 resolved (HW-025 #5, Session 30): NOT an encoding bug.
+    // AM4-Edit wire for Mix→88% wrote pidLow=0x005a/pidHigh=0x0001
+    // with float32(0.88) — byte-identical to our `unit: 'percent'`
+    // builder. HW-014's hardware-display readback (88%→53%) is a
+    // hardware-screen rendering quirk; verify via AM4-Edit.
     block: 'phaser', name: 'mix',
     pidLow: 0x005a, pidHigh: 0x0001,
     unit: 'percent', displayMin: 0, displayMax: 100,
