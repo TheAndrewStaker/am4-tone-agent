@@ -87,6 +87,46 @@ reference here when BK-014 activates.
   Primary reference for BK-020; complete address table + parameter
   ranges + tone-category enums.
 
+### ASM Hydrasynth Explorer (BK-031, founder-owned 2026-04-25)
+- `Hydrasynth_Explorer_Owners_Manual_2.2.0.txt` — full owner's manual
+  (5,695 lines). Single source for everything: synthesis architecture,
+  modulation matrix, system setup, MIDI implementation. **Primary
+  reference for BK-031.** ASM does not publish a separate MIDI
+  Implementation Chart PDF — the manual is the spec.
+  - **MIDI CC chart** at pp. 94–96 of the PDF (lines 5353–5605 in the
+    `.txt`). The chart is laid out as two side-by-side tables ("Sorted
+    by Module" + "Sorted by CC Number") and `pdftotext` interleaves
+    the columns — the `.txt` extraction is **not directly parseable**.
+    Re-extract via column-restricted `pdftotext -layout` or hand-
+    transcription before generating a CC table. See
+    `docs/devices/hydrasynth-explorer/MIDI-MAP.md` § FOLLOW-UPS.
+  - **MIDI system setup** at pp. 80–83 (Param TX/RX = CC vs NRPN,
+    Bank Select scheme, MPE toggle, Send Patch / Send All Patches
+    SysEx triggers).
+  - **Patch architecture** at pp. 74–77 (Browser, Save, Compare,
+    Favorites).
+- `Hydrasynth_KB_DR_Owners_Manual_2.2.0.pdf` — manual for the
+  larger Hydrasynth Keyboard / Desktop / Deluxe siblings. Same
+  synthesis engine, additional features (multi-patch on Deluxe, real
+  ribbon controller). Useful when Hydrasynth-line-wide questions come
+  up; the Explorer manual takes precedence for our device.
+- `Hydrasynth_Single_Factory_Patch_Listing_2.0.xlsx` — official
+  factory-patch list (8 banks × 128 patches). Bank / program / name /
+  category. Source for the BK-031 `list_hydrasynth_patches` tool —
+  parse once into JSON during BK-031 step B.
+- **Working device folder:** `docs/devices/hydrasynth-explorer/`
+  (created on the `hydrasynth-explorer` branch 2026-04-25). Contains
+  `OVERVIEW.md` (capability matrix), `MIDI-MAP.md` (working protocol
+  reference), `FIRST-SMOKE.md` (round-trip test plan).
+- **No SysEx implementation chart published** by ASM. The "Send
+  Patch" / "Send All Patches" actions on the device emit SysEx in an
+  undocumented format. Decoding is BK-031 step E (stretch goal).
+- **NRPN mapping not in the manual.** The manual states NRPN mode
+  addresses the same parameters as CC mode at higher resolution but
+  doesn't publish the MSB/LSB pairs. Decode by capturing MIDI from
+  the device with Param TX = NRPN — a one-shot founder hardware task
+  when BK-031 starts.
+
 ### Boss VE-500 (BK-018)
 - `VE-500_MIDI_ImpleChart.txt` — MIDI Implementation Chart. Confirms the
   SysEx address map is **closed** ("Specifications of System Exclusive

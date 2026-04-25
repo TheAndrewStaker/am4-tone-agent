@@ -1,0 +1,243 @@
+94
+MIDI CC Charts
+Sorted by Module
+Module Parameter CC
+Amp Amp LFO2amt 62
+ARP ARP Division 106
+ARP ARP Gate 107
+ARP ARP Mode 108
+ARP ARP Ratchet 109
+ARP ARP Chance 110
+ARP ARP Octave 120
+ARP ARP Length 122
+Delay Delay Feedback 14
+Delay Delay Time 15
+Delay Delay Wet tone 63
+Delay Delay Dry/Wet 92
+ENV 1 ENV1 Attack 81
+ENV 1 ENV1 Decay 82
+ENV 1 ENV1 Sustain 83
+ENV 1 ENV1 Release 84
+ENV 2 ENV2 Attack 85
+ENV 2 ENV2 Decay 86
+ENV 2 ENV2 Sustain 87
+ENV 2 ENV2 Release 88
+ENV 3 ENV3 Attack 89
+ENV 3 ENV3 Decay 90
+ENV 3 ENV3 Sustain 96
+ENV 3 ENV3 Release 97
+ENV 4 ENV4 Attack 25
+ENV 4 ENV4 Decay 27
+ENV 4 ENV4 Release 124
+ENV 4 ENV4 Sustain 125
+ENV 5 ENV5 Attack 102
+ENV 5 ENV5 Decay 103
+ENV 5 ENV5 Sustain 104
+ENV 5 ENV5 Release 105
+Filter 1 Filter 1 Drive 50
+Filter 1 Filter 1 Keytrack 51
+Filter 1 Filter 1 LFO1amt 52
+Filter 1 Filter 1 Vel Env 53
+Filter 1 Filter 1 ENV1amt 54
+Filter 1 Filter 1 Res 71
+Filter 1 Filter 1 Cutoff 74
+Filter 2 Filter 2 Cutoff 55
+Filter 2 Filter 2 Res 56
+Filter 2 Filter 2 Type 57
+Filter 2 Filter 2 Keytrack 58
+Filter 2 Filter 2 LFO1amt 59
+Filter 2 Filter 2 Vel Env 60
+Filter 2 Filter 2 ENV1amt 61
+LFO 1 LFO1 Gain 70
+LFO 1 LFO1 Rate 72
+LFO 2 LFO2 Gain 28
+LFO 2 LFO2 Rate 73
+LFO 3 LFO3 Gain 75
+LFO 3 LFO3 Rate 76
+LFO 4 LFO4 Gain 77
+LFO 4 LFO4 Rate 78
+LFO 5 LFO5 Gain 79
+LFO 5 LFO5 Rate 80
+Macros Macro 1 16
+Macros Macro 2 17
+Macros Macro 3 18
+Macros Macro 4 19
+Macros Macro 5 20
+Macros Macro 6 21
+Macros Macro 7 22
+Macros Macro 8 23
+Mixer Noise Vol 03
+Mixer Noise Pan 08
+Mixer Ring Mod Vol 09
+Mixer Ring Mod Pan 10
+Mixer RM12 Depth 43
+Mixer OSC1 Vol 44
+Mixer OSC1 Pan 45
+Mixer OSC2 Vol 46
+Mixer OSC2 Pan 47
+Mixer OSC3 Vol 48
+Mixer OSC3 Pan 49
+Mixer OSC 3 FRate 114
+Mixer Noise FRate 115
+Mixer Ring Mod FRate 116
+Mixer OSC1 FRate 118
+95
+Mixer OSC2 FRate 119
+Mutator 1 Mutator1 Ratio 29
+Mutator 1 Mutator1 Depth 30
+Mutator 1 Mutator1 Dry/Wet 31
+Mutator 2 Mutator2 Ratio 33
+Mutator 2 Mutator2 Depth 34
+Mutator 2 Mutator2 Dry/Wet 35
+Mutator 3 Mutator3 Ratio 36
+Mutator 3 Mutator3 Depth 37
+Mutator 3 Mutator3 Dry/Wet 39
+Mutator 4 Mutator4 Ratio 40
+Mutator 4 Mutator4 Depth 41
+Mutator 4 Mutator4 Dry/Wet 42
+OSC 1 OSC1 wavscan 24
+OSC 1 OSC 1 Cent 111
+OSC 2 OSC2 WavScan 26
+OSC 2 OSC 2 Cent 112
+OSC 3 OSC 3 Cent 113
+Post-fx POST-FX Param1 68
+Post-fx POST-FX Param2 69
+Post-fx POST FX Mix 94
+Pre-fx PRE-FX Param1 12
+Pre-fx PRE-FX Param2 13
+Pre-fx PRE-FX Mix 93
+Reverb Reverb Time 65
+Reverb Reverb Tone 67
+Reverb Reverb Dry/Wet 91
+System Bank select MSB 00
+System Modulation wheel. 01
+System Master Volume 07
+System Expression pedal 11
+System Bank select LSB 32
+System Sustain pedal 64
+System All notes off 123
+Voice GlidTime 05
+Voice Glide 66
+Voice Detune 95
+Voice StWidth 117
+Sorted by CC Number
+Module Parameter CC
+System Bank select MSB 00
+System Modulation wheel. 01
+Mixer Noise Vol 03
+Voice GlidTime 05
+System Master Volume 07
+Mixer Noise Pan 08
+Mixer Ring Mod Vol 09
+Mixer Ring Mod Pan 10
+System Expression pedal 11
+Pre-fx PRE-FX Param1 12
+Pre-fx PRE-FX Param2 13
+Delay Delay Feedback 14
+Delay Delay Time 15
+Macros Macro 1 16
+Macros Macro 2 17
+Macros Macro 3 18
+Macros Macro 4 19
+Macros Macro 5 20
+Macros Macro 6 21
+Macros Macro 7 22
+Macros Macro 8 23
+OSC 1 OSC1 wavscan 24
+ENV 4 ENV4 Attack 25
+OSC 2 OSC2 WavScan 26
+ENV 4 ENV4 Decay 27
+LFO 2 LFO2 Gain 28
+Mutator 1 Mutator1 Ratio 29
+Mutator 1 Mutator1 Depth 30
+Mutator 1 Mutator1 Dry/Wet 31
+System Bank select LSB 32
+Mutator 2 Mutator2 Ratio 33
+Mutator 2 Mutator2 Depth 34
+Mutator 2 Mutator2 Dry/Wet 35
+Mutator 3 Mutator3 Ratio 36
+Mutator 3 Mutator3 Depth 37
+Mutator 3 Mutator3 Dry/Wet 39
+Mutator 4 Mutator4 Ratio 40
+Mutator 4 Mutator4 Depth 41
+Mutator 4 Mutator4 Dry/Wet 42
+96
+Mixer RM12 Depth 43
+Mixer OSC1 Vol 44
+Mixer OSC1 Pan 45
+Mixer OSC2 Vol 46
+Mixer OSC2 Pan 47
+Mixer OSC3 Vol 48
+Mixer OSC3 Pan 49
+Filter 1 Filter1 Drive 50
+Filter 1 Filter1 Keytrack 51
+Filter 1 Filter1 LFO1amt 52
+Filter 1 Filter1 Vel Env 53
+Filter 1 Filter1 ENV1amt 54
+Filter 2 Flt2 Cutoff 55
+Filter 2 Flt2 Res 56
+Filter 2 Flt2 Type 57
+Filter 2 Filter2 Keytrack 58
+Filter 2 Filter2 LFO1amt 59
+Filter 2 Filter2 Vel Env 60
+Filter 2 Filter2 ENV1amt 61
+Amp Amp LFO2amt 62
+Delay Delay Wet tone 63
+System Sustain pedal 64
+Reverb Reverb Time 65
+Voice Glide 66
+Reverb Reverb Tone 67
+Post-fx POST-FX Param1 68
+Post-fx POST-FX Param2 69
+LFO 1 LFO1 Gain 70
+Filter 1 Filter1 Res 71
+LFO 1 LFO1 Rate 72
+LFO 2 LFO2 Rate 73
+Filter 1 Filter1 Cutoff 74
+LFO 3 LFO3 Gain 75
+LFO 3 LFO3 Rate 76
+LFO 4 LFO4 Gain 77
+LFO 4 LFO4 Rate 78
+LFO 5 LFO5 Gain 79
+LFO 5 LFO5 Rate 80
+ENV 1 ENV1 Attack 81
+ENV 1 ENV1 Decay 82
+ENV 1 ENV1 Sustain 83
+ENV 1 ENV1 Release 84
+ENV 2 ENV2 Attack 85
+ENV 2 ENV2 Decay 86
+ENV 2 ENV2 Sustain 87
+ENV 2 ENV2 Release 88
+ENV 3 ENV3 Attack 89
+ENV 3 ENV3 Decay 90
+Reverb Reverb Dry/Wet 91
+Delay Delay Dry/Wet 92
+Pre-fx PRE-FX Mix 93
+Post-fx POST FX Mix 94
+Voice Detune 95
+ENV 3 ENV3 Sustain 96
+ENV 3 ENV3 Release 97
+ENV 5 ENV5 Attack 102
+ENV 5 ENV5 Decay 103
+ENV 5 ENV5 Sustain 104
+ENV 5 ENV5 Release 105
+ARP ARP Division 106
+ARP ARP Gate 107
+ARP ARP Mode 108
+ARP ARP Ratchet 109
+ARP ARP Chance 110
+OSC 1 OSC1 Cent 111
+OSC 2 OSC2 Cent 112
+OSC 3 OSC3 Cent 113
+Mixer OSC3 FRate 114
+Mixer Noise FRate 115
+Mixer RM12 FRate 116
+Voice StWidth 117
+Mixer OSC1 FRate 118
+Mixer OSC2 FRate 119
+ARP ARP Octave 120
+ARP ARP Length 122
+System All notes off 123
+ENV 4 ENV4 Release 124
+ENV 4 ENV4 Sustain 125
+
