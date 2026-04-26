@@ -69,7 +69,8 @@ Fully quit Claude Desktop (system tray → Quit, not just the window's X
 
 **Where the tools show up:** in a new chat, click the **`+` button at
 the bottom of the chat input → "Connectors"**. `am4-tone-agent` should
-be listed with its 3 tools. `Settings → Developer` also shows per-server
+be listed with its 22 tools (17 AM4-specific plus 5 generic-MIDI
+primitives). `Settings → Developer` also shows per-server
 connection status and log tails. (Older docs mention a "hammer icon" —
 that's the old UI; it's now under the `+` menu.)
 

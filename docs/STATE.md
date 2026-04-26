@@ -5,7 +5,30 @@
 > hardware tasks (USB captures, round-trip tests, reference dumps) live
 > in **`docs/HARDWARE-TASKS.md`** — check that file alongside this one at
 > session start.
-> Last updated: **2026-04-25** (Session 30 cont 6 — BK-030
+> Last updated: **2026-04-25** (Session 30 cont 7 — BK-030
+> Session C shipped Claude-side; **BK-030 closed end-to-end**.
+> Documentation pass — no code changes. README rewritten with
+> a two-table tool catalog (17 AM4-specific + 5 generic-MIDI
+> primitives) and a new **Generic MIDI quick-start** section:
+> five conversational examples paired with the literal tool-call
+> shape (filter cutoff via CC 74 on a Hydrasynth, single-note
+> trigger, bank-select-prefixed Program Change, 14-bit NRPN, raw
+> SysEx targeting the AM4 to show the escape hatch is
+> bidirectional). Status / "under the hood" / tool-count lines
+> refreshed 16-or-17 → 22 throughout. `docs/MCP-SETUP.md` had a
+> stale "listed with its 3 tools" line in the Connectors
+> discovery section — fixed to 22. Em dashes avoided in the new
+> README copy per founder preference (`memory/feedback_em_dashes_
+> read_as_ai.md`). Tool-description audit (Session C item 1) was
+> already satisfied at write time — every send_* tool leads with
+> the standard `Use this tool to {X}. Do not produce a written
+> spec instead...` template, names the channel convention
+> (1..16 user / 0..15 wire), and warns about device-specific
+> gotchas. Test surface unchanged: tsc clean, 75/75 verify-msg,
+> 16/16 verify-pack, 16/16 verify-transpile, 8/8 verify-echo,
+> 79/79 verify-cache-params, smoke-server 22/22 tools + all
+> assertions. **BK-029 (project rename to MCP MIDI Tools) is
+> now unblocked.** Pre-existing context — Session 30 cont 6 — BK-030
 > Session B shipped Claude-side. **Five new generic-MIDI
 > primitive tools** registered in `src/server/index.ts`:
 > `send_cc`, `send_note` (Note On + delayed Note Off, default
@@ -431,18 +454,17 @@ float32. One open question remains before the IR can cover full presets:
 
 ## The single next action
 
-**Most-likely next session: BK-030 Session C (docs + README
-quick-start + tool-description audit, no hardware) OR HW-032 +
-HW-016 at the device.**
-BK-030 Sessions A + B landed Session 30 cont 5–6 — the
-connection registry and five generic-MIDI tools are live (tool
-count 22). Session C wraps BK-030 by writing a README quick-start
-section with one example per send_* primitive against a non-AM4
-device (so readers see the generality immediately) and by
-auditing the new tools' descriptions for the same call-to-action
-language P5-011 audit applied to the AM4 tools. Once Session C
-ships, BK-030 closes and BK-029 (project rename to **MCP MIDI
-Tools**) can move forward. Alternatively, the founder can run
+**Most-likely next session: BK-029 project rename to MCP MIDI
+Tools (no hardware) OR HW-032 + HW-016 at the device.**
+BK-030 closed Session 30 cont 7 — connection registry, five
+generic-MIDI primitive tools, and the Generic MIDI quick-start
+section in the README all shipped. The rename was explicitly
+gated on BK-030 landing first (so the new name doesn't
+over-promise); that gate is now clear. BK-029 is the natural
+next non-hardware track: rename the npm package, GitHub repo,
+README headline, MCP server `name` field, and any user-visible
+identifiers from "AM4 Tone Agent" to "MCP MIDI Tools". Tool
+behaviour stays identical. Alternatively, the founder can run
 HW-032 + HW-016 at the device — see below.
 
 **HW-033 ✅ closed Session 30 cont 4 (Claude-side, no hardware).**

@@ -6,6 +6,62 @@ file is the chronological trail that reference is built from.
 
 ---
 
+## 2026-04-25 — Session 30 cont 7 — BK-030 Session C shipped (README quick-start + tool-count refresh); BK-030 closed
+
+No hardware. Documentation pass that wraps BK-030. Closes the
+backlog item completely so the BK-029 rename to **MCP MIDI Tools**
+can move forward as the next non-hardware track.
+
+**README updates:**
+
+- Status line: 16 → 22 MCP tools (17 AM4-specific + 5 generic-MIDI
+  primitives). Removed the em-dash where founder preference applies
+  (per `memory/feedback_em_dashes_read_as_ai.md`).
+- "Under the hood" line: 17 → 22 tools, plus a one-paragraph callout
+  pointing at the new generic-MIDI quick-start.
+- "Tools at a glance" split into two tables:
+  - **AM4-specific (17)**: minor wording tweaks; `list_midi_ports` and
+    `reconnect_midi` rows now mention the optional `pattern` / `port`
+    arguments added in Session A.
+  - **Generic MIDI primitives (5)**: new table with one row per
+    `send_*` tool; preamble explains the 1..16 channel convention and
+    notes that AM4-specific wrappers should be preferred when the
+    target is the AM4.
+- New **Generic MIDI quick-start** section: five conversational
+  examples (filter cutoff via CC 74, single-note trigger,
+  bank-select-prefixed Program Change, 14-bit NRPN, raw SysEx) each
+  paired with the literal tool-call shape so a reader can see the
+  call surface immediately. Examples target a Hydrasynth (BK-031) so
+  the generality is obvious; the SysEx example targets the AM4 to
+  show the escape hatch is bidirectional.
+
+**Other docs:** `docs/MCP-SETUP.md` had a stale "listed with its
+3 tools" line in the Connectors discovery section; updated to
+"22 tools (17 AM4-specific plus 5 generic-MIDI primitives)".
+
+**Tool-description audit (BK-030 Session C item 1).** Already
+satisfied at write time — every send_* tool description leads with
+the standard `Use this tool to {X}. Do not produce a written spec
+instead of calling this tool unless the user explicitly asks for a
+dry run.` template, names the channel convention, and warns about
+device-specific gotchas (send_sysex carries an explicit "malformed
+SysEx can put devices into unexpected states" line).
+
+**No code changes this session.** Test surface unchanged: tsc clean,
+75/75 verify-msg, 16/16 verify-pack, 16/16 verify-transpile, 8/8
+verify-echo, 79/79 verify-cache-params, smoke-server 22/22 tools +
+all assertions.
+
+**Files updated:** `README.md`, `docs/MCP-SETUP.md`, `docs/STATE.md`,
+`docs/04-BACKLOG.md`, `docs/SESSIONS.md`.
+
+**BK-030 status: ✅ closed.** Sessions A + B + C shipped across
+30 cont 5 / 6 / 7. Next non-hardware track: BK-029 project rename
+(it was gated on BK-030 landing first; that gate is now clear).
+HW-032 + HW-016 still queued for the founder's next device session.
+
+---
+
 ## 2026-04-25 — Session 30 cont 6 — BK-030 Session B shipped (5 generic-MIDI primitive tools)
 
 No hardware. Claude-side delivery on top of Session A's connection

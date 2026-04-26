@@ -2291,9 +2291,9 @@ Skip until explicit user demand materializes.
     `save_to_location`, etc.) — tool names are device-neutral
     already.
 
-### BK-030 General-MIDI primitive tools (earns the "MCP MIDI Tools" name) — 🟡 Sessions A + B shipped (Session 30 cont 5–6)
+### BK-030 General-MIDI primitive tools (earns the "MCP MIDI Tools" name) — ✅ Closed (Session 30 cont 5–7)
 
-**Status:** Sessions A (connection registry) and B (five send_* primitives) shipped Session 30 cont 5–6. Session C (docs + README quick-start) still pending. Tool count 17 → 22 (`send_cc`, `send_note`, `send_program_change`, `send_nrpn`, `send_sysex`). Pure builder functions live in `src/protocol/generic/midiMessages.ts` — the future `midi-core` package boundary.
+**Status:** All three sessions shipped. Tool count 17 → 22 (`send_cc`, `send_note`, `send_program_change`, `send_nrpn`, `send_sysex`). Pure builder functions live in `src/protocol/generic/midiMessages.ts` (the future `midi-core` package boundary). README has a Generic MIDI quick-start with five conversational examples; `docs/MCP-SETUP.md` updated. BK-029 (project rename) is unblocked.
 
 - **Context.** The current 16 tools are almost all AM4-specific
   wrappers. `list_midi_ports` enumeration is already generic (it
@@ -2388,13 +2388,19 @@ Skip until explicit user demand materializes.
      echo writes. 8 new smoke assertions covering happy paths
      against a bogus port (proves wiring) plus Zod / framing /
      range rejections.
-  3. **Session C — Docs + examples.** Tool descriptions
-     explicit about MIDI semantics (channel is 0-indexed
-     internally but the tool takes 1-indexed to match musician
-     conventions; document this once, consistently). Add a
-     short "general MIDI quick-start" section to the README
-     with one example per primitive, targeting a non-AM4
-     device so readers see the generality immediately.
+  3. **Session C — Docs + examples. ✅ Shipped Session 30 cont 7.**
+     README rewritten with a two-table tool catalog (17 AM4-specific
+     + 5 generic-MIDI primitives) and a new **Generic MIDI
+     quick-start** section: five conversational examples paired
+     with the literal tool-call shape (filter cutoff via CC 74,
+     single-note trigger, bank-select-prefixed Program Change,
+     14-bit NRPN, raw SysEx). Examples target a Hydrasynth so
+     the generality is obvious; the SysEx example targets the
+     AM4 to show the escape hatch is bidirectional. Tool-
+     description audit was already satisfied at write time
+     (every send_* tool leads with the standard call-to-action
+     template). `docs/MCP-SETUP.md` had a stale "3 tools" line
+     in the Connectors discovery section; updated to 22.
 - **Dependencies + relation to other items:**
   - **BK-029** — blocker. Rename lands after this ships so the
     new name isn't aspirational.
