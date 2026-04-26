@@ -89,6 +89,21 @@ function tempoDivisionsEnum(): string[] {
   return rec.values;
 }
 
+/**
+ * LFO waveform dictionary (10 entries: SINE / TRIANGLE / ... / ASTABLE).
+ * Identical across every modulation block that exposes a Waveform/LFO Type
+ * knob — captured 4 times in the cache (chorus id=18, flanger id=18, phaser
+ * id=13, tremolo id=11). Source-of-truth here is chorus sub-block 2 id=18;
+ * cross-checked byte-identical against the other three.
+ */
+function lfoWaveformsEnum(): string[] {
+  const rec = s3.find((r) => r.block === 2 && r.id === 18 && r.kind === 'enum');
+  if (!rec || !rec.values || rec.values.length !== 10 || rec.values[0] !== 'SINE') {
+    throw new Error('lfoWaveformsEnum: cache no longer has 10-entry waveform enum at chorus/id=18');
+  }
+  return rec.values;
+}
+
 // -- cacheEnums.ts --
 
 function formatTsArray(name: string, values: string[]): string {
@@ -122,8 +137,15 @@ const mapsSection = BLOCKS.map((b) => toEnumValuesObject(`${b.constName}_VALUES`
 // non-Type registrations (tempo, etc.) where a block's `enumImport` would
 // otherwise mis-target the block's TYPES_VALUES.
 const tempoDivisions = tempoDivisionsEnum();
-const sharedArrays = formatTsArray('TEMPO_DIVISIONS', tempoDivisions);
-const sharedMaps = toEnumValuesObject('TEMPO_DIVISIONS_VALUES', tempoDivisions);
+const lfoWaveforms = lfoWaveformsEnum();
+const sharedArrays = [
+  formatTsArray('TEMPO_DIVISIONS', tempoDivisions),
+  formatTsArray('LFO_WAVEFORMS', lfoWaveforms),
+].join('\n\n');
+const sharedMaps = [
+  toEnumValuesObject('TEMPO_DIVISIONS_VALUES', tempoDivisions),
+  toEnumValuesObject('LFO_WAVEFORMS_VALUES', lfoWaveforms),
+].join('\n');
 
 const ts = `${header}\n${arrays}\n\n${sharedArrays}\n\n${mapsSection}\n${sharedMaps}\n`;
 const outPath = 'src/protocol/cacheEnums.ts';
@@ -133,6 +155,7 @@ for (const b of BLOCKS) {
   console.log(`  ${b.constName}: ${typeEnum(b).length} entries`);
 }
 console.log(`  TEMPO_DIVISIONS: ${tempoDivisions.length} entries`);
+console.log(`  LFO_WAVEFORMS: ${lfoWaveforms.length} entries`);
 
 // -- docs/CACHE-DUMP.md --
 

@@ -466,97 +466,134 @@ Residuals (queued as HW-034 / HW-035 / HW-036 below):
 <!-- HW-019 + HW-020 + HW-021 completed 2026-04-25 (Session 30 cont)
      — see Archive below for the decode summaries. -->
 
-### HW-022 — Modulation blocks first-page completion 🔜
+### HW-022 — Modulation blocks first-page completion ✅
 
-- **For:** BK-032 — #5 priority. Bundles chorus / flanger / phaser
-  / tremolo since they share LFO-based structure.
-- **Why:** Each has Rate / Depth / Mix registered; Tempo, Manual,
-  LFO controls, block-specific structure (chorus.voices,
-  phaser.order) missing.
-- **Captures: 4 pcapngs** (one per block — each has its own pidLow
-  so they must be in separate recordings).
+- **Closed 2026-04-26 (Session 31 cont).** 4 pcapngs +
+  4 paired AM4-Edit screenshots captured. **15 new params
+  registered**, byte-exact verify-msg goldens for each;
+  KNOWN_PARAMS 106 → 121, verify-msg goldens 83 → 98,
+  list_params catalog 118 → 133 lines. New `degrees` Unit
+  (cache c=180/π). Shared `LFO_WAVEFORMS_VALUES` dictionary
+  added to `cacheEnums.ts`.
 
-  **Capture A — Chorus:**
-  `samples/captured/session-30-chorus-basic.pcapng`
+  Captures (paired pcapng + screenshot under `samples/captured/`):
 
-  Load any Chorus type. Wiggle in this order:
-  1. Number Of Voices (count 2..8)
-  2. Tempo (enum)
-  3. Delay Time (ms)
+  - **Chorus (Analog Stereo):** `session-30-chorus-basic.pcapng` /
+    `session-30-chorus-screenshot.png`. New params:
+    `chorus.level` (0x0000 db) / `chorus.time` (0x0010 ms,
+    0.1..50) / `chorus.mod_phase` (0x0011 degrees, 0..180) /
+    `chorus.phase_reverse` (0x0014 enum NONE/RIGHT/LEFT/BOTH).
+    Existing-confirmed: `chorus.mix` / `chorus.rate` /
+    `chorus.tempo` / `chorus.depth`.
+  - **Flanger (Analog Stereo):** `session-30-flanger-basic.pcapng`
+    + screenshot. New params: `flanger.manual` (0x000f
+    knob_0_10) / `flanger.mod_phase` (0x0011 degrees).
+    Existing-confirmed: `flanger.level` / `flanger.mix` /
+    `flanger.rate` / `flanger.tempo` / `flanger.depth` /
+    `flanger.feedback`.
+  - **Phaser (Digital Stereo):** `session-30-phaser-basic.pcapng`
+    + screenshot. New params: `phaser.level` (0x0000 db) /
+    `phaser.depth` (0x000f knob_0_10) / `phaser.mod_phase`
+    (0x0013 degrees) / `phaser.manual` (0x0022 knob_0_10).
+    Existing-confirmed: `phaser.mix` / `phaser.rate` /
+    `phaser.tempo` / `phaser.feedback`.
+  - **Tremolo (Panner):** `session-30-tremolo-basic.pcapng` +
+    screenshot. New params: `tremolo.waveform` (0x000b enum
+    LFO_WAVEFORMS) / `tremolo.phase` (0x0010 degrees) /
+    `tremolo.width` (0x0011 percent, Panner-replaces-Depth) /
+    `tremolo.center` (0x0012 bipolar_percent) / `tremolo.ducking`
+    (0x0018 knob_0_10). Existing-confirmed: `tremolo.rate` /
+    `tremolo.tempo`.
 
-  **Capture B — Flanger:**
-  `samples/captured/session-30-flanger-basic.pcapng`
+- **Methodology corrections (founder feedback):** original spec
+  listed Number-Of-Voices on Chorus and Low-Cut/High-Cut/Bass-Focus/
+  Drive on Flanger — none are first-page knobs on the Analog
+  Stereo type the founder loaded. Founder verified no flanger
+  type has Low-Cut. Lesson saved as feedback memory: don't pre-
+  name knobs in capture instructions when the AM4-Edit UI is
+  type-dependent — say "wiggle every visible knob" instead.
 
-  Load any Flanger type. Wiggle in this order:
-  1. Tempo (enum)
-  2. Manual (ms)
-  3. Low Cut (Hz)
-  4. High Cut (Hz)
-  5. Bass Focus (if exposed)
-  6. Drive (if exposed)
+- **HW-017 partial closure:** HW-017's "phaser id=22" ambiguity
+  was a different register than this capture surfaced. Phaser
+  Manual landed at id=34 (pidHigh=0x0022), not id=22. The
+  HW-017 phaser/Order question for id=22 is still open and
+  needs a separate capture wiggling phaser Stages/Order on a
+  type that exposes it.
 
-  **Capture C — Phaser:**
-  `samples/captured/session-30-phaser-basic.pcapng`
-
-  Load any Phaser type. Wiggle in this order:
-  1. Tempo (enum)
-  2. Depth (%)
-  3. Manual
-  4. Tone
-  5. Order / Stages — **this resolves the HW-017 phaser id=22
-     ambiguity**
-
-  **Capture D — Tremolo:**
-  `samples/captured/session-30-tremolo-basic.pcapng`
-
-  Load any Tremolo/Panner type. Wiggle in this order:
-  1. Tempo (enum)
-  2. LFO Type (waveform enum)
-  3. LFO Duty Cycle
-
-- **Signal:** *"HW-022 done"* + 4 saved paths.
+- **Residual: tremolo.level.** The Panner capture didn't move
+  the right-panel Level knob from 0.0 dB, so no wire write was
+  emitted at pidHigh=0x0000 for the tremolo block. Universal
+  Level pattern says it lives there; one future single-knob
+  wiggle of tremolo Level produces the byte anchor we need.
+  Queue under HW-NNN if needed; otherwise pick up
+  opportunistically.
 
 ### HW-023 — Secondary blocks first-page completion 🔜
 
-- **For:** BK-032 — #6 priority. Catches wah / filter / gate / GEQ.
-  Also resolves HW-017's filter id=28 question.
-- **Why:** These blocks currently have only Type + Balance (+
-  Filter Freq). User-facing knobs missing for each.
-- **Captures: 4 pcapngs** (one per block).
+- **For:** BK-032 — last capture-driven item. Closes wah / filter /
+  gate / GEQ first-page coverage. Once decoded, BK-032 (release-
+  gate first-page param scope) is done and Wave 1 device expansion
+  (BK-014 Axe-Fx II / BK-031 Hydrasynth) is formally unblocked.
+- **Why:** these blocks currently have only Type + Balance
+  registered (plus filter.freq + filter.level + filter.low_cut +
+  filter.high_cut from HW-032). Filter modulation page knobs +
+  Q + Order are missing; Wah / Gate / GEQ have nearly no first-
+  page coverage at all.
+- **Methodology (per HW-022 founder feedback):** AM4-Edit's UI is
+  type-dependent. **Don't try to anticipate which knobs will be on
+  screen — just wiggle every visible knob.** Pick whichever Type
+  the founder finds convenient (default loaded type is fine).
+- **Capture discipline (same as HW-022):**
+  1. Start USBPcap recording on the AM4 USB interface.
+  2. Open AM4-Edit and place the target block in any slot.
+  3. Pick any Type (default is fine — type-dependent UI variation
+     is documented in HW-030).
+  4. **Wiggle every knob visible on the Config page**, one at a
+     time, with **~1 s gaps** between knobs. Discrete moves only
+     (e.g. 3 → 7), don't sweep. For enum dropdowns, click through
+     2–3 options.
+  5. Stop recording, save the pcapng with the suggested name.
+  6. **Take a screenshot** of the final Config page state — the
+     decode aligns wire pidHighs to whatever knobs the screenshot
+     shows.
 
-  **Capture A — Wah:**
-  `samples/captured/session-30-wah-basic.pcapng`
+- **Captures (4 pcapngs + 4 screenshots — one per block, each has
+  its own pidLow so they must be separate recordings):**
 
-  Load any Wah type. Wiggle in this order:
-  1. Frequency (Hz — move the wah-pedal position simulation)
-  2. Resonance / Q
-  3. Min Frequency (Expert page)
-  4. Max Frequency (Expert page)
+  - `samples/captured/session-NN-wah-basic.pcapng` +
+    `session-NN-wah-screenshot.png` (Wah block, any type)
+  - `samples/captured/session-NN-filter-basic.pcapng` +
+    `session-NN-filter-screenshot.png` (Filter block, any type
+    — Low-Pass already partially decoded in HW-032, so picking
+    Hi-Pass / Band-Pass / Band-Reject would maximise coverage of
+    type-specific knobs)
+  - `samples/captured/session-NN-gate-basic.pcapng` +
+    `session-NN-gate-screenshot.png` (Gate/Expander block,
+    any type — closes HW-035's slot-Gate scope alongside)
+  - `samples/captured/session-NN-geq-basic.pcapng` +
+    `session-NN-geq-screenshot.png` (Graphic EQ — wiggle all 10
+    band-gain sliders, low → high frequency)
 
-  **Capture B — Filter:**
-  `samples/captured/session-30-filter-basic.pcapng`
+  Pick `NN = 31` if this happens in the next session; founder can
+  use any number — the decode reads the file regardless of name.
 
-  Load any Filter type. Wiggle in this order:
-  1. Order — **resolves HW-017 filter id=28** (2nd vs 4th order)
-  2. Q / Resonance
+- **Signal completion:** *"HW-023 done"* + 4 saved pcapng paths +
+  any screenshots taken. Decode walks each capture against its
+  screenshot and registers new pidHighs in `params.ts` /
+  `paramNames.ts` with byte-exact verify-msg goldens.
 
-  **Capture C — Gate/Expander:**
-  `samples/captured/session-30-gate-basic.pcapng`
+- **Note on HW-035 overlap:** the slot-Gate first-page knobs
+  task (HW-035) is the same block as HW-023's Gate capture — one
+  Gate pcapng covers both. After HW-023's Gate decode lands, mark
+  HW-035 ✅ alongside.
 
-  Load any Gate/Expander type. Wiggle in this order:
-  1. Threshold (dB)
-  2. Ratio
-  3. Attack (ms)
-  4. Release / Hold Time (ms)
+- **Note on HW-017 partial closure:** HW-017's "filter id=28"
+  question (filter Order knob) gets resolved by HW-023's Filter
+  capture. The other HW-017 candidates (delay id=64, drive id=24,
+  gate id=14) stay separate.
 
-  **Capture D — Graphic EQ:**
-  `samples/captured/session-30-geq-basic.pcapng`
-
-  Load a Graphic EQ. Wiggle each of the 10 band-gain sliders in
-  order (lowest frequency band first, highest last). One wiggle per
-  band, then move to the next.
-
-- **Signal:** *"HW-023 done"* + 4 saved paths.
+- **Priority:** high — last BK-032 capture. After this, BK-032
+  closes and the Wave 1 device expansion path opens.
 
 ---
 

@@ -720,6 +720,19 @@ export const TEMPO_DIVISIONS: readonly string[] = [
   "63/64",
 ] as const;
 
+export const LFO_WAVEFORMS: readonly string[] = [
+  "SINE",
+  "TRIANGLE",
+  "SQUARE",
+  "SAW UP",
+  "SAW DOWN",
+  "RANDOM",
+  "LOG",
+  "EXP",
+  "TRAPEZOID",
+  "ASTABLE",
+] as const;
+
 export const AMP_TYPES_VALUES: Record<number, string> = Object.fromEntries(AMP_TYPES.map((s, i) => [i, s] as const));
 export const DRIVE_TYPES_VALUES: Record<number, string> = Object.fromEntries(DRIVE_TYPES.map((s, i) => [i, s] as const));
 export const REVERB_TYPES_VALUES: Record<number, string> = Object.fromEntries(REVERB_TYPES.map((s, i) => [i, s] as const));
@@ -736,3 +749,4 @@ export const ENHANCER_TYPES_VALUES: Record<number, string> = Object.fromEntries(
 export const GATE_TYPES_VALUES: Record<number, string> = Object.fromEntries(GATE_TYPES.map((s, i) => [i, s] as const));
 export const VOLPAN_MODES_VALUES: Record<number, string> = Object.fromEntries(VOLPAN_MODES.map((s, i) => [i, s] as const));
 export const TEMPO_DIVISIONS_VALUES: Record<number, string> = Object.fromEntries(TEMPO_DIVISIONS.map((s, i) => [i, s] as const));
+export const LFO_WAVEFORMS_VALUES: Record<number, string> = Object.fromEntries(LFO_WAVEFORMS.map((s, i) => [i, s] as const));

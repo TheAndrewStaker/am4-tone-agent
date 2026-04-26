@@ -5,7 +5,75 @@
 > hardware tasks (USB captures, round-trip tests, reference dumps) live
 > in **`docs/HARDWARE-TASKS.md`** — check that file alongside this one at
 > session start.
-> Last updated: **2026-04-26** (Session 31 — BK-029 project
+> Last updated: **2026-04-26** (Session 31 cont — HW-022 modulation-block
+> decode landed. Founder captured 4 of 4 expected pcapngs (chorus /
+> flanger / phaser / tremolo) with paired AM4-Edit screenshots
+> (`samples/captured/session-30-{block}-basic.pcapng` +
+> `session-30-{block}-screenshot.png`). **15 new hardware-verified
+> params** + new `degrees` Unit + shared `LFO_WAVEFORMS_VALUES`
+> dictionary.
+>
+> New params by block: chorus.level (db) / chorus.time (ms,
+> 0x0010) / chorus.mod_phase (degrees, 0x0011) /
+> chorus.phase_reverse (enum NONE/RIGHT/LEFT/BOTH, 0x0014);
+> flanger.manual (knob_0_10, 0x000f) / flanger.mod_phase
+> (degrees, 0x0011); phaser.level (db) / phaser.depth
+> (knob_0_10, 0x000f) / phaser.mod_phase (degrees, 0x0013) /
+> phaser.manual (knob_0_10, 0x0022); tremolo.waveform (enum
+> LFO_WAVEFORMS, 0x000b) / tremolo.phase (degrees, 0x0010) /
+> tremolo.width (percent, 0x0011) / tremolo.center
+> (bipolar_percent, 0x0012) / tremolo.ducking (knob_0_10,
+> 0x0018). KNOWN_PARAMS 106 → 121; verify-msg goldens 83 →
+> 98; verify-cache-params 83/83 unchanged; smoke-server
+> list_params 118 → 133 lines.
+>
+> **New unit `degrees`**: Mod Phase / Phase knobs encode wire-
+> radians but display in degrees. Cache c=180/π=57.295780;
+> DISPLAY_TO_INTERNAL.degrees=57.29577951308232. e.g. 10 deg →
+> 0.17453 rad / 90 deg → 1.5708 rad / 180 deg → π rad. Used by
+> 5 new params (mod_phase across chorus/flanger/phaser, phase
+> on tremolo).
+>
+> **HW-022 methodology corrections (founder feedback during
+> capture):** (a) original spec listed Number-Of-Voices on Chorus
+> and Low-Cut/High-Cut/Bass-Focus/Drive on Flanger — none of those
+> are first-page knobs on the Analog Stereo type; the founder
+> verified no flanger type has Low-Cut. Lesson saved as a feedback
+> memory: don't pre-name knobs in capture instructions when the
+> AM4-Edit UI is type-dependent — just say "wiggle every visible
+> knob." (b) Phaser Manual lives at pidHigh=0x0022 (cache id=34),
+> not in the 0x000c..0x0011 cluster — it's at the high end of the
+> register space because it's a less-common control. HW-023 spec
+> rewritten in HARDWARE-TASKS.md to match the new methodology.
+>
+> **Phaser.depth float-precision note**: AM4-Edit's pipeline does
+> float32 math throughout (slider value × float32(0.1)), JS does
+> float64 then casts. `6.7 / 10` rounds to a different float32 ULP
+> than AM4-Edit's `float32(6.7) / float32(10)`. Verify-msg golden
+> uses pre-rounded `6.6999998092651367` (= float32(6.7) read back
+> as float64) so both paths produce byte-identical wire — same
+> trick already in use for `compressor.release` etc.
+>
+> **BK-032 release-gate progress:** modulation cluster (chorus /
+> flanger / phaser / tremolo) flips from 🟡 partial → 🟢 first-
+> page coverage minus the residuals queued below. Only HW-023
+> (wah / filter / gate / GEQ secondary blocks) remains in the
+> capture-driven critical path before BK-032 closes.
+>
+> **Residuals queued:**
+> - `tremolo.level` at pidHigh=0x0000 (universal Level pattern
+>   — capture didn't move it from 0 dB; can be added with one
+>   future wiggle).
+> - Phaser `id=34` is `phaser.manual` *(closed in this session;
+>   formerly an HW-017 candidate)*.
+> - HW-035 (slot-Gate first-page knobs) and HW-023 (wah / filter
+>   / gate / GEQ first-page coverage) remain pending.
+>
+> Preflight green: tsc clean, 98/98 verify-msg, 16/16 verify-pack,
+> 16/16 verify-enum-lookup, 8/8 verify-echo, 83/83 verify-cache-
+> params, smoke-server 22/22 tools + 8/8 send_* assertions + 14
+> apply_preset validation rejections + startup banner. Pre-existing
+> context — Session 31 — BK-029 project
 > rename to **MCP MIDI Tools** landed. Mechanical pass across
 > code + docs: `package.json` / `package-lock.json` `name` →
 > `mcp-midi-tools`; `NOTICE` title; `README.md` title + lede +

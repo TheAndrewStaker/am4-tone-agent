@@ -27,6 +27,7 @@ import {
   GATE_TYPES_VALUES,
   VOLPAN_MODES_VALUES,
   TEMPO_DIVISIONS_VALUES,
+  LFO_WAVEFORMS_VALUES,
 } from './cacheEnums.js';
 
 /**
@@ -49,6 +50,7 @@ import {
  *                      (1.5:1 etc.) — semantic label so Claude reads
  *                      "ratio 4" as 4:1 not 4 dB.
  *   ms               — UI milliseconds, internal seconds (÷1000)
+ *   degrees          — UI degrees 0–180, internal radians (÷57.2958 = ÷180/π)
  *   enum             — UI dropdown name, internal int-as-float (per-param table)
  *
  * Note: `db`, `hz`, `seconds`, `count`, `semitones`, and `ratio` all
@@ -69,6 +71,7 @@ export type Unit =
   | 'semitones'
   | 'ratio'
   | 'ms'
+  | 'degrees'
   | 'enum';
 
 export interface Param extends ParamId {
@@ -92,6 +95,10 @@ const DISPLAY_TO_INTERNAL: Record<Exclude<Unit, 'enum'>, number> = {
   semitones: 1,
   ratio: 1,
   ms: 1000,
+  // Cache c=57.295780... = 180/π. AM4-Edit displays Mod Phase / Phase
+  // knobs in degrees; firmware stores radians. e.g. 10 deg → 0.17453 rad
+  // / 90 deg → 1.5708 rad / 180 deg → 3.14159 rad.
+  degrees: 57.29577951308232,
 };
 
 /** Convert a UI/display value to the float the firmware expects. */
@@ -681,6 +688,33 @@ export const KNOWN_PARAMS = {
     pidLow: 0x004e, pidHigh: 0x000e,
     unit: 'percent', displayMin: 0, displayMax: 100,
   },
+  // HW-022 (Session 31, 2026-04-26): wire-verified on Analog Stereo
+  // chorus — `session-30-chorus-basic.pcapng`. Chorus first-page
+  // additions: level / time / mod_phase / phase_reverse.
+  'chorus.level': {
+    block: 'chorus', name: 'level',
+    pidLow: 0x004e, pidHigh: 0x0000,
+    unit: 'db', displayMin: -80, displayMax: 20,
+  },
+  'chorus.time': {
+    block: 'chorus', name: 'time',
+    pidLow: 0x004e, pidHigh: 0x0010,
+    // Cache id=16: float a=0.0001 b=0.05 c=1000 → display 0.1..50 ms.
+    unit: 'ms', displayMin: 0.1, displayMax: 50,
+  },
+  'chorus.mod_phase': {
+    block: 'chorus', name: 'mod_phase',
+    pidLow: 0x004e, pidHigh: 0x0011,
+    // Cache id=17: float a=0 b=π c=180/π → display 0..180 deg.
+    unit: 'degrees', displayMin: 0, displayMax: 180,
+  },
+  'chorus.phase_reverse': {
+    block: 'chorus', name: 'phase_reverse',
+    pidLow: 0x004e, pidHigh: 0x0014,
+    // Cache id=20 enum: [NONE, RIGHT, LEFT, BOTH]. Default NONE.
+    unit: 'enum', displayMin: 0, displayMax: 3,
+    enumValues: { 0: 'NONE', 1: 'RIGHT', 2: 'LEFT', 3: 'BOTH' },
+  },
   // HW-032 (Session 30 cont 8, 2026-04-25): wire-verified at +10 dB on
   // an Analog Stereo flanger — `session-32-flanger-extended.pcapng`.
   // Follows the universal pidHigh=0x0000 Level pattern.
@@ -728,6 +762,22 @@ export const KNOWN_PARAMS = {
     // Cache caps internal range at ±0.995 — display scale 100 ⇒ ±99%.
     unit: 'bipolar_percent', displayMin: -99, displayMax: 99,
   },
+  // HW-022 (Session 31, 2026-04-26): wire-verified on Analog Stereo
+  // flanger — `session-30-flanger-basic.pcapng`. Manual is a 0–10 knob
+  // (no unit suffix shown in AM4-Edit); Mod Phase mirrors the chorus
+  // degrees encoding.
+  'flanger.manual': {
+    block: 'flanger', name: 'manual',
+    pidLow: 0x0052, pidHigh: 0x000f,
+    // Cache id=15: float a=0 b=1 c=10 → display 0..10.
+    unit: 'knob_0_10', displayMin: 0, displayMax: 10,
+  },
+  'flanger.mod_phase': {
+    block: 'flanger', name: 'mod_phase',
+    pidLow: 0x0052, pidHigh: 0x0011,
+    // Cache id=17: float a=0 b=π c=180/π → display 0..180 deg.
+    unit: 'degrees', displayMin: 0, displayMax: 180,
+  },
   'phaser.mix': {
     // BK-034 resolved (HW-025 #5, Session 30): NOT an encoding bug.
     // AM4-Edit wire for Mix→88% wrote pidLow=0x005a/pidHigh=0x0001
@@ -761,6 +811,34 @@ export const KNOWN_PARAMS = {
     // of "50" sets internal 0.5 which AM4-Edit shows as ~55.5%). The
     // natural-language UX impact is negligible.
     unit: 'bipolar_percent', displayMin: -90, displayMax: 90,
+  },
+  // HW-022 (Session 31, 2026-04-26): wire-verified on Digital Stereo
+  // phaser — `session-30-phaser-basic.pcapng`. Phaser uses 0–10 knob
+  // semantics for Depth + Manual (unlike chorus/flanger which use
+  // percent for Depth). Mod Phase address differs from chorus/flanger
+  // (0x0013 here vs 0x0011 there) — cache lays it out at id=19 not id=17.
+  'phaser.level': {
+    block: 'phaser', name: 'level',
+    pidLow: 0x005a, pidHigh: 0x0000,
+    unit: 'db', displayMin: -80, displayMax: 20,
+  },
+  'phaser.depth': {
+    block: 'phaser', name: 'depth',
+    pidLow: 0x005a, pidHigh: 0x000f,
+    // Cache id=15: float a=0 b=1 c=10 → display 0..10.
+    unit: 'knob_0_10', displayMin: 0, displayMax: 10,
+  },
+  'phaser.mod_phase': {
+    block: 'phaser', name: 'mod_phase',
+    pidLow: 0x005a, pidHigh: 0x0013,
+    // Cache id=19: float a=0 b=π c=180/π → display 0..180 deg.
+    unit: 'degrees', displayMin: 0, displayMax: 180,
+  },
+  'phaser.manual': {
+    block: 'phaser', name: 'manual',
+    pidLow: 0x005a, pidHigh: 0x0022,
+    // Cache id=34: float a=0 b=1 c=10 → display 0..10.
+    unit: 'knob_0_10', displayMin: 0, displayMax: 10,
   },
   'wah.type': {
     block: 'wah', name: 'type',
@@ -905,6 +983,50 @@ export const KNOWN_PARAMS = {
     block: 'tremolo', name: 'depth',
     pidLow: 0x006a, pidHigh: 0x000d,
     unit: 'percent', displayMin: 0, displayMax: 100,
+  },
+  // HW-022 (Session 31, 2026-04-26): wire-verified on Panner-type
+  // tremolo — `session-30-tremolo-basic.pcapng`. Tremolo's first page
+  // is type-dependent: Panner exposes Width / Phase / Center / Ducking
+  // / Waveform (instead of VCA Trem's Depth which lives at pidHigh
+  // 0x000d). Level (pidHigh=0x0000) wasn't moved in this capture — to
+  // be added when a future capture wiggles it.
+  'tremolo.waveform': {
+    block: 'tremolo', name: 'waveform',
+    pidLow: 0x006a, pidHigh: 0x000b,
+    // Cache id=11 enum: 10-entry LFO_WAVEFORMS — SINE / TRIANGLE /
+    // SQUARE / SAW UP / SAW DOWN / RANDOM / LOG / EXP / TRAPEZOID /
+    // ASTABLE. Shared dictionary across modulation blocks (extracted
+    // from chorus/id=18; cross-checked against flanger/phaser/tremolo).
+    unit: 'enum', displayMin: 0, displayMax: 9,
+    enumValues: LFO_WAVEFORMS_VALUES,
+  },
+  'tremolo.phase': {
+    block: 'tremolo', name: 'phase',
+    pidLow: 0x006a, pidHigh: 0x0010,
+    // Cache id=16: float a=0 b=π c=180/π → display 0..180 deg.
+    unit: 'degrees', displayMin: 0, displayMax: 180,
+  },
+  'tremolo.width': {
+    block: 'tremolo', name: 'width',
+    pidLow: 0x006a, pidHigh: 0x0011,
+    // Cache id=17: float a=0 b=4 c=100 — internal range allows up to
+    // display 400, but AM4-Edit's Panner Width slider visually caps at
+    // 100. Stay at 0..100 here; widen if a future capture proves
+    // values >100 are user-reachable.
+    unit: 'percent', displayMin: 0, displayMax: 100,
+  },
+  'tremolo.center': {
+    block: 'tremolo', name: 'center',
+    pidLow: 0x006a, pidHigh: 0x0012,
+    // Cache id=18: float a=-1 b=1 c=100 → display -100..+100. Panner
+    // center-pan position; 0 = dead center, ±100 = full L/R.
+    unit: 'bipolar_percent', displayMin: -100, displayMax: 100,
+  },
+  'tremolo.ducking': {
+    block: 'tremolo', name: 'ducking',
+    pidLow: 0x006a, pidHigh: 0x0018,
+    // Cache id=24: float a=0 b=1 c=10 → display 0..10.
+    unit: 'knob_0_10', displayMin: 0, displayMax: 10,
   },
   // HW-024 (Session 30 cont 3) finding F1 — `enhancer.mix` is a phantom
   // register on the AM4 hardware display. The Enhancer block exposes

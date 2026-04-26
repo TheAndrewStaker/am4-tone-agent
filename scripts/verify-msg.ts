@@ -479,6 +479,93 @@ const cases: { label: string; built: number[]; expected: string }[] = [
     built: buildSetParam('delay.tempo', 11),
     expected: 'f000017415014600130001000000040000000604084bf7',
   },
+  // HW-022 (Session 31, 2026-04-26): chorus / flanger / phaser / tremolo
+  // first-page additions. 15 new wire anchors from session-30-{block}-
+  // basic.pcapng captures. Introduces the `degrees` unit (cache c=180/π)
+  // and the shared LFO_WAVEFORMS_VALUES dictionary.
+  {
+    label: 'buildSetParam("chorus.level", -2 dB) — session-30-chorus-basic',
+    built: buildSetParam('chorus.level', -2),
+    expected: 'f000017415014e0000000100000004000000000c0056f7',
+  },
+  {
+    label: 'buildSetParam("chorus.time", 12 ms) — session-30-chorus-basic',
+    built: buildSetParam('chorus.time', 12),
+    expected: 'f000017415014e001000010000000400532668436074f7',
+  },
+  {
+    label: 'buildSetParam("chorus.mod_phase", 10 deg) — session-30-chorus-basic',
+    built: buildSetParam('chorus.mod_phase', 10),
+    expected: 'f000017415014e001100010000000400612e06237051f7',
+  },
+  {
+    label: 'buildSetParam("chorus.phase_reverse", 1 = "RIGHT") — session-30-chorus-basic',
+    built: buildSetParam('chorus.phase_reverse', 1),
+    expected: 'f000017415014e001400010000000400000010037825f7',
+  },
+  {
+    label: 'buildSetParam("flanger.manual", 10) — session-30-flanger-basic',
+    built: buildSetParam('flanger.manual', 10),
+    expected: 'f0000174150152000f00010000000400000010037822f7',
+  },
+  {
+    label: 'buildSetParam("flanger.mod_phase", 11 deg) — session-30-flanger-basic',
+    built: buildSetParam('flanger.mod_phase', 11),
+    expected: 'f000017415015200110001000000040004660843700ef7',
+  },
+  {
+    label: 'buildSetParam("phaser.level", -4.3 dB) — session-30-phaser-basic',
+    built: buildSetParam('phaser.level', -4.300000190734863),
+    expected: 'f000017415015a0000000100000004004d26311c0008f7',
+  },
+  {
+    label: 'buildSetParam("phaser.depth", 6.7 via float32) — session-30-phaser-basic',
+    // AM4-Edit's pipeline does float32 math throughout (slider value is
+    // float32, divided by float32(10), packed to wire). JavaScript stores
+    // 6.7 as float64 0.67000000000000003553… which rounds to a different
+    // float32 ULP than AM4-Edit's float32(6.7) / float32(10) =
+    // 0.6699999570846558. Pre-rounding 6.7 → float32(6.7) →
+    // 6.6999998092651367 makes the JavaScript division round to the same
+    // float32 AM4-Edit ships (1-ULP within standard float32 precision —
+    // functionally identical).
+    built: buildSetParam('phaser.depth', 6.6999998092651367),
+    expected: 'f000017415015a000f000100000004000f2125337801f7',
+  },
+  {
+    label: 'buildSetParam("phaser.mod_phase", 11 deg) — session-30-phaser-basic',
+    built: buildSetParam('phaser.mod_phase', 11),
+    expected: 'f000017415015a001300010000000400046608437004f7',
+  },
+  {
+    label: 'buildSetParam("phaser.manual", 1.0) — session-30-phaser-basic',
+    built: buildSetParam('phaser.manual', 1),
+    expected: 'f000017415015a00220001000000040066731943684bf7',
+  },
+  {
+    label: 'buildSetParam("tremolo.waveform", 1 = "TRIANGLE") — session-30-tremolo-basic',
+    built: buildSetParam('tremolo.waveform', 1),
+    expected: 'f000017415016a000b0001000000040000001003781ef7',
+  },
+  {
+    label: 'buildSetParam("tremolo.phase", 20 deg) — session-30-tremolo-basic',
+    built: buildSetParam('tremolo.phase', 20),
+    expected: 'f000017415016a001000010000000400612e16237064f7',
+  },
+  {
+    label: 'buildSetParam("tremolo.width", 20%) — session-30-tremolo-basic',
+    built: buildSetParam('tremolo.width', 20),
+    expected: 'f000017415016a001100010000000400667309437040f7',
+  },
+  {
+    label: 'buildSetParam("tremolo.center", 2) — session-30-tremolo-basic',
+    built: buildSetParam('tremolo.center', 2),
+    expected: 'f000017415016a00120001000000040005357433607bf7',
+  },
+  {
+    label: 'buildSetParam("tremolo.ducking", 10) — session-30-tremolo-basic',
+    built: buildSetParam('tremolo.ducking', 10),
+    expected: 'f000017415016a00180001000000040000001003780df7',
+  },
 ];
 
 let pass = 0;
