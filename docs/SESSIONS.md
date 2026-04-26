@@ -6,6 +6,76 @@ file is the chronological trail that reference is built from.
 
 ---
 
+## 2026-04-26 — Session 33 — HW-034 Filter / Flanger residuals (2 new params + 12 hardware re-verifications; type-agnostic spec validated)
+
+Founder captured 2 pcapngs + 2 screenshots covering an All-Pass
+Filter and an 80's Rack Flanger
+(`samples/captured/session-33-{filter,flanger}-extended.pcapng`
++ `.png`). Decode landed **2 new Filter params** plus full
+hardware re-verification of every previously-decoded Filter /
+Flanger pidHigh in the captures.
+
+**New params:**
+
+- `filter.feedback` — pidHigh=0x0015. Cache id=21, signature
+  a=-1 b=1 c=100 → `bipolar_percent` ±100. Wire-verified at
+  display 13% (wire 0.13). All-Pass Feedback can invert phase,
+  so the unit is bipolar not plain `percent`.
+- `filter.order` — pidHigh=0x001c. Cache id=28, typecode=0x0010
+  signature a=1 b=12 c=1 → `count` 1..12. Wire-verified at
+  display 4 (4-pole). AM4-Edit's UI dropdown limits the
+  exposed options per filter type (All-Pass shows
+  2/4/6/8/10/12; Low-Pass uses the separate cache id=14 enum
+  2nd/4th register at pidHigh=0x000e), but the wire register
+  accepts any integer in the cache range.
+
+**Hardware re-verifications (12):**
+
+- Filter (4): `level` 12 dB / `freq` 200 Hz / `low_cut` 40 Hz /
+  `high_cut` 9999.9 Hz — all matched display values.
+- Flanger (8): `level` -3 dB / `mix` 33% / `rate` 10 Hz /
+  `tempo` 1/64 Dot / `depth` 66% / `feedback` 33% / `manual`
+  1.11 (= wire 0.111 × 10 — confirms `knob_0_10` Unit holds on
+  80's Rack Flanger, not just HW-022's Analog Stereo) /
+  `mod_phase` 4.3° (= wire 0.075 × 180/π — confirms `degrees`
+  Unit on a different flanger type).
+
+**Type-agnostic capture spec validated.** The HW-034 rewrite
+(after the HW-022 lesson) instructed the founder to load any
+type and "wiggle every visible knob" instead of pre-naming
+expected knobs. Result: All-Pass exposed two knobs (Order,
+Feedback) that HW-032's Low-Pass capture couldn't surface
+because the UI doesn't render them on Low-Pass. Pre-naming
+the knobs in the spec (the original HW-034 listed Q +
+modulation-page knobs that don't appear on All-Pass) would
+have miscued the capture. The new wording got the right
+result on the first try.
+
+**Tooling:**
+
+- `paramNames.ts` filter block: 2 new entries (cache ids
+  21 + 28) with explicit unit overrides (c=100 default would
+  pick `percent` not `bipolar_percent`; c=1 default would pick
+  `db` not `count`).
+- `cacheParams.ts` regenerated: 83 → 85 entries.
+- `params.ts` KNOWN_PARAMS: 121 → 123.
+- `verify-msg.ts`: 2 new goldens built from the captured wire
+  bytes (`f0...0015...704bf7` and `f0...001c...006ef7`).
+  98 → 100 cases.
+
+**Preflight green:** tsc clean, 100/100 verify-msg, 16/16
+verify-pack, 16/16 verify-enum-lookup, 8/8 verify-echo, 85/85
+verify-cache-params, smoke-server 22/22 tools.
+
+**Residuals queued (low priority):** Filter Q (cache id=12),
+Mode-toggle (cache id=22 OFF/ON), and modulation page-2 knobs
+(cache ids 23/24/25/30/31/32) all need a Low-Pass or
+Band-Pass capture with Mode ON to surface — All-Pass doesn't
+expose them. Not blocking BK-032 — every type-dependent
+filter knob category is covered by the 6 captured registers.
+
+---
+
 ## 2026-04-25 — Session 30 cont 8 — HW-032 partial-decode (8 params + Input Noise Gate as new block)
 
 Founder captured 5 of 5 expected pcapngs (gate / filter / flanger /

@@ -271,6 +271,15 @@ export const PARAM_NAMES: Readonly<Record<string, Readonly<Record<number, ParamN
     // for c=1 is 'db'. Wire-verified at 100 Hz / 1800 Hz.
     18: { name: 'low_cut', unit: 'hz', displayMin: 20, displayMax: 2000 },
     19: { name: 'high_cut', unit: 'hz', displayMin: 200, displayMax: 20000 },
+    // HW-034 (Session 33, 2026-04-26): All-Pass filter Config-page
+    // residuals — `session-33-filter-extended.pcapng`. Wire-verified
+    // at +13% / 4 poles on an All-Pass filter. Feedback's cache
+    // signature (a=-1, b=1, c=100) requires the bipolar_percent
+    // override since the generator default for c=100 is plain
+    // percent. Order is a raw integer (cache c=1 a=1 b=12) — needs
+    // 'count' override since c=1 default is 'db'.
+    21: { name: 'feedback', unit: 'bipolar_percent', displayMin: -100, displayMax: 100 },
+    28: { name: 'order', unit: 'count', displayMin: 1, displayMax: 12 },
   },
   tremolo: {
     1: 'mix',

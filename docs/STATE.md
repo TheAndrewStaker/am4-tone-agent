@@ -5,8 +5,19 @@
 > hardware tasks (USB captures, round-trip tests, reference dumps) live
 > in **`docs/HARDWARE-TASKS.md`** — check that file alongside this one at
 > session start.
-> Last updated: **2026-04-26** (Session 31 cont — HW-022 modulation-block
-> decode landed. Founder captured 4 of 4 expected pcapngs (chorus /
+> Last updated: **2026-04-26** (Session 33 — HW-034 Filter / Flanger
+> residuals landed. Founder captured an All-Pass Filter + 80's Rack
+> Flanger with paired AM4-Edit screenshots
+> (`samples/captured/session-33-{filter,flanger}-extended.pcapng` +
+> `.png`). **2 new hardware-verified Filter params** (feedback,
+> order) plus full re-verification of every previously-decoded
+> flanger / filter pidHigh in the capture against display values.
+> Type-agnostic capture spec validated — All-Pass surfaced Order
+> + Feedback that HW-032's Low-Pass didn't expose. KNOWN_PARAMS
+> 121 → 123; verify-msg 98 → 100; verify-cache-params 83 → 85.
+>
+> Previous: Session 31 cont — HW-022 modulation-block decode landed.
+> Founder captured 4 of 4 expected pcapngs (chorus /
 > flanger / phaser / tremolo) with paired AM4-Edit screenshots
 > (`samples/captured/session-30-{block}-basic.pcapng` +
 > `session-30-{block}-screenshot.png`). **15 new hardware-verified
@@ -581,20 +592,22 @@ float32. One open question remains before the IR can cover full presets:
 
 ## The single next action
 
-**Most-likely next session: HW-034 + HW-035 + HW-036 (founder
-hardware) OR BK-029 project rename to MCP MIDI Tools (no
-hardware).**
-HW-032 closed partial 2026-04-25 — 8 params landed plus the
-Input Noise Gate identified as a new block, but 4 follow-up
-threads queued (HW-034 / 035 / 036 / 037). Highest-value gap is
-HW-035 (slot-Gate first-page knobs — currently only type +
-balance registered for a block whose threshold / attack / release
-controls are core gate functionality). Founder's "I did not have
-all those options" note on HW-032 is consistent with type-
-dependent UI rendering — different gate / filter types expose
-different knob subsets, so a Modern Gate capture for HW-035 +
-type-walk for HW-036 will likely surface more than the HW-032
-captures alone. BK-029 stays the natural non-hardware fallback.
+**Most-likely next session: HW-035 (slot-Gate first-page knobs)
+or HW-036 (Input Noise Gate full decode).**
+HW-034 closed Session 33 — 2 new Filter params (feedback,
+order) plus 12 hardware re-verifications across the existing
+Filter / Flanger registers. The type-agnostic capture spec was
+validated end-to-end (All-Pass exposed knobs Low-Pass didn't,
+and the new "wiggle every visible knob" wording surfaced them).
+Highest-value remaining gap is HW-035 — the slot-placeable Gate
+block (`pidLow=0x0092`) currently has only type + balance
+registered, but threshold / attack / release are core gate
+functionality. HW-036 (In-Gate full decode at `pidLow=0x0025`)
+is the second-priority pickup since In-Gate sits on the input
+stage of every preset. Either is one pcapng + one screenshot.
+BK-029 already shipped Session 31; BK-030 already shipped
+Session 30 cont 7 — no non-hardware track remains queued at
+similar priority.
 
 **Earlier (still applicable):**
 BK-030 closed Session 30 cont 7 — connection registry, five

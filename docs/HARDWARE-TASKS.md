@@ -251,43 +251,9 @@ Residuals (queued as HW-034 / HW-035 / HW-036 below):
   for per-type Qt page-template resources inside the .exe. Not
   scoped here — would need its own HW-NNN.
 
-### HW-034 — Filter / Flanger residuals from HW-032 (single-knob isolation) 🔜
+<!-- HW-034 completed 2026-04-26 (Session 33) — see Archive below for the
+     decode summary. -->
 
-- **For:** closes the 9 residual addresses HW-032 surfaced on
-  Filter + Flanger that need single-knob isolation captures to pin
-  a UI label and (in two cases) decide on a Unit extension.
-- **Note on type-dependence:** AM4-Edit's Config page is
-  type-dependent — different Filter types expose different knobs,
-  same for Flanger. **Don't worry about the knob names.** Just
-  load whatever type is on the bench and wiggle every visible
-  knob; Claude maps wire-pidHighs to UI labels post-capture from
-  the screenshots.
-- **Setup:** AM4 plugged in, AM4-Edit open, USBPcap recording.
-  One pcapng per block.
-- **Filter — capture procedure:**
-  1. Load any Filter type, leave it on the screen.
-  2. Start USBPcap.
-  3. Wiggle every visible knob on the Config page in turn,
-     ~1s gap between knobs. Include both Page 1 and the page-2
-     modulation knobs if your type has them — flip pages and
-     wiggle whatever's there.
-  4. Stop USBPcap, save as
-     `samples/captured/session-33-filter-extended.pcapng`.
-  5. **Take a screenshot of AM4-Edit's Filter Config page**
-     showing the type name + every knob's final value, save as
-     `samples/captured/session-33-filter-extended.png`.
-- **Flanger — capture procedure:** identical, with type loaded
-  on the bench (Analog Stereo or whatever's there). Save as
-  `session-33-flanger-extended.pcapng` +
-  `session-33-flanger-extended.png`.
-- **Why screenshots are required:** without the screenshot,
-  the residual pidHighs can't be matched to UI labels — that's
-  exactly what HW-032's enhancer-without-screenshot residual
-  (now queued as HW-037) demonstrates.
-- **Signal completion:** *"HW-034 done"* + saved paths (4 files
-  total).
-- **Priority:** medium — fills the highest-value coverage gap on
-  blocks already partially registered.
 
 ### HW-035 — Slot-Gate first-page knobs 🔜
 
@@ -1395,6 +1361,63 @@ highest numbers.
   shows**. They overlap heavily (per the wiki rule) but differ
   where Fractal adds universal knobs (Tone / Mix / Balance) or
   renames originals.
+
+### HW-034 — Filter / Flanger residuals from HW-032 (single-knob isolation) ✅
+
+- **Captured 2026-04-26 (Session 33).** Founder loaded an All-Pass
+  Filter (Order=4 / Frequency=200 Hz / Feedback=13% / Low Cut=40 Hz
+  / High Cut=9999.9 Hz / Level=12 dB) and an 80's Rack Flanger
+  (Rate=10 Hz / Depth=66% / Feedback=33% / Tempo=1/64 Dot /
+  Manual=1.11 / Mod Phase=4.3° / Mix=33% / Level=-3 dB). pcapng +
+  screenshot for each block.
+- **Files:**
+  - `samples/captured/session-33-filter-extended.pcapng` +
+    `session-33-filter-extended.png`
+  - `samples/captured/session-33-flanger-extended.pcapng` +
+    `session-33-flanger-extended.png`
+- **New params (2):**
+  - `filter.feedback` — pidHigh=0x0015, bipolar_percent ±100
+    (cache id=21, signature a=-1 b=1 c=100). All-Pass feedback
+    can invert phase, so the unit is bipolar not plain percent.
+  - `filter.order` — pidHigh=0x001c, count 1..12 (cache id=28,
+    signature a=1 b=12 c=1). Integer pole count; AM4-Edit's
+    dropdown limits the exposed options per filter type
+    (All-Pass shows 2/4/6/8/10/12; Low-Pass uses the separate
+    cache id=14 enum 2nd/4th register), but the wire register
+    accepts any integer in the cache range.
+- **Hardware re-verifications (8 flanger params + 4 filter
+  params):** every existing flanger / filter pidHigh in the
+  capture — flanger.level, flanger.mix, flanger.rate,
+  flanger.depth, flanger.feedback, flanger.manual,
+  flanger.mod_phase, flanger.tempo, plus filter.level,
+  filter.freq, filter.low_cut, filter.high_cut — landed at
+  display-matched final values. The 80's Rack Flanger Manual
+  knob (cache c=10, knob_0_10) wire-displayed exactly as
+  `display = wire × 10` (1.11 = 0.111 × 10) on a different
+  flanger type than HW-022's Analog Stereo capture — confirms
+  the unit holds across types. Mod Phase 4.3° = 0.075 rad
+  matches the `degrees` Unit's c=180/π scale exactly.
+- **Methodology validation:** the type-agnostic capture spec
+  worked — founder loaded a different filter type than
+  HW-032 (All-Pass vs Low-Pass) and the capture surfaced two
+  knobs (Order, Feedback) that HW-032's Low-Pass didn't expose.
+  Pre-naming knobs in the spec would have miscued the founder
+  to wiggle Q (which All-Pass doesn't show); the new "wiggle
+  every visible knob" wording got the right result.
+- **Wiring:** verify-msg goldens added for filter.feedback
+  (13%) and filter.order (4) using the captured wire bytes.
+  Preflight green: KNOWN_PARAMS 121 → 123, verify-msg 98 →
+  100, verify-cache-params 83 → 85. Smoke-server unchanged
+  (no new tools — generic block-name lookup picks the new
+  params automatically).
+- **Residual — Filter Q + Mode-page knobs:** All-Pass doesn't
+  expose Q (cache id=12) or the modulation page-2 knobs
+  (cache ids 22/23/24). Future capture on Low-Pass /
+  Band-Pass with the Mode toggle ON would close those.
+  Re-queued as HW-038 if priority warrants — for now the
+  All-Pass residuals are limited to Mode Frequency / Rate /
+  Tempo on a type that uses them (cache c=1 freq, c=1 rate,
+  c=1 tempo enum).
 
 ### HW-012 — Round-trip `apply_preset` with the per-slot `channels` shape ✅
 

@@ -419,6 +419,19 @@ const cases: { label: string; built: number[]; expected: string }[] = [
     built: buildSetParam('filter.high_cut', 1800),
     expected: 'f000017415017200130001000000040000001c14205df7',
   },
+  // HW-034 (Session 33) — All-Pass filter Config-page residuals from
+  // `session-33-filter-extended.pcapng`. Feedback 13% (bipolar_percent
+  // wire 0.13); Order 4 (count, raw integer).
+  {
+    label: 'buildSetParam("filter.feedback", 13 %) — session-33 HW-034 filter-allpass',
+    built: buildSetParam('filter.feedback', 13),
+    expected: 'f00001741501720015000100000004005c074053704bf7',
+  },
+  {
+    label: 'buildSetParam("filter.order", 4) — session-33 HW-034 filter-allpass',
+    built: buildSetParam('filter.order', 4),
+    expected: 'f0000174150172001c0001000000040000001004006ef7',
+  },
   {
     label: 'buildSetParam("flanger.level", 10 dB) — session-32 HW-032 flanger',
     built: buildSetParam('flanger.level', 10),

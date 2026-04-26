@@ -963,6 +963,25 @@ export const KNOWN_PARAMS = {
     pidLow: 0x0072, pidHigh: 0x0013,
     unit: 'hz', displayMin: 200, displayMax: 20000,
   },
+  // HW-034 (Session 33, 2026-04-26): All-Pass filter Config-page
+  // residuals — `session-33-filter-extended.pcapng`. Wire-verified
+  // at 13% Feedback / 4-pole Order. Feedback cache signature
+  // (a=-1, b=1, c=100) is bipolar_percent ±100 (All-Pass feedback
+  // can invert phase). Order is an integer pole count 1..12 — cache
+  // typecode=0x0010 with c=1 raw. AM4-Edit's UI dropdown limits the
+  // exposed options per filter type (All-Pass shows 2/4/6/8/10/12;
+  // Low-Pass shows 2/4 only at cache id=14), but the wire register
+  // accepts any integer in the cache range.
+  'filter.feedback': {
+    block: 'filter', name: 'feedback',
+    pidLow: 0x0072, pidHigh: 0x0015,
+    unit: 'bipolar_percent', displayMin: -100, displayMax: 100,
+  },
+  'filter.order': {
+    block: 'filter', name: 'order',
+    pidLow: 0x0072, pidHigh: 0x001c,
+    unit: 'count', displayMin: 1, displayMax: 12,
+  },
   'tremolo.mix': {
     block: 'tremolo', name: 'mix',
     pidLow: 0x006a, pidHigh: 0x0001,

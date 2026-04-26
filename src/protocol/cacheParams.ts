@@ -390,6 +390,16 @@ export const CACHE_PARAMS = {
     pidLow: 0x0072, pidHigh: 0x0013,
     unit: 'hz', displayMin: 200, displayMax: 20000,
   },
+  'filter.feedback': {
+    block: 'filter', name: 'feedback',
+    pidLow: 0x0072, pidHigh: 0x0015,
+    unit: 'bipolar_percent', displayMin: -100, displayMax: 100,
+  },
+  'filter.order': {
+    block: 'filter', name: 'order',
+    pidLow: 0x0072, pidHigh: 0x001c,
+    unit: 'count', displayMin: 1, displayMax: 12,
+  },
   'tremolo.mix': {
     block: 'tremolo', name: 'mix',
     pidLow: 0x006a, pidHigh: 0x0001,
