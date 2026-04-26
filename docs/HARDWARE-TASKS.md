@@ -253,44 +253,39 @@ Residuals (queued as HW-034 / HW-035 / HW-036 below):
 
 ### HW-034 — Filter / Flanger residuals from HW-032 (single-knob isolation) 🔜
 
-- **For:** closes the 9 residual addresses HW-032 surfaced on Filter
-  + Flanger that need single-knob isolation captures to pin a UI
-  label and (in two cases) decide on a Unit extension.
-- **Setup:** AM4 plugged in, AM4-Edit open, USBPcap recording. Same
-  methodology as HW-019/020/021 — wiggle ONE knob at a time, ~1s
-  between knobs, save one pcapng per knob (or one pcapng per block
-  with clean ~1s gaps between knob wiggles).
-- **Filter (Low-Pass) — wiggle each in turn:**
-  1. **Q / Resonance** — knob shown as small "0.500" between
-     Frequency and Low Cut on the Config page. Expected to land
-     at `pidHigh=0x000c` (HW-032 capture had it at 0.9, mismatch
-     with screenshot 0.500 — wiggle needs to be discrete).
-  2. **Order** (2nd / 4th selector) — likely `pidHigh=0x0016`
-     (action=0x0002 in HW-032 capture, which is the action AM4-Edit
-     uses for type/order dropdown clicks). Cache id=22 is the
-     known phaser Order candidate at HW-017 — same register
-     possibly shared with filter.
-  3. Filter **Mode Enable** (page 2 modulation toggle) — likely
-     `pidHigh=0x000e` (single write, value 0.0 in HW-032 = OFF).
-  4. **Mod Frequency** / **Mod Rate** / **Mod Tempo** (page 2) —
-     candidate addresses 0x0017 / 0x0018 / 0x001a / 0x0028.
-- **Flanger (Analog Stereo) — wiggle each in turn:**
-  1. **Manual** — knob shown "Manual: 2.00" on screen. Capture
-     showed `pidHigh=0x000f` at 0.20 — likely ms with c=10 cache
-     scale (display = internal × 10), needs cache cross-reference
-     before naming.
-  2. **Mod Phase** — knob shown "45.0 deg" on screen. Capture had
-     `pidHigh=0x0011` at 0.7854 (= π/4 radians). Needs a new
-     `degrees` Unit (display = internal × 180/π) added to the
-     Unit union before this can be cleanly named.
-- **Suggested filenames:**
-  - `samples/captured/session-33-filter-q.pcapng`
-  - `samples/captured/session-33-filter-order.pcapng`
-  - `samples/captured/session-33-filter-mod-page.pcapng` (multi-knob
-    OK if each has its own ~1s gap)
-  - `samples/captured/session-33-flanger-manual.pcapng`
-  - `samples/captured/session-33-flanger-mod-phase.pcapng`
-- **Signal completion:** *"HW-034 done"* + saved paths.
+- **For:** closes the 9 residual addresses HW-032 surfaced on
+  Filter + Flanger that need single-knob isolation captures to pin
+  a UI label and (in two cases) decide on a Unit extension.
+- **Note on type-dependence:** AM4-Edit's Config page is
+  type-dependent — different Filter types expose different knobs,
+  same for Flanger. **Don't worry about the knob names.** Just
+  load whatever type is on the bench and wiggle every visible
+  knob; Claude maps wire-pidHighs to UI labels post-capture from
+  the screenshots.
+- **Setup:** AM4 plugged in, AM4-Edit open, USBPcap recording.
+  One pcapng per block.
+- **Filter — capture procedure:**
+  1. Load any Filter type, leave it on the screen.
+  2. Start USBPcap.
+  3. Wiggle every visible knob on the Config page in turn,
+     ~1s gap between knobs. Include both Page 1 and the page-2
+     modulation knobs if your type has them — flip pages and
+     wiggle whatever's there.
+  4. Stop USBPcap, save as
+     `samples/captured/session-33-filter-extended.pcapng`.
+  5. **Take a screenshot of AM4-Edit's Filter Config page**
+     showing the type name + every knob's final value, save as
+     `samples/captured/session-33-filter-extended.png`.
+- **Flanger — capture procedure:** identical, with type loaded
+  on the bench (Analog Stereo or whatever's there). Save as
+  `session-33-flanger-extended.pcapng` +
+  `session-33-flanger-extended.png`.
+- **Why screenshots are required:** without the screenshot,
+  the residual pidHighs can't be matched to UI labels — that's
+  exactly what HW-032's enhancer-without-screenshot residual
+  (now queued as HW-037) demonstrates.
+- **Signal completion:** *"HW-034 done"* + saved paths (4 files
+  total).
 - **Priority:** medium — fills the highest-value coverage gap on
   blocks already partially registered.
 
