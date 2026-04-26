@@ -5,8 +5,30 @@
 > hardware tasks (USB captures, round-trip tests, reference dumps) live
 > in **`docs/HARDWARE-TASKS.md`** — check that file alongside this one at
 > session start.
-> Last updated: **2026-04-25** (Session 30 cont 4 — HW-033 closed
-> Claude-side. Extended `scripts/extract-lineage.ts` with
+> Last updated: **2026-04-25** (Session 30 cont 5 — BK-030
+> Session A shipped Claude-side. Connection layer in
+> `src/protocol/midi.ts` + `src/server/index.ts` refactored from
+> single-handle to a port-keyed registry (`connections: Map<string,
+> RegistryEntry>`). `MidiConnection` type replaces `AM4Connection`
+> (alias retained); generic `connect({ needles, notFoundLeadIn?,
+> notFoundHints? })` factored out of the AM4-specific path.
+> `connectAM4()` is now a thin wrapper supplying AM4-specific
+> install hints + `AM4 not found in the MIDI device list.` lead-in
+> verbatim. Default registry label `"am4"` keeps every existing
+> AM4 callsite (every `ensureMidi()` / `recordAckOutcome()` /
+> tool handler) byte-for-byte equivalent. `consecutiveTimeouts`
+> moved per-port — once Session B's send_* primitives land,
+> apply_preset all-time-outs on AM4 won't drag down a separate
+> Hydrasynth handle. Two tools generalized: `list_midi_ports`
+> accepts optional `pattern` (string | string[]) for tagging
+> non-AM4 devices; `reconnect_midi` accepts optional `port`
+> (substring) defaulting to AM4. Tool count unchanged (17).
+> Preflight green: tsc clean, 75/75 verify-msg, 79/79
+> verify-cache-params, smoke-server 17 tools + new pattern-arg
+> assertion. BK-030 Session B (send_cc / send_note /
+> send_program_change / send_nrpn / send_sysex) and Session C
+> (docs) still pending. Pre-existing context — Session 30 cont 4
+> — HW-033 closed Claude-side. Extended `scripts/extract-lineage.ts` with
 > `extractControlsFromBody()` — 10 regex patterns covering the
 > wiki's "Controls:" / "Original controls:" / "the pedal has X
 > knobs" / "models the original controls:" prose shapes, plus a
@@ -387,12 +409,15 @@ float32. One open question remains before the IR can cover full presets:
 
 ## The single next action
 
-**Most-likely next session: HW-032 (newly-discovered first-page
-knobs) + HW-016 (Claude Desktop smoke #1 + #3) at the device.**
-HW-024 closed cleanly; the ~25 unmapped first-page knobs it
-surfaced (Gate / Filter / Flanger / Enhancer / Volpan) are the
-single biggest coverage gain available right now and pair well
-with the founder being at the device for HW-016.
+**Most-likely next session: BK-030 Session B (send_* primitive
+tools, no hardware) OR HW-032 + HW-016 at the device.**
+BK-030 Session A landed Session 30 cont 5 — the connection
+registry is in place and the AM4 path is unchanged. Session B
+adds five generic-MIDI tools (`send_cc` / `send_note` /
+`send_program_change` / `send_nrpn` / `send_sysex`) on top of
+the registry; tool count grows 17 → 22. No hardware needed for
+Session B (validation-layer assertions only). Alternatively,
+the founder can run HW-032 + HW-016 at the device — see below.
 
 **HW-033 ✅ closed Session 30 cont 4 (Claude-side, no hardware).**
 `scripts/extract-lineage.ts` now extracts wiki "Controls:" prose

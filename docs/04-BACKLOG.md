@@ -2291,7 +2291,9 @@ Skip until explicit user demand materializes.
     `save_to_location`, etc.) — tool names are device-neutral
     already.
 
-### BK-030 General-MIDI primitive tools (earns the "MCP MIDI Tools" name)
+### BK-030 General-MIDI primitive tools (earns the "MCP MIDI Tools" name) — 🟡 Session A shipped (Session 30 cont 5)
+
+**Status:** Session A (connection registry + generalized list_midi_ports / reconnect_midi) shipped Session 30 cont 5. Sessions B (send primitives) and C (docs) still pending.
 
 - **Context.** The current 16 tools are almost all AM4-specific
   wrappers. `list_midi_ports` enumeration is already generic (it
@@ -2361,14 +2363,19 @@ Skip until explicit user demand materializes.
     so they're obviously portable. When BK-012 splits into
     packages, these become `packages/midi-core/`.
 - **Session breakdown:**
-  1. **Session A — Registry + generalized list/reconnect.**
-     Refactor the connection layer to a port-keyed registry.
-     Generalize `list_midi_ports` (drop the hard-coded tag,
-     keep a visible "Port includes 'am4' — tagged as AM4" in
-     the returned metadata so existing AM4 tool flows stay
-     intelligible). Generalize `reconnect_midi` to accept a
-     port argument, default to AM4. Smoke-server picks up
-     the new arg shape.
+  1. **Session A — Registry + generalized list/reconnect. ✅
+     Shipped Session 30 cont 5.**
+     Connection layer is now keyed by `label`
+     (`connections: Map<string, RegistryEntry>` in
+     `src/server/index.ts`); the default label `"am4"` keeps every
+     existing AM4 callsite identical. `MidiConnection` type and
+     `connect({ needles, notFoundLeadIn?, notFoundHints? })` live
+     in `src/protocol/midi.ts`; `connectAM4()` is a thin wrapper.
+     `list_midi_ports` accepts optional `pattern`; `reconnect_midi`
+     accepts optional `port`. `looksLikeAM4` stays as a back-compat
+     field on `MidiPortInfo` alongside the new generic `matched`.
+     Tool count unchanged (17). Preflight green; smoke covers the
+     new pattern arg.
   2. **Session B — Send primitives (cc, note, program_change,
      nrpn, sysex).** Five new MCP tools. Zod-validate every
      input. Smoke-server coverage for each (happy path +

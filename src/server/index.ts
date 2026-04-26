@@ -61,9 +61,10 @@ import {
 } from '../protocol/blockTypes.js';
 import { formatLocationCode, parseLocationCode } from '../protocol/locations.js';
 import {
+  connect,
   connectAM4,
   listMidiPorts,
-  type AM4Connection,
+  type MidiConnection,
   toHex,
 } from '../protocol/midi.js';
 
@@ -85,9 +86,25 @@ const WRITE_ECHO_TIMEOUT_MS = 300;
 const SCRATCH_LOCATION = 'Z04';
 
 // -- MIDI lazy-init + self-healing reconnect -------------------------------
+//
+// The connection layer is keyed by `label` so the server can hold open
+// handles to multiple MIDI ports concurrently (BK-030 prerequisite for
+// generic-MIDI primitives). Today only the AM4 label is used — every
+// AM4-tool call hits `ensureConnection()` with the default label and
+// behaves exactly like the previous single-handle implementation. When
+// the send_cc / send_note / send_program_change / send_nrpn / send_sysex
+// tools land in BK-030 Session B, they'll pass their own `label` so each
+// device gets an independent stale-handle counter and reconnect path.
 
-let midi: AM4Connection | undefined;
-let midiError: Error | undefined;
+const AM4_LABEL = 'am4';
+
+interface RegistryEntry {
+  conn: MidiConnection;
+  consecutiveTimeouts: number;
+}
+
+const connections = new Map<string, RegistryEntry>();
+const connectionErrors = new Map<string, Error>();
 
 /**
  * How many ack-less writes we tolerate before assuming the MIDI handle is
@@ -97,20 +114,21 @@ let midiError: Error | undefined;
  * any tool calls looks like the handle is actually dead.
  */
 const STALE_HANDLE_TIMEOUT_THRESHOLD = 2;
-let consecutiveTimeouts = 0;
 
 /**
  * Call after a write/ack pair completes. Resets the stale-handle counter on
- * success; increments it on timeout. The counter is process-global, not
- * per-tool, so patterns like "apply_preset 3 writes all time out" count as
- * 3 consecutive and trip the reconnect threshold.
+ * success; increments it on timeout. Counter is per-port — patterns like
+ * "apply_preset 3 AM4 writes all time out" count as 3 consecutive against
+ * the AM4 entry only, and don't drag down a separate Hydrasynth handle.
  */
-function recordAckOutcome(acked: boolean): void {
-  if (acked) consecutiveTimeouts = 0;
-  else consecutiveTimeouts++;
+function recordAckOutcome(acked: boolean, label: string = AM4_LABEL): void {
+  const entry = connections.get(label);
+  if (!entry) return;
+  if (acked) entry.consecutiveTimeouts = 0;
+  else entry.consecutiveTimeouts++;
 }
 
-function closeMidiSafely(conn: AM4Connection | undefined): void {
+function closeMidiSafely(conn: MidiConnection | undefined): void {
   if (!conn) return;
   try {
     conn.close();
@@ -119,25 +137,53 @@ function closeMidiSafely(conn: AM4Connection | undefined): void {
   }
 }
 
-function ensureMidi(forceReconnect = false): AM4Connection {
-  if (forceReconnect || consecutiveTimeouts >= STALE_HANDLE_TIMEOUT_THRESHOLD) {
-    closeMidiSafely(midi);
-    midi = undefined;
-    midiError = undefined;
-    consecutiveTimeouts = 0;
+/**
+ * Open or return a cached connection for `label`. The default label is
+ * the AM4; future device packages will pass their own label.
+ *
+ * For non-AM4 labels, `label` itself is used as the port-name needle —
+ * callers wanting a different needle can plumb a separate connect call.
+ */
+function ensureConnection(
+  label: string = AM4_LABEL,
+  forceReconnect = false,
+): MidiConnection {
+  const cached = connections.get(label);
+  const stale = (cached?.consecutiveTimeouts ?? 0) >= STALE_HANDLE_TIMEOUT_THRESHOLD;
+  if (forceReconnect || stale) {
+    if (cached) closeMidiSafely(cached.conn);
+    connections.delete(label);
+    connectionErrors.delete(label);
   }
-  if (midi) return midi;
-  if (midiError) throw midiError;
+  const existing = connections.get(label);
+  if (existing) return existing.conn;
+  const cachedErr = connectionErrors.get(label);
+  if (cachedErr) throw cachedErr;
   try {
-    midi = connectAM4();
-    return midi;
+    const conn = label === AM4_LABEL
+      ? connectAM4()
+      : connect({ needles: [label] });
+    connections.set(label, { conn, consecutiveTimeouts: 0 });
+    return conn;
   } catch (err) {
-    midiError = err instanceof Error ? err : new Error(String(err));
-    throw midiError;
+    const e = err instanceof Error ? err : new Error(String(err));
+    connectionErrors.set(label, e);
+    throw e;
   }
 }
 
-process.on('exit', () => closeMidiSafely(midi));
+/**
+ * Back-compat shim — every AM4-only call site continues to call this.
+ * Forwards to `ensureConnection()` with the default AM4 label.
+ */
+function ensureMidi(forceReconnect = false): MidiConnection {
+  return ensureConnection(AM4_LABEL, forceReconnect);
+}
+
+process.on('exit', () => {
+  for (const entry of connections.values()) closeMidiSafely(entry.conn);
+  connections.clear();
+});
 
 // -- Channel awareness (P1-012) ---------------------------------------------
 //
@@ -227,7 +273,7 @@ function channelStatusLine(block: string, justSwitched: boolean): string {
  * was issued.
  */
 async function switchBlockChannel(
-  conn: AM4Connection,
+  conn: MidiConnection,
   block: string,
   channel: string | number,
 ): Promise<{ switched: boolean }> {
@@ -1346,7 +1392,7 @@ server.registerTool('apply_preset', {
  * counter stays accurate.
  */
 async function sendAndAwaitAck(
-  conn: AM4Connection,
+  conn: MidiConnection,
   bytes: number[],
   predicate: (write: number[], response: number[]) => boolean,
 ): Promise<
@@ -1747,28 +1793,49 @@ server.registerTool('switch_scene', {
 server.registerTool('list_midi_ports', {
   description: [
     'List every MIDI port the server can see on this machine, for both',
-    'inputs and outputs, tagged with which ones look like the AM4 (name',
-    'contains "am4" or "fractal"). Safe to call at any time — does not',
-    'open the AM4 connection or interfere with an in-progress session.',
-    'Use when a user reports "AM4 not connected" to diagnose whether the',
-    'device is visible at all, whether the driver is installed, or whether',
-    'another app is holding the port. If the AM4 shows up here but writes',
-    'still fail, call reconnect_midi to force a fresh handle.',
+    'inputs and outputs. Safe to call at any time — does not open any MIDI',
+    'connection or interfere with an in-progress session.',
+    'Default behaviour tags ports whose names contain "am4" or "fractal"',
+    'as the AM4. Pass `pattern` to tag a different device — e.g. "hydra"',
+    'for the Hydrasynth, "axe-fx" for the Axe-Fx II — when diagnosing',
+    'whether a non-AM4 device is plugged in.',
+    'Use when a user reports a device isn\'t connected to diagnose whether',
+    'it\'s visible at all, whether the driver is installed, or whether',
+    'another app is holding the port. If the device shows up here but',
+    'writes still fail, call reconnect_midi (with the matching `port`',
+    'argument for non-AM4 devices) to force a fresh handle.',
   ].join(' '),
-  inputSchema: {},
-}, async () => {
-  const { inputs, outputs } = listMidiPorts();
-  const format = (port: { index: number; name: string; looksLikeAM4: boolean }): string =>
-    `  [${port.index}] ${port.name}${port.looksLikeAM4 ? '  ← looks like the AM4' : ''}`;
-  const am4Input = inputs.find((p) => p.looksLikeAM4);
-  const am4Output = outputs.find((p) => p.looksLikeAM4);
-  const verdict = am4Input && am4Output
-    ? 'AM4 input + output both visible. The server will connect to these on the next tool call.'
-    : am4Input || am4Output
-      ? 'Only one of AM4 input/output is visible. The AM4 needs both directions — check the USB cable and driver.'
-      : inputs.length === 0 && outputs.length === 0
-        ? 'No MIDI ports of any kind are visible. This usually means no MIDI driver is installed.'
-        : 'AM4 not visible. Check USB cable, power, and that the AM4 driver is installed (https://www.fractalaudio.com/am4-downloads/). Also close AM4-Edit if it\'s running — it grabs the port exclusively.';
+  inputSchema: {
+    pattern: z.union([z.string(), z.array(z.string())]).optional().describe(
+      'Optional name-substring pattern for tagging matched ports. Defaults to AM4 needles ("am4"/"fractal"). Pass a string or array of strings (case-insensitive).',
+    ),
+  },
+}, async ({ pattern }) => {
+  const needles = pattern === undefined
+    ? undefined
+    : Array.isArray(pattern) ? pattern : [pattern];
+  const { inputs, outputs } = listMidiPorts(needles);
+  const isCustomPattern = needles !== undefined;
+  const tagLabel = isCustomPattern ? `matches "${needles!.join('" / "')}"` : 'looks like the AM4';
+  const format = (port: { index: number; name: string; matched: boolean }): string =>
+    `  [${port.index}] ${port.name}${port.matched ? `  ← ${tagLabel}` : ''}`;
+  const matchedInput = inputs.find((p) => p.matched);
+  const matchedOutput = outputs.find((p) => p.matched);
+  const verdict = isCustomPattern
+    ? matchedInput && matchedOutput
+      ? `Device matching "${needles!.join('" / "')}" visible on both input and output.`
+      : matchedInput || matchedOutput
+        ? `Device matching "${needles!.join('" / "')}" partially visible (one direction missing). Check USB cable and driver.`
+        : inputs.length === 0 && outputs.length === 0
+          ? 'No MIDI ports of any kind are visible. This usually means no MIDI driver is installed.'
+          : `No MIDI ports match "${needles!.join('" / "')}". Check USB cable, power, and driver. Close any other app that may be holding the port exclusively.`
+    : matchedInput && matchedOutput
+      ? 'AM4 input + output both visible. The server will connect to these on the next tool call.'
+      : matchedInput || matchedOutput
+        ? 'Only one of AM4 input/output is visible. The AM4 needs both directions — check the USB cable and driver.'
+        : inputs.length === 0 && outputs.length === 0
+          ? 'No MIDI ports of any kind are visible. This usually means no MIDI driver is installed.'
+          : 'AM4 not visible. Check USB cable, power, and that the AM4 driver is installed (https://www.fractalaudio.com/am4-downloads/). Also close AM4-Edit if it\'s running — it grabs the port exclusively.';
   return {
     content: [{
       type: 'text',
@@ -1784,32 +1851,48 @@ server.registerTool('list_midi_ports', {
 
 server.registerTool('reconnect_midi', {
   description: [
-    'Use this tool to reset the server\'s MIDI connection to the user\'s AM4',
-    'when writes stop acking. Do not produce a written spec instead of',
-    'calling this tool unless the user explicitly asks for a dry run.',
+    'Use this tool to reset the server\'s MIDI connection when writes stop',
+    'acking. Do not produce a written spec instead of calling this tool',
+    'unless the user explicitly asks for a dry run.',
     'Force the server to close its cached MIDI connection and open a fresh',
-    'one. Use this if writes stop getting ack\'d — typically after AM4-Edit',
-    'was briefly opened and grabbed the USB port exclusively, or after a',
-    'USB replug, or any other event that leaves the cached handle in a',
-    'dead state. The server also auto-reconnects after',
+    'one. Use this if writes stop getting ack\'d — typically after another',
+    'app briefly opened and grabbed the USB port exclusively (e.g.',
+    'AM4-Edit), or after a USB replug, or any other event that leaves the',
+    'cached handle in a dead state. The server also auto-reconnects after',
     `${STALE_HANDLE_TIMEOUT_THRESHOLD} consecutive ack-less writes, so`,
     'manual use is only needed when you want to force it sooner without',
     'waiting for writes to accumulate.',
+    'Defaults to reconnecting the AM4. Pass `port` to target a different',
+    'device (e.g. "hydra" for the Hydrasynth) — the server treats the',
+    'string as a case-insensitive name-substring needle.',
   ].join(' '),
-  inputSchema: {},
-}, async () => {
+  inputSchema: {
+    port: z.string().optional().describe(
+      'Optional port-name needle to reconnect. Defaults to AM4 ("am4"/"fractal" needles). Pass a substring of the port name for non-AM4 devices.',
+    ),
+  },
+}, async ({ port }) => {
+  const label = port ?? AM4_LABEL;
+  const isAM4 = label === AM4_LABEL;
   try {
-    ensureMidi(true);
-    // Fresh connection = we don't know anything about the hardware state.
-    invalidateChannelCache();
+    ensureConnection(label, true);
+    if (isAM4) {
+      // Fresh AM4 connection = we don't know anything about the hardware
+      // state, so the channel cache is no longer trustworthy. Channels
+      // are AM4-specific; non-AM4 reconnects don't touch this cache.
+      invalidateChannelCache();
+    }
     return {
       content: [{
         type: 'text',
-        text:
-          'MIDI connection reset. Next tool call will use a fresh port handle. ' +
-          'Channel cache cleared. If writes still don\'t ack after this, the issue ' +
-          'is below the server (AM4 powered off, USB unplugged, driver wedged, or ' +
-          'another app holding the port exclusively).',
+        text: isAM4
+          ? 'MIDI connection reset (AM4). Next tool call will use a fresh port handle. ' +
+            'Channel cache cleared. If writes still don\'t ack after this, the issue ' +
+            'is below the server (AM4 powered off, USB unplugged, driver wedged, or ' +
+            'another app holding the port exclusively).'
+          : `MIDI connection reset for port matching "${port}". Next call to that ` +
+            'device will use a fresh handle. If writes still don\'t ack, check the ' +
+            'device is powered, the cable is seated, and no other app holds the port.',
       }],
     };
   } catch (err) {
@@ -1817,12 +1900,17 @@ server.registerTool('reconnect_midi', {
     return {
       content: [{
         type: 'text',
-        text:
-          `Reconnect failed: ${msg}\n\n` +
-          'Most common causes:\n' +
-          '  - AM4 is off or not connected by USB\n' +
-          '  - Driver not installed (fractalaudio.com/am4-downloads/)\n' +
-          '  - Another app holds the MIDI port exclusively (close AM4-Edit)',
+        text: isAM4
+          ? `Reconnect failed: ${msg}\n\n` +
+            'Most common causes:\n' +
+            '  - AM4 is off or not connected by USB\n' +
+            '  - Driver not installed (fractalaudio.com/am4-downloads/)\n' +
+            '  - Another app holds the MIDI port exclusively (close AM4-Edit)'
+          : `Reconnect failed for port matching "${port}": ${msg}\n\n` +
+            'Most common causes:\n' +
+            '  - device is off or not connected by USB\n' +
+            '  - device driver not installed\n' +
+            '  - another app holds the MIDI port exclusively',
       }],
     };
   }

@@ -6,6 +6,80 @@ file is the chronological trail that reference is built from.
 
 ---
 
+## 2026-04-25 — Session 30 cont 5 — BK-030 Session A shipped (connection registry refactor)
+
+No hardware. Claude-side refactor only — preserves AM4 behaviour bit-for-bit
+while opening the door for BK-030 Session B (send_cc / send_note /
+send_program_change / send_nrpn / send_sysex) and the eventual BK-029
+rename to "MCP MIDI Tools".
+
+**Connection layer generalized.** `src/protocol/midi.ts`:
+
+- Renamed exported type `AM4Connection` → `MidiConnection` (the type
+  itself was never AM4-specific). Kept `AM4Connection` as a back-compat
+  alias.
+- Added a generic `connect(opts: { needles, notFoundLeadIn?,
+  notFoundHints? })` function. The AM4-specific install hints (Fractal
+  driver URL, AM4-Edit exclusivity warning) and the familiar
+  `AM4 not found in the MIDI device list.` lead-in moved to
+  `connectAM4()` overrides on top of `connect()`.
+- `listMidiPorts()` accepts an optional needles array (defaults to
+  `['am4', 'fractal']`). Returned port info gains a generic
+  `matched: boolean`; `looksLikeAM4` stays populated for back-compat
+  with the AM4-specific server callers (startup banner, AM4 verdict
+  text).
+
+**Server connection state is now port-keyed.** `src/server/index.ts`:
+
+- Replaced single `midi: AM4Connection | undefined` global with
+  `connections: Map<string, RegistryEntry>` keyed by `label`. Today
+  only `"am4"` is used; non-AM4 labels open via `connect({ needles:
+  [label] })`.
+- `consecutiveTimeouts` moved per-port — apply_preset all-time-outs
+  on AM4 don't drag down a separate Hydrasynth handle when those
+  arrive in Session B.
+- New `ensureConnection(label?, forceReconnect?)`. Default label =
+  `AM4_LABEL = 'am4'`, so every existing `ensureMidi()` callsite
+  is byte-for-byte equivalent (the back-compat shim is preserved
+  too).
+- `recordAckOutcome(acked, label?)` extends to accept a label; all
+  existing single-arg callers implicitly target the AM4 entry.
+- Process-exit handler iterates the registry and closes every open
+  handle.
+
+**Two MCP tools generalized:**
+
+- `list_midi_ports` accepts an optional `pattern` (string or string
+  array) for tagging non-AM4 devices ("hydra", "axe-fx", etc.). Without
+  the arg, response text and tagging are unchanged. With the arg, the
+  verdict adapts to the supplied pattern. Smoke assertion added.
+- `reconnect_midi` accepts an optional `port` (substring) to target a
+  non-AM4 device. Without the arg, behaviour is unchanged (closes the
+  AM4 handle, clears channel cache). With the arg, opens / resets a
+  per-port handle without touching the AM4 channel cache.
+
+**Test discipline.** Every existing assertion stays green:
+
+- `tsc --noEmit` clean.
+- 75/75 verify-msg, 16/16 verify-pack, 16/16 verify-transpile, 8/8
+  verify-echo, 79/79 verify-cache-params.
+- smoke-server: all 17 tools register, list_midi_ports happy path +
+  custom-pattern path, list_params catalog with live-confirmation
+  line, all 13 apply_preset / scenes validation assertions, startup
+  banner.
+
+**What's not in this session.** No tool count change (still 17 — the
+five send_* primitives land in Session B). No AM4 behavioural change.
+No HARDWARE-TASKS.md change (this is purely a Claude-side refactor).
+HW-033 / HW-030 / HW-032 / HW-016 / HW-029 / HW-028 / HW-026 / HW-022 /
+HW-023 / HW-017 / HW-014 / HW-024 statuses unchanged.
+
+**Files updated:** `src/protocol/midi.ts`, `src/server/index.ts`,
+`scripts/smoke-server.ts`, `docs/STATE.md`, `docs/04-BACKLOG.md`,
+`docs/SESSIONS.md`. Preflight green.
+
+---
+
 ## 2026-04-25 — Session 30 cont 4 — HW-033 closed Claude-side (31 drive + 1 phaser wiki-derived knob lists)
 
 No hardware. `scripts/extract-lineage.ts` extended with

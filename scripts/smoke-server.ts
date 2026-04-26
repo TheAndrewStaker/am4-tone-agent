@@ -124,6 +124,20 @@ async function main(): Promise<void> {
   }
   console.log(`✓ list_midi_ports call returned port enumeration`);
 
+  // BK-030 Session A — list_midi_ports accepts an optional `pattern` arg
+  // for tagging non-AM4 devices. Smoke just exercises the input-schema
+  // path; the response text adapts to the supplied pattern.
+  const patternResp = await request('tools/call', {
+    name: 'list_midi_ports',
+    arguments: { pattern: 'hydra' },
+  });
+  if (patternResp.error) throw new Error(`list_midi_ports(pattern) error: ${patternResp.error.message}`);
+  const patternText = (patternResp.result as { content: { text: string }[] }).content[0].text;
+  if (!patternText.includes('hydra')) {
+    throw new Error(`list_midi_ports(pattern="hydra") response missing pattern echo:\n${patternText}`);
+  }
+  console.log(`✓ list_midi_ports accepts custom pattern argument`);
+
   // Exercise list_params — doesn't touch MIDI.
   const callResp = await request('tools/call', {
     name: 'list_params',
