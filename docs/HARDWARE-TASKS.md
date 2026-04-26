@@ -69,45 +69,62 @@ Claude picks up from there and moves the item to ⏳ or ✅.
 
 ## Pending — next up
 
-### HW-024 — Complete HW-014 spot-check (Round 4 + re-tests + missed params) 🔜
+<!-- HW-024 completed 2026-04-25 (Session 30 cont 3) — see Archive
+     below for the test report and findings. -->
 
-- **For:** closes the residual coverage gaps from HW-014. HW-014's
-  Round 4 (enhancer/gate/volpan) wasn't reached, `filter.freq`
-  needs a re-test on a non-Envelope filter type, `amp.level`
-  needs a non-default test value, and `flanger.rate` /
-  `phaser.rate` weren't called out in readback.
-- **Why:** finishes the structurally-decoded-param coverage so
-  every shipped knob has a hardware datapoint, not just the 28
-  HW-014 verified.
-- **Setup:** AM4 plugged in, Claude Desktop with the connector
-  attached. No captures needed — *ear + display* verification.
-  Z04 recommended (scratch).
-- **Steps:** Conversational — tell Claude: *"Run HW-024 — finish
-  HW-014's Round 4. Build a preset on Z04 with enhancer + gate +
-  volpan blocks, write distinctive values to every mapped param,
-  and I'll read them back. Then re-test `filter.freq` on a
-  Low-Pass filter type, re-test `amp.level` at +8 dB, confirm
-  `flanger.rate` and `phaser.rate` from the previous run, and
-  test `reverb.springs` + `reverb.spring_tone` on a Spring
-  reverb."* Claude paces the writes for sequential verification.
-- **Param checklist (~13 params):**
-  - Round 4: `enhancer.type`, `enhancer.mix`, `enhancer.balance`,
-    `gate.type`, `gate.balance`, `volpan.mode`, `volpan.balance`.
-  - Re-tests: `filter.freq` (on Low-Pass), `amp.level` (+8 dB),
-    `flanger.rate`, `phaser.rate`.
-  - Spring-reverb-only: `reverb.springs`, `reverb.spring_tone`.
-- **Pass criterion:** each `set_param` produces the expected
-  display value on the AM4. Balance params should pan audibly
-  L/R as the value moves between -100 and +100. Hidden-on-display
-  params (likely `enhancer.balance`, `gate.balance`,
-  `volpan.balance`, `enhancer.mix`) noted as such — not failures.
-- **Signal completion:** *"HW-024 done"* + readback values
-  (verified / hidden / mismatch). Claude promotes the verified
-  params by removing the "pending HW-014" qualifier from
-  `params.ts` comments and updates PROMPT-COVERAGE.md rows.
-- **Priority:** medium — coverage completion. Lower urgency than
-  the bug-fix HW-025 captures because none of these are known
-  to be broken; they just lack a datapoint.
+### HW-032 — Capture newly-discovered first-page knobs (HW-024 finding F4) 🔜
+
+- **For:** HW-024's Phase-2 readback inventoried the AM4 hardware
+  display pages for several blocks and surfaced ~25 first-page
+  knobs that aren't yet in our param registry. These are the next
+  batch of high-value coverage to add.
+- **Newly-discovered first-page knobs by block:**
+  - **Gate** (HIGH priority — core gate functionality currently
+    missing): Threshold, Attenuation, Attack, Release, Hold,
+    Sidechain Source, Level.
+  - **Filter** (Low-Pass) (HIGH priority — only freq + type
+    mapped): Q, Order, Low Cut, High Cut, Level. Plus filter
+    page 2: Mode Enable, Mod Type, Frequency, Mod Frequency,
+    Mod Rate, Mod Tempo (modulation subsystem).
+  - **Flanger** (HIGH priority — only rate + depth + feedback +
+    mix + tempo mapped after HW-027; missing Manual, Mod Phase,
+    Level).
+  - **Enhancer** (MEDIUM): Width, Phase Invert, Pan Left, Pan
+    Right, Level. Stereo utility params.
+  - **Volpan** (Auto-Swell mode) (MEDIUM): Threshold, Attack,
+    Taper, Level. Auto-Swell envelope params.
+- **Why:** these are knobs a typical user reaches for. Adding
+  them lifts MVP "we cover what users want to set" from "every
+  Type knob + the universal mix/balance" to "every block's first
+  page." Dovetails with TYPE-KNOBS.md growth.
+- **Capture strategy:** one pcapng per block, wiggling each new
+  knob in turn. Same methodology as HW-019/020/021. Rough
+  capture count: 5 pcapngs (gate, filter, flanger, enhancer,
+  volpan).
+- **Suggested filenames:**
+  - `samples/captured/session-32-gate-extended.pcapng`
+  - `samples/captured/session-32-filter-extended.pcapng`
+  - `samples/captured/session-32-flanger-extended.pcapng`
+  - `samples/captured/session-32-enhancer-extended.pcapng`
+  - `samples/captured/session-32-volpan-extended.pcapng`
+- **Signal completion:** *"HW-032 done"* + saved paths. Claude
+  decodes via `extract-final-writes`, registers the new pidHighs
+  in `params.ts` + `paramNames.ts`, and adds verify-msg goldens
+  for each.
+- **Audio-effect spot-check (bonus):** while at the device, do a
+  one-knob-at-a-time A/B for each of the **4 hidden-balance
+  blocks** that wire-ack but don't display (amp / chorus /
+  flanger / drive being most likely-to-have-stereo-effect). Set
+  balance to -100 vs +100; listen for L/R pan. Same for
+  `enhancer.mix` (HW-024 finding F1 — phantom on display, but
+  audio-effect status unknown). Reports back let us tag each
+  param accurately.
+- **Priority:** medium — biggest coverage jump for everyday
+  user knobs. Recommend pairing with HW-016 next time at the
+  device.
+
+### HW-024 — Complete HW-014 spot-check (Round 4 + re-tests + missed params) ✅
+*See Archive below for the test report and findings.*
 
 <!-- HW-025 completed 2026-04-25 (Session 30) — see Archive below for the
      decode summary. -->
@@ -879,6 +896,73 @@ highest numbers.
   common reason in practice (the founder almost certainly had
   AM4-Edit open). P5-009 #2 (graceful "AM4 not found" error)
   is doing what it was designed to do.
+
+### HW-024 — Complete HW-014 spot-check (Round 4 + re-tests + missed params) ✅
+
+- **Tested 2026-04-25 (Session 30 cont 3)** via Claude Desktop
+  with the `am4-tone-agent` connector attached. Two phases on
+  Z04 — Phase 1 covered Round 4 + flanger.rate re-check
+  (4 slots: enhancer + gate + volpan + flanger), Phase 2
+  covered targeted re-tests (4 slots: amp.level + filter.freq +
+  reverb springs + phaser.rate). 28 wire writes total, all
+  acked.
+- **Verified params (9)**: `enhancer.type` (Classic),
+  `gate.type` (Modern Gate), `volpan.mode` (Auto-Swell),
+  `flanger.rate` (1.7 Hz, was unconfirmed from HW-014 Round 2),
+  `phaser.rate` (2.3 Hz, ditto), `amp.level` (+8 dB at non-
+  default positive), `filter.freq` (1250 → 1249.9 Hz on
+  Low-Pass type — 0.1 Hz quantization drift, see F3),
+  `reverb.springs` (5, first-ever test), `reverb.spring_tone`
+  (7.30, first-ever test).
+- **Finding F1 — `enhancer.mix` is a phantom on hardware
+  display.** Wire writes ack but the Enhancer block has no
+  Mix knob on any page. Visible knobs are Width / Phase Invert
+  / Pan Left / Pan Right / Balance / Level. Pre-HW-024 we had
+  `enhancer.mix` registered via the universal Mix-Page rule
+  (cache id=1, percent signature). Comment added in `params.ts`
+  flagging "wire-acked, no observed hardware effect"; audio-
+  effect spot-check queued under HW-032.
+- **Finding F2 — `enhancer.balance` IS visible on hardware
+  display** at the expected -33%. Breaks the HW-014 pattern of
+  "balance hidden on every block tested." Implication: balance
+  visibility is block-type-dependent; effect blocks hide it
+  as an output mixer, but stereo-utility blocks like the
+  enhancer expose it. Comment in `params.ts` per-block balance
+  block now lists visible vs hidden per block.
+- **Finding F3 — `filter.freq` shows sub-Hz quantization at
+  high values.** Wrote 1250 Hz; readback was 1249.9 Hz
+  (0.008% relative error). Likely float→fixed-point rounding
+  in the firmware's filter-coefficient solver; drift scales
+  with frequency. Functionally inaudible. Comment in
+  `params.ts` warns against assuming exact equality on
+  round-trip for filter.freq.
+- **Finding F4 — ~25 unmapped first-page knobs surfaced.**
+  Hardware page inventories during readback revealed knobs
+  the Blocks Guide describes generically but we hadn't
+  registered: Gate (Threshold/Attenuation/Attack/Release/Hold/
+  Sidechain Source/Level), Filter Low-Pass (Q/Order/Low Cut/
+  High Cut/Level + page 2 modulation subsystem), Flanger
+  (Manual/Mod Phase/Level), Enhancer (Width/Phase Invert/
+  Pan L/Pan R/Level), Volpan Auto-Swell (Threshold/Attack/
+  Taper/Level). Queued as **HW-032** (next-up capture pass).
+- **Cumulative status across HW-014 + HW-024**: 73 params
+  hardware-confirmed, 15 wire-acked-but-display-hidden (14
+  balance + enhancer.mix), 1 marginal (filter.freq drift).
+  No hardware-display mismatch surfaced this session — every
+  Round-4 enum and every re-test landed exactly on the AM4
+  display.
+- **Methodology validated**: Claude Desktop + MCP connector
+  flow worked end-to-end. Initial first-turn message reported
+  "MCP server isn't connected" before the connector was
+  enabled — relevant signal for HW-016's first-turn smoke
+  (founder reports the connector was disabled at conversation-
+  start; once enabled, Claude proceeded with tool calls
+  cleanly). Doesn't fully close HW-016 since the prompt was
+  not the HW-016 set, but reinforces that the connection-state
+  diagnostic copy works.
+- `params.ts` comments updated to reflect HW-024 verifications,
+  enhancer.mix phantom flag, filter.freq quantization note,
+  and per-block balance visibility table.
 
 ### HW-027 — Extract delay tempo-division enum (79 entries) ✅
 

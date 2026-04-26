@@ -161,23 +161,56 @@ Blackglass 7K:
 
 ## Other blocks
 
-Not yet captured at the per-type level. Universal first-page
-knobs (those registered in `params.ts`) are listed below as the
-implicit "always shown" set; per-type additions to be filled in
-when HW-022 (modulation) and HW-023 (secondary) captures land,
-post-HW-030 step 2.
+Per-type entries pending. Universal first-page knobs (those
+registered in `params.ts`) are listed below as the implicit
+"always shown" set. HW-024's Phase-2 readback pass also
+surfaced **hardware-page inventories** for several blocks
+without registering each knob — those are listed under "HW-024
+hardware-page inventory (knob name only — most not yet
+registered in params.ts)" and queued as HW-032.
 
 - **Amp** — universal: gain, bass, mid, treble, master, depth,
   presence, level, balance, type. Per-type extras pending — most
   amp types likely share the universal stack with model-specific
   UI labels (5153 50W has "Master/Depth/Presence" exposed; 1959SLP
   hides Master because Plexis don't have one — HW-014 finding).
-- **Chorus / Flanger / Phaser / Tremolo** — universal: mix, type,
-  rate, depth (Chorus/Flanger), feedback (Flanger/Phaser),
-  balance. Per-type extras pending HW-022.
-- **Wah / Filter / Gate / GEQ / Enhancer / Volume-Pan** —
-  universal: type, mix (where applicable), balance. Per-type
-  extras pending HW-023.
+
+- **Flanger** — universal: mix, type, rate, depth, feedback,
+  tempo (post-HW-027), balance. **Analog Stereo HW-024 inventory**:
+  Rate, Depth, Feedback, Mix, Tempo, **Manual**, **Mod Phase**,
+  **Level**. Bolded = unmapped, queued as HW-032.
+
+- **Chorus / Phaser / Tremolo** — universal: mix, type, rate,
+  depth (Chorus only), feedback (Phaser only), tempo (post-HW-027),
+  balance. Per-type extras pending HW-022 / HW-032.
+
+- **Filter** — universal: mix, type, freq, balance. **Low-Pass
+  HW-024 inventory** (page 1): Type, Frequency, **Q**, **Level**,
+  **Order**, **Low Cut**, **High Cut**. (page 2): **Mode Enable**,
+  **Mod Type**, **Frequency** (mod), **Mod Frequency**, **Mod Rate**,
+  **Mod Tempo**. Bolded = unmapped, queued as HW-032.
+
+- **Gate** — universal: type, balance. **Modern Gate HW-024
+  inventory**: **Threshold**, **Attenuation**, **Attack**,
+  **Release**, **Hold**, **Sidechain Source**, **Level**.
+  All unmapped — gate's core functionality is currently uncovered.
+  Queued as HW-032 (high priority).
+
+- **Enhancer** — universal: mix, type, balance. **Classic HW-024
+  inventory**: **Width**, **Phase Invert**, **Pan Left**,
+  **Pan Right**, Balance, **Level**. **Note**: `enhancer.mix` is
+  a *phantom* — wire-acks but no Mix knob exposed on any
+  Enhancer page (HW-024 finding F1). `enhancer.balance` IS
+  visible (HW-024 finding F2 — only block tested where balance
+  shows on hardware).
+
+- **Volpan** — universal: mode, balance. **Auto-Swell mode HW-024
+  inventory**: **Threshold**, **Attack**, **Taper**, **Level**.
+  Volume mode (mode index 0) likely has different knobs (e.g.
+  Pan, Level only). Queued as HW-032.
+
+- **Wah / GEQ** — universal: type, balance (+ mix on Wah). Per-
+  type extras pending HW-023.
 
 ---
 

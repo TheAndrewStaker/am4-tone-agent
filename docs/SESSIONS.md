@@ -6,6 +6,78 @@ file is the chronological trail that reference is built from.
 
 ---
 
+## 2026-04-25 — Session 30 cont 3 — HW-024 closed (9 params verified, 4 findings, ~25 unmapped knobs queued)
+
+Conversational hardware test via Claude Desktop. Two phases on
+Z04 — Phase 1 covered Round 4 (enhancer + gate + volpan first-
+time + flanger.rate re-check), Phase 2 covered the targeted
+re-tests (amp.level non-default + filter.freq on Low-Pass +
+reverb.springs/spring_tone on Spring + phaser.rate re-check).
+28 wire writes total, all acked.
+
+**9 params verified**: `enhancer.type`, `gate.type`, `volpan.mode`
+(Round 4 first-time tests); `flanger.rate`, `phaser.rate` (re-
+checks unconfirmed since HW-014 Round 2); `amp.level` at +8 dB
+(first non-default test); `filter.freq` on Low-Pass at 1250 Hz
+(read back as 1249.9 Hz — see F3); `reverb.springs` and
+`reverb.spring_tone` (first-ever hardware tests of the Spring-
+specific params Session 29 registered).
+
+**Finding F1 — `enhancer.mix` is a hardware-display phantom.**
+Wire writes ack but the Enhancer block has no Mix knob on any
+UI page. Visible knobs: Width, Phase Invert, Pan Left, Pan
+Right, Balance, Level. `enhancer.mix` was registered Session 26
+via the universal Mix-Page rule (cache id=1, percent signature)
+— that pattern is now known to over-register. Comment in
+`params.ts` flags as "wire-acked, no observed hardware effect";
+audio-effect spot-check queued under HW-032.
+
+**Finding F2 — `enhancer.balance` IS visible on hardware
+display** at -33%. Breaks the HW-014 "balance hidden on every
+block" pattern. Implication: balance visibility is block-type-
+dependent, not globally hidden. Stereo-utility blocks like the
+enhancer expose balance as a core control; effect blocks treat
+it as a hidden output mixer. The universal-balance comment in
+`params.ts` now lists per-block visibility.
+
+**Finding F3 — `filter.freq` quantization at high values.** Wrote
+1250 Hz; readback 1249.9 Hz (8e-5 relative error). Likely
+float→fixed-point rounding in the filter-coefficient solver.
+Functionally inaudible; documented as a comment in `params.ts`
+warning that exact-equality round-trips don't hold for
+filter.freq.
+
+**Finding F4 — ~25 unmapped first-page knobs surfaced.** The
+HW-024 readback inventoried hardware pages while reading back
+each verification, exposing knobs we hadn't registered: Gate
+(Threshold/Attenuation/Attack/Release/Hold/Sidechain Source/
+Level), Filter Low-Pass (Q/Order/Low Cut/High Cut/Level + page
+2 modulation subsystem), Flanger (Manual/Mod Phase/Level),
+Enhancer (Width/Phase Invert/Pan L/Pan R/Level), Volpan Auto-
+Swell (Threshold/Attack/Taper/Level). Queued as **HW-032** =
+the next-up capture pass; biggest single coverage jump
+available.
+
+**Cumulative status across HW-014 + HW-024**: 73 params
+hardware-confirmed, 15 wire-acked-but-display-hidden (14
+balance + enhancer.mix), 1 marginal (filter.freq drift). No
+hardware-display mismatch surfaced — every Round-4 enum and
+every re-test landed exactly. The "wire-acked = audibly
+applied" question remains open per BK-008 (apply/absorb
+discriminator) but is structurally clean for everything tested.
+
+**TYPE-KNOBS.md grown** with the per-block hardware-page
+inventories from HW-024's readback. Each inventoried block
+now lists its currently-registered knobs vs the unmapped ones
+(bolded), making HW-032's scope concrete before captures begin.
+
+`params.ts` comments updated per finding. Preflight green
+(75/75 verify-msg unchanged this session — HW-024 had no new
+captures to anchor goldens against, just hardware-display
+verification).
+
+---
+
 ## 2026-04-25 — Session 30 cont 2 — HW-027 closed (5 tempo params via shared TEMPO_DIVISIONS_VALUES extraction)
 
 Pure Claude-side coverage win, no captures needed. Extended

@@ -250,6 +250,9 @@ export const KNOWN_PARAMS = {
     unit: 'enum', displayMin: 0, displayMax: 2,
     enumValues: { 0: 'PRE-PI', 1: 'POST-PI', 2: 'PRE-TRIODE' },
   },
+  // HW-024 (Session 30 cont 3, 2026-04-25): hardware-verified at
+  // +8 dB on a 1959SLP Normal — first non-default positive-value
+  // datapoint for amp.level (HW-014 only tested at the default).
   'amp.level': {
     block: 'amp', name: 'level',
     pidLow: 0x003a, pidHigh: 0x0000,
@@ -384,7 +387,9 @@ export const KNOWN_PARAMS = {
   },
   // Session 29 (HW-015): spring-reverb-specific params. Registers are
   // writable on any reverb type; AM4-Edit exposes the UI only when
-  // a Spring reverb is active.
+  // a Spring reverb is active. HW-024 (Session 30 cont 3) wire-verified
+  // both on Spring, Large reverb (springs=5 displayed exactly; spring_tone
+  // 7.30 displayed exactly) — first-ever hardware test of these params.
   'reverb.springs': {
     block: 'reverb', name: 'springs',
     pidLow: 0x0042, pidHigh: 0x001b,
@@ -692,6 +697,8 @@ export const KNOWN_PARAMS = {
     unit: 'enum', displayMin: 0, displayMax: 31,
     enumValues: FLANGER_TYPES_VALUES,
   },
+  // HW-024 (Session 30 cont 3): wire-verified at 1.7 Hz on an
+  // Analog Stereo flanger (HW-014 left this unconfirmed in Round 2).
   'flanger.rate': {
     block: 'flanger', name: 'rate',
     pidLow: 0x0052, pidHigh: 0x000b,
@@ -729,6 +736,8 @@ export const KNOWN_PARAMS = {
     unit: 'enum', displayMin: 0, displayMax: 16,
     enumValues: PHASER_TYPES_VALUES,
   },
+  // HW-024 (Session 30 cont 3): wire-verified at 2.3 Hz on a Digital
+  // Mono phaser (HW-014 left this unconfirmed in Round 2).
   'phaser.rate': {
     block: 'phaser', name: 'rate',
     pidLow: 0x005a, pidHigh: 0x000c,
@@ -836,7 +845,12 @@ export const KNOWN_PARAMS = {
   },
   'filter.freq': {
     // Blocks Guide §Filter: Frequency is the filter cutoff. 20..20000 Hz,
-    // c=1 raw (uses 'hz' unit).
+    // c=1 raw (uses 'hz' unit). HW-024 (Session 30 cont 3): wire-verified
+    // on Low-Pass at 1250 Hz; readback was 1249.9 Hz. The 0.1 Hz drift is
+    // float→fixed-point quantization noise in the firmware (8e-5 relative
+    // error), not a wire-layer encoding bug — drift scales with frequency.
+    // Functionally inaudible; do not assume exact equality on round-trip
+    // when comparing presets that differ only in filter.freq.
     block: 'filter', name: 'freq',
     pidLow: 0x0072, pidHigh: 0x000b,
     unit: 'hz', displayMin: 20, displayMax: 20000,
@@ -862,24 +876,41 @@ export const KNOWN_PARAMS = {
     pidLow: 0x006a, pidHigh: 0x000d,
     unit: 'percent', displayMin: 0, displayMax: 100,
   },
+  // HW-024 (Session 30 cont 3) finding F1 — `enhancer.mix` is a phantom
+  // register on the AM4 hardware display. The Enhancer block exposes
+  // Width / Phase Invert / Pan Left / Pan Right / Balance / Level on
+  // its UI pages — no Mix knob anywhere. Wire writes still ack (the
+  // SET_PARAM goes through and the firmware accepts it), but the
+  // parameter likely has no audible effect. Cache id=1 has the same
+  // signature as every other block's `mix` (percent, c=100), which is
+  // why P1-010 Session B registered it via the universal Mix-Page rule.
+  // Keep registered for now but treat as "wire-acked, no observed
+  // hardware effect" — pending an audio-effect spot-check (queued
+  // under HW-032 follow-ups).
   'enhancer.mix': {
     block: 'enhancer', name: 'mix',
     pidLow: 0x007a, pidHigh: 0x0001,
     unit: 'percent', displayMin: 0, displayMax: 100,
   },
+  // HW-024 (Session 30 cont 3): wire-verified — type "Classic" displayed
+  // exactly. AM4-Edit labels this "Mode" on the dropdown but we keep
+  // `type` for consistency across blocks.
   'enhancer.type': {
-    // AM4-Edit labels this "Mode", but keep `type` for consistency across blocks.
     block: 'enhancer', name: 'type',
     pidLow: 0x007a, pidHigh: 0x000e,
     unit: 'enum', displayMin: 0, displayMax: 2,
     enumValues: ENHANCER_TYPES_VALUES,
   },
+  // HW-024 (Session 30 cont 3): wire-verified — Modern Gate displayed
+  // exactly. Round 4 first-time test for this block type.
   'gate.type': {
     block: 'gate', name: 'type',
     pidLow: 0x0092, pidHigh: 0x0013,
     unit: 'enum', displayMin: 0, displayMax: 3,
     enumValues: GATE_TYPES_VALUES,
   },
+  // HW-024 (Session 30 cont 3): wire-verified — Auto-Swell displayed
+  // exactly. Round 4 first-time test for this block type.
   'volpan.mode': {
     // Block is "Volume/Pan"; this is the Volume-vs-Auto-Swell selector.
     block: 'volpan', name: 'mode',
@@ -896,12 +927,21 @@ export const KNOWN_PARAMS = {
   // lines 899 (Amp), 1233 (Chorus), 1430 (Flanger), 1733 (Delay),
   // 1883 (Phaser). Cache signature is identical across all 15
   // confirmed blocks: id=2, a=-1, b=1, c=100 (display = internal ×
-  // 100, so -100..+100%). HW-014 verified on `geq.balance` = -67
-  // (the only Balance param AM4's hardware display exposes); other
-  // block Balances wrote and wire-acked but are hidden from the
-  // hardware screen. AM4-Edit verification owed for the 14 hidden
-  // ones; structural evidence across all 15 blocks is extremely
-  // strong.
+  // 100, so -100..+100%).
+  //
+  // Hardware-display visibility per block (HW-014 + HW-024 finding F2):
+  //   visible: enhancer.balance (HW-024 at -33%), geq.balance (HW-014
+  //     at -67), volpan.balance is type-specific to the Pan range —
+  //     classified as an effect-block balance below.
+  //   hidden (wire-acked, no display readout): amp / compressor /
+  //     reverb / delay / chorus / flanger / phaser / wah / tremolo /
+  //     filter / drive / gate / volpan.
+  // Visibility is block-type-dependent — the enhancer is a stereo
+  // utility block where balance/pan controls are core, while effect
+  // blocks treat balance as a hidden output mixer. Hidden writes still
+  // affect the stereo image at the audio path (per Blocks Guide line
+  // 347 — universal at the firmware level); audio-effect spot-check
+  // queued under HW-032.
   'amp.balance':       { block: 'amp',        name: 'balance', pidLow: 0x003a, pidHigh: 0x0002, unit: 'bipolar_percent', displayMin: -100, displayMax: 100 },
   'compressor.balance':{ block: 'compressor', name: 'balance', pidLow: 0x002e, pidHigh: 0x0002, unit: 'bipolar_percent', displayMin: -100, displayMax: 100 },
   'geq.balance':       { block: 'geq',        name: 'balance', pidLow: 0x0032, pidHigh: 0x0002, unit: 'bipolar_percent', displayMin: -100, displayMax: 100 },

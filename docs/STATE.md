@@ -5,8 +5,22 @@
 > hardware tasks (USB captures, round-trip tests, reference dumps) live
 > in **`docs/HARDWARE-TASKS.md`** — check that file alongside this one at
 > session start.
-> Last updated: **2026-04-25** (Session 30 cont 2 — HW-027 closed
-> Claude-side. Extended `gen-cache-enums.ts` to emit shared
+> Last updated: **2026-04-25** (Session 30 cont 3 — HW-024 closed.
+> Conversational hardware test via Claude Desktop covered Round 4
+> (enhancer/gate/volpan first-time tests) + 4 re-tests + 2 first-
+> ever tests (reverb.springs / reverb.spring_tone on Spring,
+> Large reverb). 9 params verified, 4 findings: F1 — `enhancer.mix`
+> is a hardware-display phantom (wire-acks but no Mix knob exposed
+> on Enhancer's pages); F2 — `enhancer.balance` IS visible (breaks
+> the "balance hidden everywhere" HW-014 pattern, validates that
+> visibility is block-type-dependent); F3 — `filter.freq` has 0.1 Hz
+> quantization drift at 1250 Hz (functionally inaudible); F4 —
+> ~25 unmapped first-page knobs surfaced via hardware-page
+> inventories during readback (queued as HW-032). Cumulative
+> status across HW-014 + HW-024: 73 params hardware-confirmed,
+> 15 wire-acked-but-hidden, 1 marginal. `params.ts` comments
+> updated per finding. Pre-existing context — Session 30 cont 2 —
+> HW-027 closed Claude-side. Extended `gen-cache-enums.ts` to emit shared
 > `TEMPO_DIVISIONS_VALUES` (79-entry enum, source-of-truth at
 > delay/id=19). **5 new tempo params**: `delay.tempo` (wire-
 > verified from session-30 capture), `chorus.tempo` /
@@ -345,6 +359,15 @@ float32. One open question remains before the IR can cover full presets:
 
 ## The single next action
 
+**Most-likely next session: HW-032 (newly-discovered first-page
+knobs) + HW-016 (Claude Desktop smoke #1 + #3) at the device.**
+HW-024 closed cleanly; the ~25 unmapped first-page knobs it
+surfaced (Gate / Filter / Flanger / Enhancer / Volpan) are the
+single biggest coverage gain available right now and pair well
+with the founder being at the device for HW-016. HW-031
+(Ghidra type-visibility decode) and BK-030 (generic-MIDI
+primitives) are the next non-hardware-gated tracks.
+
 **HW-030 step 1 done — partial fail. Pivot to HW-016 + lazy
 HW-030 step 2.** Session 30 cont (continued) ruled out the
 simplest cache-decode hypotheses for per-type knob visibility:
@@ -375,11 +398,14 @@ that, HW-022/023 can run any time and grow TYPE-KNOBS.md.
 
 **Then or in parallel — remaining queue:**
 
-- **HW-024** — finish HW-014 spot-check coverage (Round 4 =
-  enhancer/gate/volpan, re-test `filter.freq` on Low-Pass,
-  re-test `amp.level` non-default, confirm
-  `flanger.rate`/`phaser.rate`, test `reverb.springs`/
-  `spring_tone` on Spring reverb).
+- **HW-032** — capture the ~25 first-page knobs that HW-024's
+  hardware-page inventories surfaced as currently-unmapped
+  (Gate core: Threshold/Attenuation/Attack/Release/Hold/
+  Sidechain Source/Level; Filter: Q/Order/Low Cut/High Cut/
+  Level + page-2 modulation; Flanger: Manual/Mod Phase/Level;
+  Enhancer: Width/Phase Invert/Pan L/Pan R/Level; Volpan
+  Auto-Swell: Threshold/Attack/Taper/Level). 5 captures, ~30
+  min total. Pair with HW-016 next time at the device.
 - **BK-032 first-page captures (remaining)** — HW-022
   (modulation bundle) > HW-023 (secondary). Both should wait
   on HW-030 so they can be specced from a real
