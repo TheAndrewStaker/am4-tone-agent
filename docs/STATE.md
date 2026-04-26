@@ -364,9 +364,17 @@ knobs) + HW-016 (Claude Desktop smoke #1 + #3) at the device.**
 HW-024 closed cleanly; the ~25 unmapped first-page knobs it
 surfaced (Gate / Filter / Flanger / Enhancer / Volpan) are the
 single biggest coverage gain available right now and pair well
-with the founder being at the device for HW-016. HW-031
-(Ghidra type-visibility decode) and BK-030 (generic-MIDI
-primitives) are the next non-hardware-gated tracks.
+with the founder being at the device for HW-016.
+
+**HW-033 (Claude-side, no hardware) is the next-best coverage
+move** — extend `scripts/extract-lineage.ts` to capture
+"Controls:" prose from the wiki into a `controls` field per
+lineage record, then derive AM4-Edit Basic-page knobs from the
+Fractal wiki rule "Basic page knobs = modeled device's knobs"
+(documented in TYPE-KNOBS.md). Could grow per-type coverage from
+~5 captured rows to ~50–100 wiki-derived rows. HW-031 (Ghidra
+type-visibility decode) and BK-030 (generic-MIDI primitives) are
+the other non-hardware-gated tracks.
 
 **HW-030 step 1 done — partial fail. Pivot to HW-016 + lazy
 HW-030 step 2.** Session 30 cont (continued) ruled out the

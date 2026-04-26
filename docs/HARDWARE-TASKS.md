@@ -276,6 +276,46 @@ Claude picks up from there and moves the item to ⏳ or ✅.
 <!-- HW-027 completed 2026-04-25 (Session 30 cont 2) — see Archive
      below for the decode summary. -->
 
+### HW-033 — Extend lineage extractor to capture per-type "Controls:" prose 🔜
+
+- **For:** TYPE-KNOBS.md per-type knob coverage. The Fractal wiki
+  states a strong rule (Drive_block.md line 232: "The controls on
+  the Basic page of the Drive correspond with the knobs on the
+  modeled devices") and ~19 drive types + similar coverage on
+  reverb / delay / compressor / phaser / etc. carry explicit
+  "Controls:" prose listing the modeled device's physical knobs.
+  Today our lineage JSONs (`src/knowledge/{block}-lineage.json`)
+  capture `basedOn.productName` / `manufacturer` / `model` /
+  `description` / `categories` but NOT the controls.
+- **Why:** for any AM4 type whose modeled device has documented
+  controls, we can derive the AM4-Edit Basic-page knob list
+  without a hardware capture (per the wiki rule). That's the
+  fastest path to growing TYPE-KNOBS.md per-type coverage from
+  the ~5 hardware-captured rows we have today to potentially
+  ~50–100 rows across all blocks.
+- **Strategy:**
+  - Extend `scripts/extract-lineage.ts` to grep the per-block
+    wiki .md files for "Controls:" / "Original controls:" /
+    "knobs:" patterns and a few synonyms ("the pedal has X
+    knobs", "knobs are", etc.).
+  - Add a `controls: { values: string[]; source: 'fractal-wiki' }`
+    field per record where prose was found.
+  - Run `npm run extract-lineage` to regenerate the JSONs.
+  - Update TYPE-KNOBS.md generation (or write a new script) to
+    cross-reference each type's `controls` against `params.ts`
+    block knob names and emit a `wiki-derived` row per type.
+- **Pass criterion:** `extract-lineage` regenerates without errors
+  and at least 50% of captured drive/reverb/delay/compressor
+  types gain a `controls` field. Cross-validate against HW-019
+  / HW-020 / HW-021 captures (T808 OD / Blackglass 7K / Digital
+  Mono / JFET Studio) — wiki-derived knobs should match captured
+  knobs (modulo wiki gaps and Fractal's added "Mix" / "Balance" /
+  output controls).
+- **Status:** **No founder action required.** Pure Claude-side.
+- **Priority:** medium — biggest coverage-jump available short
+  of HW-032 captures, and complements HW-032 by reducing the
+  capture set needed to validate the heuristic.
+
 
 ### HW-026 — Resolve unidentified `pidHigh=0x0000` on Reverb (likely Level) 🔜
 

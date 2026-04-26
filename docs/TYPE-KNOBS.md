@@ -16,11 +16,61 @@ every possible knob across all 78 drive types), but AM4-Edit only
 circuit. HW-019 / HW-020 / HW-021 (Session 30 cont) each surfaced
 "spec said N knobs, capture showed M ≠ N".
 
-**Cache investigation (Session 30 cont)** ruled out the simplest
-hypotheses: there is no per-type subset table after section 3, no
-unparsed tail with visibility data (only 2 bytes remain after
-section 3 in a 129 KB file), and `english.laxml` is just UI string
-translations. The remaining candidates are:
+## The wiki Basic-page heuristic (per-block visibility shortcut)
+
+Before reaching for a hardware capture or screenshot, check the
+**Fractal wiki rule** stated in `docs/wiki/Drive_block.md` line 232:
+
+> *"The controls on the Basic page of the Drive correspond with
+> the knobs on the modeled devices."*
+
+That's the per-type visibility shortcut in plain English. It means:
+**AM4-Edit's Basic-page knob set for a given type ≈ the original
+modeled pedal/amp/effect's physical control set.** So if you know
+a type's `basedOn.productName` (from `src/knowledge/{block}-
+lineage.json`), you can usually derive its AM4-Edit Basic-page
+knobs from the real-world device's knob layout.
+
+Examples (validated against captures):
+
+- **T808 OD** → `basedOn.productName: "TS-808 Tube Screamer"` →
+  Tube Screamer is famously 3-knob (Drive, Tone, Level) → AM4-Edit
+  Basic page exposes drive / tone / level. **Matches HW-019
+  capture exactly.**
+- **Blackglass 7K** → `basedOn.productName: "Darkglass Microtubes
+  B7K bass preamp and drive"` → real device has Drive, Blend,
+  Volume, Bass, Mid, Mid Freq, Treble, Low Cut → AM4-Edit Basic
+  page exposes drive / tone / level / mix / low_cut / bass / mid /
+  mid_freq / treble (+1 unidentified). **Closely matches HW-019
+  capture.**
+- **Klone Chiron** → `basedOn.productName: "Klon Centaur"` → Klon
+  Centaur has 3 knobs (Gain, Treble, Output) → AM4-Edit Basic
+  page exposes drive / tone / level, **labelled** "Drive" /
+  "Treble" / "Output" to match the original. **Matches HW-014
+  finding.**
+
+When the heuristic and a hardware capture disagree, **trust the
+capture**. The wiki rule is a strong prior, not a guarantee —
+Fractal's modelers occasionally add or rename knobs versus the
+original device (as in BB Pre AT vs the BB Preamp). Per-type rows
+in this file always cite their evidence (`session-XX-*.pcapng` or
+"Wiki: §Drive types" or "BG-derived").
+
+The wiki has explicit "Controls:" prose for ~19 of 78 drive types,
+and similar prose for many reverb / delay / compressor types. The
+`src/knowledge/{block}-lineage.json` files capture the
+`basedOn.productName` / `manufacturer` / `model` fields but not
+yet the controls — extending the lineage extractor to do so is
+queued as **HW-033** (Claude-side, no founder hardware).
+
+## Cache-investigation findings (HW-030 step 1)
+
+The simpler hypothesis — that the AM4-Edit metadata cache itself
+encodes per-type visibility — was ruled out (Session 30 cont):
+no per-type subset table after section 3, no unparsed tail with
+visibility data (only 2 bytes remain after section 3 in a 129 KB
+file), and `english.laxml` is just UI string translations. The
+remaining candidates are:
 
 1. **Per-record `extra` field** — a partial signal, not a full map.
    `extra=1` correlates with "shown on every type" (drive's
