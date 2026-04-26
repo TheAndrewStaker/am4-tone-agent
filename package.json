@@ -24,6 +24,7 @@
     "write-test": "tsx scripts/write-test.ts",
     "hydra:smoke": "tsx scripts/hydrasynth/smoke.ts",
     "hydra:gen-params": "tsx scripts/hydrasynth/gen-params.ts",
+    "hydra:gen-nrpn": "tsx scripts/hydrasynth/gen-nrpn.ts",
     "hydra:server": "tsx src/devices/hydrasynth-explorer/server.ts",
     "server": "tsx src/server/index.ts",
     "build": "tsc",

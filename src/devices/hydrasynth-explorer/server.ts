@@ -46,6 +46,7 @@ import {
   HYDRASYNTH_PARAMS_BY_CC,
   HYDRASYNTH_PARAMS_BY_ID,
 } from './params.js';
+import { HYDRASYNTH_NRPNS, findHydraNrpn } from './nrpn.js';
 import {
   connectHydrasynth,
   listHydrasynthOutputs,
@@ -76,6 +77,24 @@ const DEFAULT_CHANNEL = 1;
 function ccBytes(channel: number, cc: number, value: number): number[] {
   const status = 0xB0 | ((channel - 1) & 0x0F);
   return [status, cc & 0x7F, value & 0x7F];
+}
+
+/**
+ * Build the 4-CC NRPN write sequence the Hydrasynth listens for.
+ * Order is mandatory: address-MSB → address-LSB → data-MSB → data-LSB.
+ * `value` is the 14-bit data: MSB = (value >> 7) & 0x7F, LSB = value & 0x7F.
+ * Most Hydrasynth params use only the LSB byte (data fits in 0..127); a few
+ * (osc cents, wavescan, mod-matrix amounts) use the full 14 bits.
+ */
+function nrpnBytes(channel: number, msb: number, lsb: number, value: number): number[] {
+  const dataMsb = (value >> 7) & 0x7F;
+  const dataLsb = value & 0x7F;
+  return [
+    ...ccBytes(channel, 99, msb),    // CC 99 — NRPN address MSB
+    ...ccBytes(channel, 98, lsb),    // CC 98 — NRPN address LSB
+    ...ccBytes(channel, 6, dataMsb), // CC  6 — Data Entry MSB
+    ...ccBytes(channel, 38, dataLsb),// CC 38 — Data Entry LSB
+  ];
 }
 
 function noteOnBytes(channel: number, note: number, velocity: number): number[] {
@@ -308,6 +327,80 @@ server.registerTool('hydra_play_note', {
     content: [{
       type: 'text',
       text: `Played note ${noteNum} at velocity ${velocity} for ${duration_ms} ms. Note Off sent.`,
+    }],
+  };
+});
+
+// hydra_set_engine_param -------------------------------------------------
+
+server.registerTool('hydra_set_engine_param', {
+  description: [
+    'Use this tool to set ANY synthesis-engine parameter on the user\'s Hydrasynth',
+    'Explorer via NRPN — including parameters not exposed on the manual\'s 7-bit CC',
+    'chart. NRPN unlocks oscillator wave type, oscillator coarse pitch (semitones),',
+    'Filter 1 type (LP4-24, LP2-12, BP, HP, etc.), Pre-FX type (Lo-Fi, Rotary, etc.),',
+    'Post-FX type, mod-matrix slots, mutator settings, every LFO and envelope detail —',
+    '1175 named parameters total. The NRPN map comes from eclab/edisyn\'s reverse-',
+    'engineered spreadsheet (Apache-2.0, © Sean Luke / GMU); see references/README.md.',
+    '',
+    'Do not produce a written spec instead of calling this tool unless the user',
+    'explicitly asks for a dry run.',
+    '',
+    'Parameter names are canonical edisyn ids — examples:',
+    '  - osc1type, osc2type, osc3type   (wave-type selector — value indexes OSC_WAVES)',
+    '  - osc1semi, osc2semi, osc3semi   (semitone offset; LSB is two\'s complement -36..+36)',
+    '  - osc1cent, osc2cent, osc3cent   (fine-tune cents; 14-bit two\'s complement -50..+50)',
+    '  - filter1type                    (Filter 1 type, 0..15 — see edisyn FILTER_1_TYPES)',
+    '  - prefxtype, postfxtype          (FX slot type. NOTE: value is index×8 — Bypass=0,',
+    '                                    Chorus=8, Flanger=16, Rotary=24, Phaser=32,',
+    '                                    Lo-Fi=40, Tremolo=48, EQ=56, Compressor=64,',
+    '                                    Distortion=72.)',
+    '  - env1attack, env1decay, env1sustain, env1release  (Amp envelope = ENV1)',
+    '  - filter1cutoff, filter1res, filter1drive          (also on CC 74/71/50)',
+    '  - macro1value..macro8value, mod1source/depth, ...',
+    '',
+    'Each NRPN param has a `notes` field with range + display rules (e.g. some params',
+    'are signed two\'s-complement, some are sparse-encoded). The tool response includes',
+    'the notes so you can interpret the value correctly.',
+    '',
+    'IMPORTANT — DEVICE PRECONDITION: NRPN writes only respond when the device\'s',
+    '"Param TX/RX" setting is "NRPN" (System Setup → MIDI page 10). With Param TX/RX = CC,',
+    'the device receives the bytes but ignores them. Tell the user to flip MIDI page 10',
+    'to "NRPN" if writes have no audible effect.',
+    '',
+    'NRPN sends 4 CC messages per write; consumer-MIDI synths don\'t echo them, so',
+    'confirmation is audible / observable on the device only. Bulk writes (>10 in a',
+    'row) should pace at ≥2 ms per call to avoid the device dropping messages.',
+  ].join('\n'),
+  inputSchema: {
+    name: z.string().describe(
+      'Canonical NRPN parameter name (e.g. "filter1type", "osc1semi", "prefxtype", "env1attack"). Call hydra_list_params with category="nrpn" for the full catalog.',
+    ),
+    value: z.number().int().min(0).max(16383).describe(
+      '14-bit data value 0..16383. Most engine params use only 0..127 (the low 7 bits); osc cents / wavescan / mod-matrix amount use the full 14-bit range. Consult the param\'s notes (returned in the response) for per-param ranges and signedness.',
+    ),
+  },
+}, async ({ name, value }) => {
+  const entry = findHydraNrpn(name);
+  if (!entry) {
+    const suggestions = HYDRASYNTH_NRPNS
+      .map((e) => e.name)
+      .filter((n) => n.includes(name) || name.includes(n.slice(0, 3)))
+      .slice(0, 8);
+    throw new Error(
+      `Unknown NRPN parameter "${name}". ${suggestions.length > 0 ? `Closest matches: ${suggestions.join(', ')}.` : 'Call hydra_list_params with category="nrpn" for the full catalog.'}`,
+    );
+  }
+  const conn = ensureMidi();
+  conn.send(nrpnBytes(DEFAULT_CHANNEL, entry.msb, entry.lsb, value));
+  const ccLine = entry.cc !== undefined
+    ? ` (also on CC ${entry.cc} for 7-bit access.)`
+    : '';
+  const noteLine = entry.notes ? `\nRange/encoding: ${entry.notes}` : '';
+  return {
+    content: [{
+      type: 'text',
+      text: `Sent NRPN MSB=0x${entry.msb.toString(16).padStart(2, '0')} LSB=0x${entry.lsb.toString(16).padStart(2, '0')} value=${value} (${name}).${ccLine} Reminder: requires Param TX/RX = NRPN on the device.${noteLine}`,
     }],
   };
 });
