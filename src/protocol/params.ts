@@ -1080,6 +1080,53 @@ export const KNOWN_PARAMS = {
     unit: 'enum', displayMin: 0, displayMax: 3,
     enumValues: GATE_TYPES_VALUES,
   },
+  // HW-035 (Session 34, 2026-04-26): slot-Gate first-page knobs on a
+  // Modern Gate type — `session-34-slotgate-extended.pcapng`. Wire-
+  // verified at Threshold=-22 dB / Attack=1 ms / Hold=80 ms /
+  // Release=90 ms / Attenuation=-33 dB / Sidechain=INPUT 1 / Level=
+  // 12 dB. Threshold/Attack/Hold/Release/Attenuation are mirrored
+  // from CACHE_PARAMS. Level (pidHigh=0x0000) follows the universal
+  // out-of-band Level pattern. Sidechain (pidHigh=0x000f) is a
+  // 4-entry enum sourced directly from cache id=15 enum strings
+  // (BLOCK L+R / INPUT 1 / BLOCK L / BLOCK R) — hand-authored
+  // because the cache generator only attaches the block-wide
+  // GATE_TYPES_VALUES import.
+  'gate.level': {
+    block: 'gate', name: 'level',
+    pidLow: 0x0092, pidHigh: 0x0000,
+    unit: 'db', displayMin: -80, displayMax: 20,
+  },
+  'gate.threshold': {
+    block: 'gate', name: 'threshold',
+    pidLow: 0x0092, pidHigh: 0x000a,
+    unit: 'db', displayMin: -100, displayMax: 0,
+  },
+  'gate.attack': {
+    block: 'gate', name: 'attack',
+    pidLow: 0x0092, pidHigh: 0x000b,
+    unit: 'ms', displayMin: 0, displayMax: 1000,
+  },
+  'gate.hold': {
+    block: 'gate', name: 'hold',
+    pidLow: 0x0092, pidHigh: 0x000c,
+    unit: 'ms', displayMin: 0, displayMax: 1000,
+  },
+  'gate.release': {
+    block: 'gate', name: 'release',
+    pidLow: 0x0092, pidHigh: 0x000d,
+    unit: 'ms', displayMin: 0, displayMax: 1000,
+  },
+  'gate.sidechain': {
+    block: 'gate', name: 'sidechain',
+    pidLow: 0x0092, pidHigh: 0x000f,
+    unit: 'enum', displayMin: 0, displayMax: 3,
+    enumValues: { 0: 'BLOCK L+R', 1: 'INPUT 1', 2: 'BLOCK L', 3: 'BLOCK R' },
+  },
+  'gate.attenuation': {
+    block: 'gate', name: 'attenuation',
+    pidLow: 0x0092, pidHigh: 0x0014,
+    unit: 'db', displayMin: -80, displayMax: 0,
+  },
   // HW-024 (Session 30 cont 3): wire-verified — Auto-Swell displayed
   // exactly. Round 4 first-time test for this block type.
   'volpan.mode': {
@@ -1131,6 +1178,33 @@ export const KNOWN_PARAMS = {
     block: 'ingate', name: 'level',
     pidLow: 0x0025, pidHigh: 0x0000,
     unit: 'db', displayMin: -80, displayMax: 20,
+  },
+  // HW-036 (Session 34, 2026-04-26): In-Gate Config-page residuals
+  // from `session-34-inputgate-extended.pcapng`. Wire-verified at
+  // Threshold=-44 dB / Release=60 ms / Type=Intelligent on the
+  // In-Gate tab. All three were the HW-032 residuals queued for
+  // unit + type-walk. Threshold curve is dB-direct (not the 0..1
+  // normalized hypothesis from HW-032 — hardware writes raw dB).
+  // Release uses the same display=internal × 1000 ms scaling as
+  // every other release-style param. Type enum order matches
+  // BLOCK-PARAMS.md (Classic Expander / Intelligent / Noise
+  // Reducer); wire confirmed index 1 = Intelligent. No cache
+  // backing — all hand-authored.
+  'ingate.threshold': {
+    block: 'ingate', name: 'threshold',
+    pidLow: 0x0025, pidHigh: 0x000a,
+    unit: 'db', displayMin: -100, displayMax: 0,
+  },
+  'ingate.release': {
+    block: 'ingate', name: 'release',
+    pidLow: 0x0025, pidHigh: 0x000c,
+    unit: 'ms', displayMin: 0, displayMax: 1000,
+  },
+  'ingate.type': {
+    block: 'ingate', name: 'type',
+    pidLow: 0x0025, pidHigh: 0x000f,
+    unit: 'enum', displayMin: 0, displayMax: 2,
+    enumValues: { 0: 'Classic Expander', 1: 'Intelligent', 2: 'Noise Reducer' },
   },
 
   // Universal per-block output Balance (Session 28 cont — P1-010

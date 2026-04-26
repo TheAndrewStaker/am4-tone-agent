@@ -6,6 +6,93 @@ file is the chronological trail that reference is built from.
 
 ---
 
+## 2026-04-26 — Session 34 — HW-035 + HW-036 Gate / In-Gate decode (10 new params; In-Gate threshold / release curves resolved)
+
+Founder captured 2 pcapngs + 2 screenshots — a Modern Gate slot-
+Gate and an Intelligent In-Gate
+(`samples/captured/session-34-{slotgate,inputgate}-extended.{pcapng,png}`).
+Closed both HW-035 (slot-Gate first-page knobs) and HW-036
+(In-Gate full decode) in a single combined session. **10 new
+hardware-verified params**.
+
+**Slot-Gate (pidLow=0x0092, Modern Gate type) — 7 new:**
+
+- `gate.level` — pidHigh=0x0000, dB. Wire-verified at 12 dB.
+  Out-of-band (universal Level pattern at id=0; cache has no
+  record there).
+- `gate.threshold` — pidHigh=0x000a, dB. Cache id=10
+  (a=-100 b=0 c=1). Wire-verified at -22 dB.
+- `gate.attack` — pidHigh=0x000b, ms. Cache id=11
+  (a=0.0001 b=1 c=1000). Wire-verified at 1 ms.
+- `gate.hold` — pidHigh=0x000c, ms. Cache id=12
+  (a=0.001 b=1 c=1000). Wire-verified at 80 ms.
+- `gate.release` — pidHigh=0x000d, ms. Cache id=13
+  (a=0.001 b=1 c=1000). Wire-verified at 90 ms.
+- `gate.sidechain` — pidHigh=0x000f, enum 4 values
+  `[BLOCK L+R, INPUT 1, BLOCK L, BLOCK R]`. Cache id=15
+  enum strings sourced directly. Wire-verified at index 1
+  ("INPUT 1"). Hand-authored — gen-params only attaches one
+  enum import per block (used for `type`).
+- `gate.attenuation` — pidHigh=0x0014, dB. Cache id=20
+  (a=-80 b=0 c=1). Wire-verified at -33 dB.
+
+**In-Gate (pidLow=0x0025, Intelligent type) — 3 new:**
+
+- `ingate.threshold` — pidHigh=0x000a, dB. Wire-verified at
+  -44 dB. **HW-032 residual closed.** Confirms the curve is
+  raw dB, not a normalized 0..1 → -100..0 dB hypothesis from
+  HW-032 — hardware writes -44 dB directly to the wire.
+- `ingate.release` — pidHigh=0x000c, ms. Wire-verified at
+  60 ms. **HW-032 residual closed.** Same `display = wire ×
+  1000` ms encoding as every other release-style param.
+- `ingate.type` — pidHigh=0x000f, enum 3 values
+  `[Classic Expander, Intelligent, Noise Reducer]` per
+  BLOCK-PARAMS.md. Wire-verified at index 1 ("Intelligent").
+  **HW-032 residual closed.**
+- All In-Gate params hand-authored — pidLow=0x0025 has no
+  cache backing (none of the 17 cache sub-blocks match its
+  4-register footprint per HW-032).
+
+**Tooling:**
+
+- `paramNames.ts` gate block: 5 new entries (cache ids
+  10/11/12/13/20) + existing 2 (BALANCE, type at id=19).
+- `cacheParams.ts` regenerated: 85 → 90 entries (5 new gate
+  cache-derived).
+- `params.ts` KNOWN_PARAMS: 123 → 133. Five gate cache-derived
+  + two gate hand-authored (level, sidechain) + three ingate
+  hand-authored.
+- `verify-msg.ts`: 10 new goldens built from captured wire
+  bytes. 100 → 110 cases.
+
+**Preflight green:** tsc clean, 110/110 verify-msg, 16/16
+verify-pack, 16/16 verify-enum-lookup, 8/8 verify-echo, 90/90
+verify-cache-params, smoke-server 22/22 tools.
+
+**Methodology held:** HW-035's spec (pre-rewrite) listed knobs
+specifically. The founder still wiggled every visible knob,
+which surfaced exactly the registers the spec predicted —
+useful confirmation that the type-dependent UI for Modern Gate
+matches what the cache exposes for cacheBlock 11. The HW-036
+spec asked for 3 separate captures (threshold sweep, release
+sweep, type-walk); the founder collapsed it into one combined
+capture and got the same coverage. Both captures' final values
+matched the screenshots within float-rounding tolerance.
+
+**Residuals queued:**
+
+- Modern Gate first-page exposes Threshold / Attenuation /
+  Attack / Hold / Release / Sidechain / Level — all 7
+  registered. Knee Type (cache id=22 enum) and Detector Type
+  (cache id=21 enum [RMS, PEAK]) are cache records that may
+  surface on Classic Expander / Modern Expander — re-queue
+  if a future capture exposes them.
+- In-Gate captured 4 of 4 expected registers. No residuals.
+- HW-037 (Enhancer first-page knob mapping) remains the last
+  HW-032-family residual.
+
+---
+
 ## 2026-04-26 — Session 33 — HW-034 Filter / Flanger residuals (2 new params + 12 hardware re-verifications; type-agnostic spec validated)
 
 Founder captured 2 pcapngs + 2 screenshots covering an All-Pass

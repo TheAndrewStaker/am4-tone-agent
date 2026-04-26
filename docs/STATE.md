@@ -5,8 +5,30 @@
 > hardware tasks (USB captures, round-trip tests, reference dumps) live
 > in **`docs/HARDWARE-TASKS.md`** — check that file alongside this one at
 > session start.
-> Last updated: **2026-04-26** (Session 33 — HW-034 Filter / Flanger
-> residuals landed. Founder captured an All-Pass Filter + 80's Rack
+> Last updated: **2026-04-26** (Session 34 — HW-035 + HW-036 Gate /
+> In-Gate decode landed. Founder captured a Modern Gate (slot)
+> + an Intelligent In-Gate with paired AM4-Edit screenshots
+> (`samples/captured/session-34-{slotgate,inputgate}-extended.pcapng`
+> + `.png`). **10 new hardware-verified params** — slot-Gate
+> gains level/threshold/attack/hold/release/sidechain/attenuation
+> (all on Modern Gate); In-Gate gains threshold/release/type
+> closing every HW-032 residual. KNOWN_PARAMS 123 → 133;
+> verify-msg 100 → 110; verify-cache-params 85 → 90.
+>
+> **In-Gate threshold curve confirmed:** HW-032 left the curve
+> ambiguous (internal 0..1 → display -100..0 dB hypothesis). The
+> capture writes raw dB directly (-44 dB → wire -44.0), matching
+> `unit: 'db'` not a normalized 0..1 mapping. Same answer for
+> Release: `display = wire × 1000` ms, the standard ms encoding
+> across the registry — no curve.
+>
+> **gate.sidechain enum sourced from cache id=15** (cacheBlock 11):
+> `[BLOCK L+R, INPUT 1, BLOCK L, BLOCK R]`. Hand-authored in
+> params.ts because the gen-params script only attaches one
+> enum import per block (used for `type` at id=19).
+>
+> Previous: Session 33 — HW-034 Filter / Flanger residuals landed.
+> Founder captured an All-Pass Filter + 80's Rack
 > Flanger with paired AM4-Edit screenshots
 > (`samples/captured/session-33-{filter,flanger}-extended.pcapng` +
 > `.png`). **2 new hardware-verified Filter params** (feedback,
@@ -592,22 +614,21 @@ float32. One open question remains before the IR can cover full presets:
 
 ## The single next action
 
-**Most-likely next session: HW-035 (slot-Gate first-page knobs)
-or HW-036 (Input Noise Gate full decode).**
-HW-034 closed Session 33 — 2 new Filter params (feedback,
-order) plus 12 hardware re-verifications across the existing
-Filter / Flanger registers. The type-agnostic capture spec was
-validated end-to-end (All-Pass exposed knobs Low-Pass didn't,
-and the new "wiggle every visible knob" wording surfaced them).
-Highest-value remaining gap is HW-035 — the slot-placeable Gate
-block (`pidLow=0x0092`) currently has only type + balance
-registered, but threshold / attack / release are core gate
-functionality. HW-036 (In-Gate full decode at `pidLow=0x0025`)
-is the second-priority pickup since In-Gate sits on the input
-stage of every preset. Either is one pcapng + one screenshot.
-BK-029 already shipped Session 31; BK-030 already shipped
-Session 30 cont 7 — no non-hardware track remains queued at
-similar priority.
+**Most-likely next session: HW-037 (Enhancer first-page knob
+mapping) or BK-032 closure check.**
+HW-035 + HW-036 closed Session 34 — 10 new Gate / In-Gate
+params landed in one combined capture pass. The remaining
+HW-032 residual is HW-037 (Enhancer first-page knob mapping).
+HW-032 captured the Enhancer pcapng but didn't pair a
+screenshot, so 5 captured pidHighs (0x0000=11, 0x000a=0.20,
+0x000b=0.10, 0x000c=11, 0x000d=3200) still can't be matched
+to UI labels. One screenshot of the Enhancer Config page
+showing every knob's value is enough — no recapture needed
+unless the existing pcapng's state has drifted. With HW-037
+done, BK-032 first-page-knob coverage hits its release-gate
+target across every block. After that the protocol track
+mostly winds down for this phase; preset-management UX (auto-
+backup, save flow polish) takes over as the critical path.
 
 **Earlier (still applicable):**
 BK-030 closed Session 30 cont 7 — connection registry, five

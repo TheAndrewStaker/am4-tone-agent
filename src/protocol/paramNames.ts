@@ -298,7 +298,19 @@ export const PARAM_NAMES: Readonly<Record<string, Readonly<Record<number, ParamN
   },
   gate: {
     2: BALANCE,
+    // HW-035 (Session 34, 2026-04-26): slot-Gate Config-page knobs on
+    // Modern Gate type — `session-34-slotgate-extended.pcapng`.
+    // Threshold/Attack/Hold/Release/Attenuation are dB and ms knobs
+    // with cache c=1 (raw dB, signed) and c=1000 (ms) signatures
+    // respectively. Sidechain enum (cache id=15) is hand-authored
+    // in params.ts since the generator only handles one enum import
+    // per block (used for `type` at id=19).
+    10: { name: 'threshold', unit: 'db', displayMin: -100, displayMax: 0 },
+    11: { name: 'attack', unit: 'ms', displayMin: 0, displayMax: 1000 },
+    12: { name: 'hold', unit: 'ms', displayMin: 0, displayMax: 1000 },
+    13: { name: 'release', unit: 'ms', displayMin: 0, displayMax: 1000 },
     19: 'type',
+    20: { name: 'attenuation', unit: 'db', displayMin: -80, displayMax: 0 },
   },
   volpan: {
     2: BALANCE,

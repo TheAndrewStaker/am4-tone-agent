@@ -432,6 +432,60 @@ const cases: { label: string; built: number[]; expected: string }[] = [
     built: buildSetParam('filter.order', 4),
     expected: 'f0000174150172001c0001000000040000001004006ef7',
   },
+  // HW-035 (Session 34) — slot-Gate Config-page knobs on Modern Gate
+  // type from `session-34-slotgate-extended.pcapng`.
+  {
+    label: 'buildSetParam("gate.level", 12 dB) — session-34 HW-035 slotgate-modern',
+    built: buildSetParam('gate.level', 12),
+    expected: 'f0000174150112010000010000000400000008040803f7',
+  },
+  {
+    label: 'buildSetParam("gate.threshold", -22 dB) — session-34 HW-035 slotgate-modern',
+    built: buildSetParam('gate.threshold', -22),
+    expected: 'f0000174150112010a000100000004000000160c081ff7',
+  },
+  {
+    label: 'buildSetParam("gate.attack", 1 ms) — session-34 HW-035 slotgate-modern',
+    built: buildSetParam('gate.attack', 1),
+    expected: 'f0000174150112010b0001000000040037445033504cf7',
+  },
+  {
+    label: 'buildSetParam("gate.hold", 80 ms) — session-34 HW-035 slotgate-modern',
+    built: buildSetParam('gate.hold', 80),
+    expected: 'f0000174150112010c00010000000400053574336814f7',
+  },
+  {
+    label: 'buildSetParam("gate.release", 90 ms) — session-34 HW-035 slotgate-modern',
+    built: buildSetParam('gate.release', 90),
+    expected: 'f0000174150112010d00010000000400761437036834f7',
+  },
+  {
+    label: 'buildSetParam("gate.sidechain", 1) — session-34 HW-035 slotgate-modern',
+    built: buildSetParam('gate.sidechain', 1),
+    expected: 'f0000174150112010f00010000000400000010037863f7',
+  },
+  {
+    label: 'buildSetParam("gate.attenuation", -33 dB) — session-34 HW-035 slotgate-modern',
+    built: buildSetParam('gate.attenuation', -33),
+    expected: 'f00001741501120114000100000004000000004c104ff7',
+  },
+  // HW-036 (Session 34) — In-Gate Config-page residuals from
+  // `session-34-inputgate-extended.pcapng`.
+  {
+    label: 'buildSetParam("ingate.threshold", -44 dB) — session-34 HW-036 inputgate-intelligent',
+    built: buildSetParam('ingate.threshold', -44),
+    expected: 'f0000174150125000a000100000004000000060c1021f7',
+  },
+  {
+    label: 'buildSetParam("ingate.release", 60 ms) — session-34 HW-036 inputgate-intelligent',
+    built: buildSetParam('ingate.release', 60),
+    expected: 'f0000174150125000c0001000000040047704e53687ff7',
+  },
+  {
+    label: 'buildSetParam("ingate.type", 1) — session-34 HW-036 inputgate-intelligent',
+    built: buildSetParam('ingate.type', 1),
+    expected: 'f0000174150125000f00010000000400000010037855f7',
+  },
   {
     label: 'buildSetParam("flanger.level", 10 dB) — session-32 HW-032 flanger',
     built: buildSetParam('flanger.level', 10),

@@ -447,11 +447,36 @@ export const CACHE_PARAMS = {
     pidLow: 0x0092, pidHigh: 0x0002,
     unit: 'bipolar_percent', displayMin: -100, displayMax: 100,
   },
+  'gate.threshold': {
+    block: 'gate', name: 'threshold',
+    pidLow: 0x0092, pidHigh: 0x000a,
+    unit: 'db', displayMin: -100, displayMax: 0,
+  },
+  'gate.attack': {
+    block: 'gate', name: 'attack',
+    pidLow: 0x0092, pidHigh: 0x000b,
+    unit: 'ms', displayMin: 0, displayMax: 1000,
+  },
+  'gate.hold': {
+    block: 'gate', name: 'hold',
+    pidLow: 0x0092, pidHigh: 0x000c,
+    unit: 'ms', displayMin: 0, displayMax: 1000,
+  },
+  'gate.release': {
+    block: 'gate', name: 'release',
+    pidLow: 0x0092, pidHigh: 0x000d,
+    unit: 'ms', displayMin: 0, displayMax: 1000,
+  },
   'gate.type': {
     block: 'gate', name: 'type',
     pidLow: 0x0092, pidHigh: 0x0013,
     unit: 'enum', displayMin: 0, displayMax: 3,
     enumValues: GATE_TYPES_VALUES,
+  },
+  'gate.attenuation': {
+    block: 'gate', name: 'attenuation',
+    pidLow: 0x0092, pidHigh: 0x0014,
+    unit: 'db', displayMin: -80, displayMax: 0,
   },
   'volpan.balance': {
     block: 'volpan', name: 'balance',

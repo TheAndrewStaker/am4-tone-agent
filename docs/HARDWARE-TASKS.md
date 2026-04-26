@@ -255,66 +255,13 @@ Residuals (queued as HW-034 / HW-035 / HW-036 below):
      decode summary. -->
 
 
-### HW-035 — Slot-Gate first-page knobs 🔜
+<!-- HW-035 completed 2026-04-26 (Session 34) — see Archive below for the
+     decode summary. -->
 
-- **For:** the slot-placeable Gate effect block (`pidLow=0x0092`,
-  block ID confirmed Session 18) currently has **only** type +
-  balance registered. HW-024's hardware-page inventory observed
-  Threshold / Attenuation / Attack / Release / Hold / Sidechain
-  Source / Level — none mapped. This is core gate functionality
-  and high-value coverage.
-- **Setup:** as HW-019 — load Gate block in any free slot, AM4-Edit
-  open, USBPcap recording.
-- **Capture: 1 pcapng** —
-  `samples/captured/session-33-slotgate-extended.pcapng`. Load
-  Modern Gate type. Wiggle in this order:
-  1. Threshold (dB)
-  2. Attack (ms)
-  3. Release (ms)
-  4. Hold (ms — if exposed on Modern Gate)
-  5. Attenuation (dB — if exposed)
-  6. Sidechain Source (enum — if exposed)
-  7. Level (dB output, right panel)
-- **Signal completion:** *"HW-035 done"* + saved path + a screenshot
-  of the Gate block's Config page so the per-type knob inventory
-  can be cross-checked.
-- **Priority:** medium — gate is core functionality.
 
-### HW-036 — Input Noise Gate full decode (pidLow=0x0025) 🔜
+<!-- HW-036 completed 2026-04-26 (Session 34) — see Archive below for the
+     decode summary. -->
 
-- **For:** finishes the Input Noise Gate registration started under
-  HW-032. Three of the 4 captured registers (Threshold / Release /
-  Type) need either a new Unit, a cache record, or a type-walk
-  capture before they can be named cleanly.
-- **Why:** the In-Gate is the always-on input stage — every guitar
-  signal passes through it before hitting the AM4's effect slots.
-  Users will want to set the threshold / type for noise control
-  via natural language ("turn down the noise gate", "use the
-  intelligent gate to filter EMI hum from my guitar"). Currently
-  only `ingate.level` is exposed.
-- **Setup:** AM4 plugged in, AM4-Edit open, USBPcap recording.
-- **Captures:**
-  1. `samples/captured/session-33-ingate-threshold.pcapng` —
-     wiggle Threshold from -100 dB → 0 dB → -50 dB. The internal
-     0..1 → display -100..0 dB curve we observed in HW-032 needs
-     verification: is it linear, or does it use the same kind of
-     curve as Release? Two-point capture confirms.
-  2. `samples/captured/session-33-ingate-release.pcapng` — wiggle
-     Release through several discrete values (e.g. 5 ms / 50 ms /
-     500 ms). The 0.3552 → 51.33 ms mapping in HW-032 doesn't
-     match any of our existing Unit curves; multi-point capture
-     pins the exponent / range.
-  3. `samples/captured/session-33-ingate-types.pcapng` — click
-     through the 3 Type options (Classic / Intelligent / Noise
-     Reducer per BLOCK-PARAMS.md). Each click writes
-     `pidHigh=0x000f` with the type index. Confirms the enum
-     ordering. While clicking, also screenshot each type's UI
-     page — Intelligent and Noise Reducer may expose additional
-     knobs beyond Classic's Threshold/Release/Level set.
-- **Signal completion:** *"HW-036 done"* + saved paths + 3
-  screenshots (one per Type).
-- **Priority:** medium — In-Gate is everywhere in the signal path
-  but knob count is small.
 
 ### HW-037 — Enhancer first-page knob mapping (HW-032 follow-up) 🔜
 
@@ -1361,6 +1308,51 @@ highest numbers.
   shows**. They overlap heavily (per the wiki rule) but differ
   where Fractal adds universal knobs (Tone / Mix / Balance) or
   renames originals.
+
+### HW-035 — Slot-Gate first-page knobs ✅
+
+- **Captured 2026-04-26 (Session 34).** Founder loaded a Modern
+  Gate slot-Gate (Threshold=-22 dB / Attenuation=-33 dB /
+  Attack=1 ms / Hold=80 ms / Release=90 ms / Sidechain="INPUT 1"
+  / Level=12 dB). One pcapng + one screenshot.
+- **Files:** `samples/captured/session-34-slotgate-extended.pcapng`
+  + `session-34-slotgate-extended.png`.
+- **New params (7):** gate.level (db, 0x0000) / gate.threshold
+  (db, 0x000a) / gate.attack (ms, 0x000b) / gate.hold (ms,
+  0x000c) / gate.release (ms, 0x000d) / gate.sidechain (enum
+  4 values, 0x000f) / gate.attenuation (db, 0x0014). Five
+  cache-derived (cache ids 10/11/12/13/20); two hand-authored
+  (level — universal out-of-band pattern; sidechain — secondary
+  enum the gen-params script can't auto-attach).
+- **Sidechain enum:** `[BLOCK L+R, INPUT 1, BLOCK L, BLOCK R]`
+  sourced from cache id=15 strings.
+- **Wiring:** verify-msg goldens for all 7 params built from
+  captured wire bytes. Preflight green: KNOWN_PARAMS 123 →
+  130, verify-msg 100 → 107, verify-cache-params 85 → 90.
+
+### HW-036 — Input Noise Gate full decode (pidLow=0x0025) ✅
+
+- **Captured 2026-04-26 (Session 34).** Founder collapsed the
+  3-capture spec into one combined wiggle pass on the
+  Intelligent type (Threshold=-44 dB / Release=60 ms /
+  Type=Intelligent / Level=11 dB). One pcapng + one screenshot.
+- **Files:** `samples/captured/session-34-inputgate-extended.pcapng`
+  + `session-34-inputgate-extended.png`.
+- **New params (3):** ingate.threshold (db, 0x000a) /
+  ingate.release (ms, 0x000c) / ingate.type (enum 3 values,
+  0x000f). All hand-authored — pidLow=0x0025 has no cache
+  backing.
+- **Curves resolved:** HW-032 left two ambiguities. (1)
+  Threshold curve: hardware writes raw dB (-44 dB → wire
+  -44.0), NOT a normalized 0..1 → -100..0 dB mapping.
+  (2) Release curve: standard `display = wire × 1000` ms
+  encoding (60 ms → wire 0.06), same as every release-style
+  param. No new Unit needed.
+- **Type enum:** `[Classic Expander, Intelligent, Noise Reducer]`
+  per BLOCK-PARAMS.md; wire-confirmed at index 1 = Intelligent.
+- **Wiring:** verify-msg goldens for all 3 params from captured
+  wire bytes. Combined with HW-035: KNOWN_PARAMS final 133;
+  verify-msg final 110; verify-cache-params final 90.
 
 ### HW-034 — Filter / Flanger residuals from HW-032 (single-knob isolation) ✅
 
