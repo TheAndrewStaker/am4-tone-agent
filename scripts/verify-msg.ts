@@ -401,6 +401,49 @@ const cases: { label: string; built: number[]; expected: string }[] = [
     built: buildSetParam('compressor.level', -8),
     expected: 'f000017415012e0000000100000004000000000c083ef7',
   },
+  // HW-032 (Session 30 cont 8) — first-page Level + low/high cut +
+  // volpan threshold/attack + ingate level. Each `expected` is the
+  // exact wire frame from the matching session-32 pcapng final-write.
+  {
+    label: 'buildSetParam("filter.level", 12 dB) — session-32 HW-032 filter-config',
+    built: buildSetParam('filter.level', 12),
+    expected: 'f0000174150172000000010000000400000008040862f7',
+  },
+  {
+    label: 'buildSetParam("filter.low_cut", 100 Hz) — session-32 HW-032 filter-config',
+    built: buildSetParam('filter.low_cut', 100),
+    expected: 'f0000174150172001200010000000400000019041079f7',
+  },
+  {
+    label: 'buildSetParam("filter.high_cut", 1800 Hz) — session-32 HW-032 filter-config',
+    built: buildSetParam('filter.high_cut', 1800),
+    expected: 'f000017415017200130001000000040000001c14205df7',
+  },
+  {
+    label: 'buildSetParam("flanger.level", 10 dB) — session-32 HW-032 flanger',
+    built: buildSetParam('flanger.level', 10),
+    expected: 'f000017415015200000001000000040000000404084ef7',
+  },
+  {
+    label: 'buildSetParam("volpan.level", 12 dB) — session-32 HW-032 volpan',
+    built: buildSetParam('volpan.level', 12),
+    expected: 'f0000174150166000000010000000400000008040876f7',
+  },
+  {
+    label: 'buildSetParam("volpan.threshold", -20 dB) — session-32 HW-032 volpan',
+    built: buildSetParam('volpan.threshold', -20),
+    expected: 'f00001741501660010000100000004000000140c0872f7',
+  },
+  {
+    label: 'buildSetParam("volpan.attack", 300 ms) — session-32 HW-032 volpan',
+    built: buildSetParam('volpan.attack', 300),
+    expected: 'f00001741501660011000100000004004d2633137058f7',
+  },
+  {
+    label: 'buildSetParam("ingate.level", -10 dB) — session-32 HW-032 input-noise-gate',
+    built: buildSetParam('ingate.level', -10),
+    expected: 'f00001741501250000000100000004000000040c0831f7',
+  },
   {
     label: 'buildSetParam("compressor.threshold", -30 dB) — session-30 HW-021 jfet-studio',
     built: buildSetParam('compressor.threshold', -30),

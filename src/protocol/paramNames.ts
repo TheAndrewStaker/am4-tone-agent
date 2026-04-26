@@ -265,6 +265,12 @@ export const PARAM_NAMES: Readonly<Record<string, Readonly<Record<number, ParamN
     // Blocks Guide §Filter: Frequency is the filter cutoff (20..20000 Hz
     // at cache-c=1 raw). Universal control for every filter type.
     11: { name: 'freq', unit: 'hz' },
+    // HW-032 (Session 30 cont 8, 2026-04-25): Low/High cut on the
+    // filter Config page — `session-32-filter-extended.pcapng`. Cache
+    // c=1 raw Hz; needs the 'hz' override since the generator default
+    // for c=1 is 'db'. Wire-verified at 100 Hz / 1800 Hz.
+    18: { name: 'low_cut', unit: 'hz', displayMin: 20, displayMax: 2000 },
+    19: { name: 'high_cut', unit: 'hz', displayMin: 200, displayMax: 20000 },
   },
   tremolo: {
     1: 'mix',
@@ -290,5 +296,14 @@ export const PARAM_NAMES: Readonly<Record<string, Readonly<Record<number, ParamN
     // The Volume-vs-Auto-Swell selector. Registered as `volpan.mode` in
     // KNOWN_PARAMS for historical reasons — keep the name stable.
     15: 'mode',
+    // HW-032 (Session 30 cont 8, 2026-04-25): Auto-Swell envelope params
+    // on the Volume/Pan Config page — `session-32-volpan-extended.pcapng`.
+    // Threshold (id=16, dB) wire-verified at -20 dB; Attack (id=17, ms)
+    // wire-verified at 300 ms. Cache c=1 for threshold (raw dB, needs
+    // 'db' override since generator default is also 'db' but we set the
+    // range explicitly). Cache c=1000 for attack means generator picks
+    // 'ms' automatically — no override needed except the display range.
+    16: { name: 'threshold', unit: 'db', displayMin: -100, displayMax: 0 },
+    17: { name: 'attack', unit: 'ms', displayMin: 1, displayMax: 5000 },
   },
 } as const;

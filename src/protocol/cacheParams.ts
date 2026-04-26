@@ -380,6 +380,16 @@ export const CACHE_PARAMS = {
     pidLow: 0x0072, pidHigh: 0x000b,
     unit: 'hz', displayMin: 20, displayMax: 20000,
   },
+  'filter.low_cut': {
+    block: 'filter', name: 'low_cut',
+    pidLow: 0x0072, pidHigh: 0x0012,
+    unit: 'hz', displayMin: 20, displayMax: 2000,
+  },
+  'filter.high_cut': {
+    block: 'filter', name: 'high_cut',
+    pidLow: 0x0072, pidHigh: 0x0013,
+    unit: 'hz', displayMin: 200, displayMax: 20000,
+  },
   'tremolo.mix': {
     block: 'tremolo', name: 'mix',
     pidLow: 0x006a, pidHigh: 0x0001,
@@ -443,6 +453,16 @@ export const CACHE_PARAMS = {
     pidLow: 0x0066, pidHigh: 0x000f,
     unit: 'enum', displayMin: 0, displayMax: 1,
     enumValues: VOLPAN_MODES_VALUES,
+  },
+  'volpan.threshold': {
+    block: 'volpan', name: 'threshold',
+    pidLow: 0x0066, pidHigh: 0x0010,
+    unit: 'db', displayMin: -100, displayMax: 0,
+  },
+  'volpan.attack': {
+    block: 'volpan', name: 'attack',
+    pidLow: 0x0066, pidHigh: 0x0011,
+    unit: 'ms', displayMin: 1, displayMax: 5000,
   },
 } as const satisfies Record<string, Param>;
 

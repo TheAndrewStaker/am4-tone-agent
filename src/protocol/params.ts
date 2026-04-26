@@ -681,6 +681,14 @@ export const KNOWN_PARAMS = {
     pidLow: 0x004e, pidHigh: 0x000e,
     unit: 'percent', displayMin: 0, displayMax: 100,
   },
+  // HW-032 (Session 30 cont 8, 2026-04-25): wire-verified at +10 dB on
+  // an Analog Stereo flanger — `session-32-flanger-extended.pcapng`.
+  // Follows the universal pidHigh=0x0000 Level pattern.
+  'flanger.level': {
+    block: 'flanger', name: 'level',
+    pidLow: 0x0052, pidHigh: 0x0000,
+    unit: 'db', displayMin: -80, displayMax: 20,
+  },
   'flanger.mix': {
     // BK-034 resolved (HW-025 #3, Session 30): NOT an encoding bug.
     // AM4-Edit wire for Mix→54% wrote pidLow=0x0052/pidHigh=0x0001
@@ -832,6 +840,14 @@ export const KNOWN_PARAMS = {
   // captures. PEQ (pidLow=0x36) and Rotary (pidLow=0x56) are also confirmed
   // block addresses but have no Type enum — their params will be added when
   // we start supporting specific knob names.
+  // HW-032 (Session 30 cont 8, 2026-04-25): wire-verified at +12 dB on
+  // a Low-Pass filter — `session-32-filter-extended.pcapng`. Follows
+  // the universal pidHigh=0x0000 Level pattern.
+  'filter.level': {
+    block: 'filter', name: 'level',
+    pidLow: 0x0072, pidHigh: 0x0000,
+    unit: 'db', displayMin: -80, displayMax: 20,
+  },
   'filter.mix': {
     block: 'filter', name: 'mix',
     pidLow: 0x0072, pidHigh: 0x0001,
@@ -854,6 +870,20 @@ export const KNOWN_PARAMS = {
     block: 'filter', name: 'freq',
     pidLow: 0x0072, pidHigh: 0x000b,
     unit: 'hz', displayMin: 20, displayMax: 20000,
+  },
+  // HW-032 (Session 30 cont 8, 2026-04-25): filter Config-page cuts.
+  // Wire-verified at 100 Hz / 1800 Hz on a Low-Pass filter
+  // (`session-32-filter-extended.pcapng`). Cache c=1 raw Hz at ids
+  // 18 / 19. Mirrored from CACHE_PARAMS so the type-check picks them up.
+  'filter.low_cut': {
+    block: 'filter', name: 'low_cut',
+    pidLow: 0x0072, pidHigh: 0x0012,
+    unit: 'hz', displayMin: 20, displayMax: 2000,
+  },
+  'filter.high_cut': {
+    block: 'filter', name: 'high_cut',
+    pidLow: 0x0072, pidHigh: 0x0013,
+    unit: 'hz', displayMin: 200, displayMax: 20000,
   },
   'tremolo.mix': {
     block: 'tremolo', name: 'mix',
@@ -917,6 +947,49 @@ export const KNOWN_PARAMS = {
     pidLow: 0x0066, pidHigh: 0x000f,
     unit: 'enum', displayMin: 0, displayMax: 1,
     enumValues: VOLPAN_MODES_VALUES,
+  },
+  // HW-032 (Session 30 cont 8, 2026-04-25): Volume/Pan Auto-Swell
+  // envelope params. Wire-verified at -20 dB / 300 ms on the Auto-Swell
+  // type (`session-32-volpan-extended.pcapng`). Cache ids 16 / 17 with
+  // c=1 (raw dB) and c=1000 (display ms) respectively. Mirrored from
+  // CACHE_PARAMS so the type-check picks them up.
+  'volpan.threshold': {
+    block: 'volpan', name: 'threshold',
+    pidLow: 0x0066, pidHigh: 0x0010,
+    unit: 'db', displayMin: -100, displayMax: 0,
+  },
+  'volpan.attack': {
+    block: 'volpan', name: 'attack',
+    pidLow: 0x0066, pidHigh: 0x0011,
+    unit: 'ms', displayMin: 1, displayMax: 5000,
+  },
+  // HW-032 (Session 30 cont 8, 2026-04-25): wire-verified at +12 dB on
+  // an Auto-Swell Volume/Pan — `session-32-volpan-extended.pcapng`.
+  // Follows the universal pidHigh=0x0000 Level pattern.
+  'volpan.level': {
+    block: 'volpan', name: 'level',
+    pidLow: 0x0066, pidHigh: 0x0000,
+    unit: 'db', displayMin: -80, displayMax: 20,
+  },
+
+  // Input Noise Gate (HW-032, Session 30 cont 8). Always-on input stage
+  // (per docs/BLOCK-PARAMS.md "Input Noise Gate (global, not a block
+  // slot)"); not placeable in any of the 4 effect slots. Distinct from
+  // the slot-placeable Gate effect block (pidLow=0x0092).
+  // Wire-verified on `session-32-gate-extended.pcapng` against the
+  // AM4-Edit "In-Gate" tab on Z04. Captured 4 distinct registers
+  // (0x00 / 0x0a / 0x0c / 0x0f); `level` is the only one with a
+  // unit-clean encoding so far. Threshold (0x0a, internal 0..1 →
+  // display -100..0 dB), Release (0x0c, curve TBD) and Type (0x0f,
+  // enum: Classic / Intelligent / Noise Reducer per the manual) need
+  // a Unit-extension pass plus a type-walk capture and are queued as
+  // HW-034. Pidlow 0x0025 has no cache backing — input gate isn't in
+  // any of the 17 cache sub-blocks (none of the section 2 candidates
+  // match its 4-register footprint).
+  'ingate.level': {
+    block: 'ingate', name: 'level',
+    pidLow: 0x0025, pidHigh: 0x0000,
+    unit: 'db', displayMin: -80, displayMax: 20,
   },
 
   // Universal per-block output Balance (Session 28 cont — P1-010

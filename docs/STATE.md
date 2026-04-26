@@ -5,7 +5,31 @@
 > hardware tasks (USB captures, round-trip tests, reference dumps) live
 > in **`docs/HARDWARE-TASKS.md`** — check that file alongside this one at
 > session start.
-> Last updated: **2026-04-25** (Session 30 cont 7 — BK-030
+> Last updated: **2026-04-25** (Session 30 cont 8 — HW-032
+> partial-decode landed. Founder captured 5 of 5 expected pcapngs
+> (gate / filter / flanger / enhancer / volpan) plus screenshots
+> for gate / filter / flanger / volpan (enhancer screenshot
+> pending). **8 hardware-verified params landed** + identified
+> the **Input Noise Gate** as a NEW BLOCK. New block:
+> `ingate` (pidLow=0x0025, "In-Gate" tab in AM4-Edit) — always-on
+> input stage, conceptually distinct from the slot-placeable Gate
+> effect block (pidLow=0x0092). Wired params: `filter.level` /
+> `filter.low_cut` / `filter.high_cut` (0x0000 / 0x0012 / 0x0013,
+> +12 dB / 100 Hz / 1800 Hz on Low-Pass), `flanger.level` (0x0000,
+> +10 dB on Analog Stereo), `volpan.level` / `volpan.threshold` /
+> `volpan.attack` (0x0000 / 0x0010 / 0x0011, +12 dB / -20 dB /
+> 300 ms on Auto-Swell), `ingate.level` (0x0000, -10 dB).
+> KNOWN_PARAMS 98 → 106; verify-msg goldens 75 → 83;
+> verify-cache-params 79 → 83. Residuals queued: HW-034 (filter Q +
+> Order + Mod-page knobs, flanger Manual + Mod Phase — 7 unmapped
+> pidHighs); HW-035 (slot-Gate first-page knobs — currently only
+> type/balance registered); HW-036 (Input Noise Gate full decode
+> — Threshold / Release / Type encodings need new Unit + type-walk
+> capture); HW-037 (Enhancer screenshot to map the 5 captured
+> pidHighs). Methodology footnote: hdr2/action=0x0001 = single
+> knob-drag write, action=0x0002 = AM4-Edit-initiated dropdown
+> click — both work on hardware (per HW-015 SYSEX-MAP §6i).
+> Pre-existing context — Session 30 cont 7 — BK-030
 > Session C shipped Claude-side; **BK-030 closed end-to-end**.
 > Documentation pass — no code changes. README rewritten with
 > a two-table tool catalog (17 AM4-specific + 5 generic-MIDI
@@ -454,8 +478,22 @@ float32. One open question remains before the IR can cover full presets:
 
 ## The single next action
 
-**Most-likely next session: BK-029 project rename to MCP MIDI
-Tools (no hardware) OR HW-032 + HW-016 at the device.**
+**Most-likely next session: HW-034 + HW-035 + HW-036 (founder
+hardware) OR BK-029 project rename to MCP MIDI Tools (no
+hardware).**
+HW-032 closed partial 2026-04-25 — 8 params landed plus the
+Input Noise Gate identified as a new block, but 4 follow-up
+threads queued (HW-034 / 035 / 036 / 037). Highest-value gap is
+HW-035 (slot-Gate first-page knobs — currently only type +
+balance registered for a block whose threshold / attack / release
+controls are core gate functionality). Founder's "I did not have
+all those options" note on HW-032 is consistent with type-
+dependent UI rendering — different gate / filter types expose
+different knob subsets, so a Modern Gate capture for HW-035 +
+type-walk for HW-036 will likely surface more than the HW-032
+captures alone. BK-029 stays the natural non-hardware fallback.
+
+**Earlier (still applicable):**
 BK-030 closed Session 30 cont 7 — connection registry, five
 generic-MIDI primitive tools, and the Generic MIDI quick-start
 section in the README all shipped. The rename was explicitly

@@ -72,7 +72,36 @@ Claude picks up from there and moves the item to ⏳ or ✅.
 <!-- HW-024 completed 2026-04-25 (Session 30 cont 3) — see Archive
      below for the test report and findings. -->
 
-### HW-032 — Capture newly-discovered first-page knobs (HW-024 finding F4) 🔜
+### HW-032 — Capture newly-discovered first-page knobs (HW-024 finding F4) ⏳ partial-decode
+
+**Status (2026-04-25, Session 30 cont 8):** founder captured 5 of 5 expected
+pcapngs (gate / filter / flanger / enhancer / volpan) plus screenshots
+for gate / filter / flanger / volpan (enhancer screenshot pending).
+Decode landed **8 hardware-verified params** + identified the **Input
+Noise Gate** as a separate block (`pidLow=0x0025`, registered as
+`ingate`).
+
+Wired (verify-msg + verify-cache-params byte-exact):
+
+- `filter.level` (0x0000, dB, +12)
+- `filter.low_cut` (0x0012, Hz, 100)
+- `filter.high_cut` (0x0013, Hz, 1800)
+- `flanger.level` (0x0000, dB, +10)
+- `volpan.level` (0x0000, dB, +12)
+- `volpan.threshold` (0x0010, dB, -20)
+- `volpan.attack` (0x0011, ms, 300)
+- `ingate.level` (0x0000, dB, -10) — NEW BLOCK
+
+Residuals (queued as HW-034 / HW-035 / HW-036 below):
+
+- Filter Q + Order + page-2 modulation knobs (6 unmapped pidHighs).
+- Flanger Manual + Mod Phase (radians-encoded — needs `degrees` Unit).
+- Volpan Taper enum (Linear / Log / Exp candidate).
+- Ingate Threshold + Release + Type (non-trivial encodings + type-walk).
+- Enhancer first-page knob mapping (pcapng decoded but screenshot not
+  captured — re-queue with screenshot ask).
+
+
 
 - **For:** HW-024's Phase-2 readback inventoried the AM4 hardware
   display pages for several blocks and surfaced ~25 first-page
@@ -221,6 +250,132 @@ Claude picks up from there and moves the item to ⏳ or ✅.
   full coverage automatically, queue a Ghidra session to look
   for per-type Qt page-template resources inside the .exe. Not
   scoped here — would need its own HW-NNN.
+
+### HW-034 — Filter / Flanger residuals from HW-032 (single-knob isolation) 🔜
+
+- **For:** closes the 9 residual addresses HW-032 surfaced on Filter
+  + Flanger that need single-knob isolation captures to pin a UI
+  label and (in two cases) decide on a Unit extension.
+- **Setup:** AM4 plugged in, AM4-Edit open, USBPcap recording. Same
+  methodology as HW-019/020/021 — wiggle ONE knob at a time, ~1s
+  between knobs, save one pcapng per knob (or one pcapng per block
+  with clean ~1s gaps between knob wiggles).
+- **Filter (Low-Pass) — wiggle each in turn:**
+  1. **Q / Resonance** — knob shown as small "0.500" between
+     Frequency and Low Cut on the Config page. Expected to land
+     at `pidHigh=0x000c` (HW-032 capture had it at 0.9, mismatch
+     with screenshot 0.500 — wiggle needs to be discrete).
+  2. **Order** (2nd / 4th selector) — likely `pidHigh=0x0016`
+     (action=0x0002 in HW-032 capture, which is the action AM4-Edit
+     uses for type/order dropdown clicks). Cache id=22 is the
+     known phaser Order candidate at HW-017 — same register
+     possibly shared with filter.
+  3. Filter **Mode Enable** (page 2 modulation toggle) — likely
+     `pidHigh=0x000e` (single write, value 0.0 in HW-032 = OFF).
+  4. **Mod Frequency** / **Mod Rate** / **Mod Tempo** (page 2) —
+     candidate addresses 0x0017 / 0x0018 / 0x001a / 0x0028.
+- **Flanger (Analog Stereo) — wiggle each in turn:**
+  1. **Manual** — knob shown "Manual: 2.00" on screen. Capture
+     showed `pidHigh=0x000f` at 0.20 — likely ms with c=10 cache
+     scale (display = internal × 10), needs cache cross-reference
+     before naming.
+  2. **Mod Phase** — knob shown "45.0 deg" on screen. Capture had
+     `pidHigh=0x0011` at 0.7854 (= π/4 radians). Needs a new
+     `degrees` Unit (display = internal × 180/π) added to the
+     Unit union before this can be cleanly named.
+- **Suggested filenames:**
+  - `samples/captured/session-33-filter-q.pcapng`
+  - `samples/captured/session-33-filter-order.pcapng`
+  - `samples/captured/session-33-filter-mod-page.pcapng` (multi-knob
+    OK if each has its own ~1s gap)
+  - `samples/captured/session-33-flanger-manual.pcapng`
+  - `samples/captured/session-33-flanger-mod-phase.pcapng`
+- **Signal completion:** *"HW-034 done"* + saved paths.
+- **Priority:** medium — fills the highest-value coverage gap on
+  blocks already partially registered.
+
+### HW-035 — Slot-Gate first-page knobs 🔜
+
+- **For:** the slot-placeable Gate effect block (`pidLow=0x0092`,
+  block ID confirmed Session 18) currently has **only** type +
+  balance registered. HW-024's hardware-page inventory observed
+  Threshold / Attenuation / Attack / Release / Hold / Sidechain
+  Source / Level — none mapped. This is core gate functionality
+  and high-value coverage.
+- **Setup:** as HW-019 — load Gate block in any free slot, AM4-Edit
+  open, USBPcap recording.
+- **Capture: 1 pcapng** —
+  `samples/captured/session-33-slotgate-extended.pcapng`. Load
+  Modern Gate type. Wiggle in this order:
+  1. Threshold (dB)
+  2. Attack (ms)
+  3. Release (ms)
+  4. Hold (ms — if exposed on Modern Gate)
+  5. Attenuation (dB — if exposed)
+  6. Sidechain Source (enum — if exposed)
+  7. Level (dB output, right panel)
+- **Signal completion:** *"HW-035 done"* + saved path + a screenshot
+  of the Gate block's Config page so the per-type knob inventory
+  can be cross-checked.
+- **Priority:** medium — gate is core functionality.
+
+### HW-036 — Input Noise Gate full decode (pidLow=0x0025) 🔜
+
+- **For:** finishes the Input Noise Gate registration started under
+  HW-032. Three of the 4 captured registers (Threshold / Release /
+  Type) need either a new Unit, a cache record, or a type-walk
+  capture before they can be named cleanly.
+- **Why:** the In-Gate is the always-on input stage — every guitar
+  signal passes through it before hitting the AM4's effect slots.
+  Users will want to set the threshold / type for noise control
+  via natural language ("turn down the noise gate", "use the
+  intelligent gate to filter EMI hum from my guitar"). Currently
+  only `ingate.level` is exposed.
+- **Setup:** AM4 plugged in, AM4-Edit open, USBPcap recording.
+- **Captures:**
+  1. `samples/captured/session-33-ingate-threshold.pcapng` —
+     wiggle Threshold from -100 dB → 0 dB → -50 dB. The internal
+     0..1 → display -100..0 dB curve we observed in HW-032 needs
+     verification: is it linear, or does it use the same kind of
+     curve as Release? Two-point capture confirms.
+  2. `samples/captured/session-33-ingate-release.pcapng` — wiggle
+     Release through several discrete values (e.g. 5 ms / 50 ms /
+     500 ms). The 0.3552 → 51.33 ms mapping in HW-032 doesn't
+     match any of our existing Unit curves; multi-point capture
+     pins the exponent / range.
+  3. `samples/captured/session-33-ingate-types.pcapng` — click
+     through the 3 Type options (Classic / Intelligent / Noise
+     Reducer per BLOCK-PARAMS.md). Each click writes
+     `pidHigh=0x000f` with the type index. Confirms the enum
+     ordering. While clicking, also screenshot each type's UI
+     page — Intelligent and Noise Reducer may expose additional
+     knobs beyond Classic's Threshold/Release/Level set.
+- **Signal completion:** *"HW-036 done"* + saved paths + 3
+  screenshots (one per Type).
+- **Priority:** medium — In-Gate is everywhere in the signal path
+  but knob count is small.
+
+### HW-037 — Enhancer first-page knob mapping (HW-032 follow-up) 🔜
+
+- **For:** the founder captured `session-32-enhancer-extended.pcapng`
+  but didn't take a corresponding screenshot, so the 5 captured
+  pidHighs (0x0000=11.0, 0x000a=0.20, 0x000b=0.10, 0x000c=11.0,
+  0x000d=3200) can't be mapped to UI labels yet. The HW-024
+  hardware-page inventory listed Width / Phase Invert / Pan Left /
+  Pan Right / Balance / Level — five candidates plus the universal
+  Balance. 0x0000=11.0 is almost certainly `enhancer.level` per the
+  universal pattern, but the rest need pinning.
+- **Setup:** if the existing pcapng can be paired with a screenshot
+  of the same block state from AM4-Edit, that's enough — no
+  re-capture needed. Otherwise, recapture with one knob wiggled at
+  a time.
+- **Capture: 1 pcapng + 1 screenshot** —
+  `samples/captured/session-33-enhancer-extended.pcapng` + a
+  screenshot of the Enhancer's Config page showing every knob's
+  value. Or just the screenshot if the existing pcapng matches.
+- **Signal completion:** *"HW-037 done"* + saved paths.
+- **Priority:** low — Enhancer is a stereo utility, not core
+  tone-shaping.
 
 ### HW-029 — Resolve unidentified Drive `pidHigh=0x002d` (knob_0_10) 🔜
 

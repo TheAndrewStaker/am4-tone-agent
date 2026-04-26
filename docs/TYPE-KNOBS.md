@@ -233,25 +233,37 @@ registered in params.ts)" and queued as HW-032.
   hides Master because Plexis don't have one — HW-014 finding).
 
 - **Flanger** — universal: mix, type, rate, depth, feedback,
-  tempo (post-HW-027), balance. **Analog Stereo HW-024 inventory**:
-  Rate, Depth, Feedback, Mix, Tempo, **Manual**, **Mod Phase**,
-  **Level**. Bolded = unmapped, queued as HW-032.
+  tempo (post-HW-027), balance, **level (HW-032)**. **Analog
+  Stereo HW-024 inventory**: Rate, Depth, Feedback, Mix, Tempo,
+  **Manual**, **Mod Phase**, Level. Bolded = still unmapped after
+  HW-032 (Manual at pidHigh=0x000f; Mod Phase at pidHigh=0x0011
+  with radians-encoded internal float — needs a `degrees` Unit
+  extension before naming). Queued as HW-034.
 
 - **Chorus / Phaser / Tremolo** — universal: mix, type, rate,
   depth (Chorus only), feedback (Phaser only), tempo (post-HW-027),
   balance. Per-type extras pending HW-022 / HW-032.
 
-- **Filter** — universal: mix, type, freq, balance. **Low-Pass
-  HW-024 inventory** (page 1): Type, Frequency, **Q**, **Level**,
-  **Order**, **Low Cut**, **High Cut**. (page 2): **Mode Enable**,
+- **Filter** — universal: mix, type, freq, balance, **level
+  (HW-032)**, **low_cut (HW-032)**, **high_cut (HW-032)**.
+  **Low-Pass HW-024 inventory** (page 1): Type, Frequency, **Q**,
+  Level, **Order**, Low Cut, High Cut. (page 2): **Mode Enable**,
   **Mod Type**, **Frequency** (mod), **Mod Frequency**, **Mod Rate**,
-  **Mod Tempo**. Bolded = unmapped, queued as HW-032.
+  **Mod Tempo**. Bolded = still unmapped after HW-032 — Q + Order
+  + page-2 modulation knobs surfaced 6 distinct addresses in the
+  HW-032 capture (0x000c, 0x000e, 0x0016, 0x0017, 0x0018, 0x001a,
+  0x0028) but pinning each to a UI label needs single-knob isolation
+  captures. Queued as HW-034.
 
-- **Gate** — universal: type, balance. **Modern Gate HW-024
-  inventory**: **Threshold**, **Attenuation**, **Attack**,
-  **Release**, **Hold**, **Sidechain Source**, **Level**.
-  All unmapped — gate's core functionality is currently uncovered.
-  Queued as HW-032 (high priority).
+- **Gate** (slot-placeable, `pidLow=0x0092`) — universal: type,
+  balance. **Modern Gate HW-024 inventory**: **Threshold**,
+  **Attenuation**, **Attack**, **Release**, **Hold**, **Sidechain
+  Source**, **Level**. All unmapped — gate's core functionality
+  is currently uncovered. Queued as HW-035.
+
+- **Input Noise Gate (`ingate`, `pidLow=0x0025`)** — see dedicated
+  section below. NEW BLOCK as of HW-032; conceptually distinct from
+  the slot-placeable Gate effect block above.
 
 - **Enhancer** — universal: mix, type, balance. **Classic HW-024
   inventory**: **Width**, **Phase Invert**, **Pan Left**,
@@ -259,15 +271,56 @@ registered in params.ts)" and queued as HW-032.
   a *phantom* — wire-acks but no Mix knob exposed on any
   Enhancer page (HW-024 finding F1). `enhancer.balance` IS
   visible (HW-024 finding F2 — only block tested where balance
-  shows on hardware).
+  shows on hardware). HW-032 captured 5 distinct registers
+  (`session-32-enhancer-extended.pcapng`: 0x0000=11.0 likely Level,
+  0x000a=0.20, 0x000b=0.10, 0x000c=11.0, 0x000d=3200 likely Hz)
+  but the corresponding screenshot wasn't captured — knob mapping
+  pending.
 
-- **Volpan** — universal: mode, balance. **Auto-Swell mode HW-024
-  inventory**: **Threshold**, **Attack**, **Taper**, **Level**.
-  Volume mode (mode index 0) likely has different knobs (e.g.
-  Pan, Level only). Queued as HW-032.
+- **Volpan** — universal: mode, balance, **level (HW-032)**.
+  **Auto-Swell mode HW-032 inventory** (`session-32-volpan-extended
+  .pcapng`): **Threshold (HW-032 = -20 dB at pidHigh=0x0010)**,
+  **Attack (HW-032 = 300 ms at pidHigh=0x0011)**, Taper (enum at
+  pidHigh=0x000b — value 0.0 = "Linear" candidate; full enum walk
+  needed), Level. Volume mode (mode index 0) likely has different
+  knobs (e.g. Pan, Level only) — not yet captured.
 
 - **Wah / GEQ** — universal: type, balance (+ mix on Wah). Per-
   type extras pending HW-023.
+
+---
+
+## Input Noise Gate (`pidLow=0x0025`) — `ingate` block
+
+**Always-on** input stage; not placeable in any of the 4 effect
+slots. Distinct from the slot Gate effect block (`pidLow=0x0092`).
+Per `docs/BLOCK-PARAMS.md`, the AM4 manual describes 3 types
+(Classic Expander / Intelligent / Noise Reducer) plus a global
+Noisegate Offset under SETUP.
+
+### Captured registers (HW-032, `session-32-gate-extended.pcapng`)
+
+The capture's 4 final writes on the In-Gate config tab (active
+type: Classic):
+
+| pidHigh | Final | Hardware label | Status |
+|---|---|---|---|
+| 0x0000 | -10.0 | Level | ✅ wired as `ingate.level` (db, universal pattern) |
+| 0x000a | 0.2424 | Threshold (-75.8 dB on screen) | encoding: internal 0..1 → display -100..0 dB; needs a new Unit |
+| 0x000c | 0.3552 | Release (51.33 ms on screen) | encoding: non-trivial curve; needs cache record + Unit extension |
+| 0x000f | 0.0 | Type (Classic on screen) | enum: Classic / Intelligent / Noise Reducer; needs a type-walk capture |
+
+### Open follow-ups (HW-036)
+
+- The threshold / release / type registers above need either a new
+  Unit (e.g. `db_neg_normalized` for the 0..1 → -100..0 mapping) or
+  a cache record to back the encoding. The cache currently has no
+  sub-block matching `pidLow=0x0025`'s 4-register footprint — input
+  gate may not be in any cache block.
+- Type-walk capture: load each of Classic / Intelligent / Noise
+  Reducer in turn and observe what knobs each exposes (the manual
+  hints Intelligent mode adds an EMI-filter knob, Noise Reducer is
+  more aggressive).
 
 ---
 

@@ -6,6 +6,100 @@ file is the chronological trail that reference is built from.
 
 ---
 
+## 2026-04-25 — Session 30 cont 8 — HW-032 partial-decode (8 params + Input Noise Gate as new block)
+
+Founder captured 5 of 5 expected pcapngs (gate / filter / flanger /
+enhancer / volpan) plus screenshots for gate / filter / flanger /
+volpan (enhancer screenshot pending). Decode landed **8 hardware-
+verified params** plus identified the **Input Noise Gate** as a
+new block (`pidLow=0x0025`, registered as `ingate`).
+
+**Key finding — `In-Gate` is a separate block from the slot Gate.**
+`samples/captured/session-32-gate.png` shows the founder on the
+"In-Gate" tab of AM4-Edit, not on a slot Gate block. The wire
+captures used `pidLow=0x0025`, distinct from the slot Gate
+(`pidLow=0x0092` confirmed Session 18). `docs/BLOCK-PARAMS.md`
+already documented the Input Noise Gate as "global, not a block
+slot" with 3 types (Classic Expander / Intelligent / Noise
+Reducer) — HW-032 confirms it has its own `pidLow` namespace and
+4 distinct registers (Level / Threshold / Release / Type).
+
+**Captures and decoded params:**
+
+| pcapng | Final writes | Wired |
+|---|---|---|
+| `session-32-gate-extended` (In-Gate, Classic) | 4 (0x00 / 0x0a / 0x0c / 0x0f) | `ingate.level` (-10 dB, 0x0000) |
+| `session-32-filter-extended` (Low-Pass) | 11 | `filter.level` (+12 dB, 0x0000), `filter.low_cut` (100 Hz, 0x0012), `filter.high_cut` (1800 Hz, 0x0013) |
+| `session-32-flanger-extended` (Analog Stereo) | 8 | `flanger.level` (+10 dB, 0x0000) |
+| `session-32-volpan-extended` (Auto-Swell) | 4 | `volpan.level` (+12 dB, 0x0000), `volpan.threshold` (-20 dB, 0x0010), `volpan.attack` (300 ms, 0x0011) |
+| `session-32-enhancer-extended` | 5 | (none — screenshot pending; HW-037) |
+
+KNOWN_PARAMS 98 → 106; verify-msg goldens 75 → 83 (8 new byte-
+exact); verify-cache-params 79 → 83 (filter low/high cut + volpan
+threshold/attack added via paramNames.ts → gen-params).
+
+**Universal `pidHigh=0x0000` Level pattern continues to hold.**
+amp / drive / delay / compressor / reverb (queued HW-026) all
+have Level at 0x0000; this session adds filter / flanger /
+volpan / ingate to the list. Future capture decodes can register
+`{block}.level` confidently from the 0x0000 + dB-encoding
+signature alone.
+
+**Encoding gotchas surfaced (queued under HW-034 / 036):**
+
+- `ingate.threshold` (0x0a) — internal float 0..1 maps to display
+  -100..0 dB (capture: 0.2424 → screen -75.8 dB; formula
+  `display_dB = (internal - 1) × 100`). None of our existing
+  Units (`db` / `bipolar_percent` / `percent` / etc.) covers this
+  curve. Needs a Unit extension before clean naming.
+- `ingate.release` (0x0c) — internal 0.3552 → display 51.33 ms.
+  Formula isn't linear (× 144 ≈ 51.1, close but not exact),
+  isn't logarithmic (`log10(51.33)/log10(2000)` = 0.515, not
+  0.3552). Multi-point capture needed to pin the curve.
+- `flanger.mod_phase` (0x11) — radians stored, degrees displayed
+  (capture: 0.7854 = π/4 → screen 45.0 deg). Needs a `degrees`
+  Unit (display = internal × 180/π).
+- `flanger.manual` (0x0f) — capture 0.20 → screen "2.00" (likely
+  ms). Suggests a c=10 cache scale (display = internal × 10);
+  no existing Unit matches. Needs cache cross-reference + Unit
+  extension.
+
+**Methodology footnote on hdr2/action.** Several captures wrote
+with `action=0x0002` instead of our builder's `action=0x0001`.
+This matches the HW-015 finding (SYSEX-MAP §6i): AM4-Edit uses
+action=0x0002 for dropdown / type / order clicks, action=0x0001
+for knob drags. Both work on hardware — the value bytes are
+byte-identical, only the action header differs.
+
+**Residuals queued as four new HW tasks:**
+
+- **HW-034** — Filter Q + Order + Mod-page knobs (6 unmapped
+  pidHighs) and Flanger Manual + Mod Phase (2 needing Unit
+  extension). Single-knob isolation captures.
+- **HW-035** — Slot-Gate (`pidLow=0x0092`) first-page knobs.
+  Currently only type / balance registered; HW-024 inventory
+  surfaced Threshold / Attenuation / Attack / Release / Hold /
+  Sidechain Source / Level — none mapped. Core gate
+  functionality.
+- **HW-036** — Input Noise Gate full decode. Threshold / Release
+  encoding curves + type-walk through Classic / Intelligent /
+  Noise Reducer. Per-type screenshots so each type's exposed
+  knob set is documented.
+- **HW-037** — Enhancer screenshot to pair with the existing
+  `session-32-enhancer-extended.pcapng`. 5 pidHighs captured but
+  none mapped to UI labels. Low priority — Enhancer is a stereo
+  utility, not core tone-shaping.
+
+**Files updated:** `src/protocol/params.ts` (+8 entries),
+`src/protocol/paramNames.ts` (+4 cache entries), `src/protocol/
+cacheParams.ts` (regenerated), `scripts/verify-msg.ts` (+8
+goldens), `docs/STATE.md`, `docs/SESSIONS.md`,
+`docs/HARDWARE-TASKS.md`, `docs/TYPE-KNOBS.md`. Preflight green:
+83/83 verify-msg, 16/16 verify-pack, 16/16 verify-transpile, 8/8
+verify-echo, 83/83 verify-cache-params, smoke-server 22/22 tools.
+
+---
+
 ## 2026-04-25 — Session 30 cont 7 — BK-030 Session C shipped (README quick-start + tool-count refresh); BK-030 closed
 
 No hardware. Documentation pass that wraps BK-030. Closes the
