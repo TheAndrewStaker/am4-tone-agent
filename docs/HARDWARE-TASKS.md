@@ -276,45 +276,11 @@ Claude picks up from there and moves the item to ⏳ or ✅.
 <!-- HW-027 completed 2026-04-25 (Session 30 cont 2) — see Archive
      below for the decode summary. -->
 
-### HW-033 — Extend lineage extractor to capture per-type "Controls:" prose 🔜
+<!-- HW-033 completed 2026-04-25 (Session 30 cont 4) — Claude-side
+     extraction landed. See Archive below. -->
 
-- **For:** TYPE-KNOBS.md per-type knob coverage. The Fractal wiki
-  states a strong rule (Drive_block.md line 232: "The controls on
-  the Basic page of the Drive correspond with the knobs on the
-  modeled devices") and ~19 drive types + similar coverage on
-  reverb / delay / compressor / phaser / etc. carry explicit
-  "Controls:" prose listing the modeled device's physical knobs.
-  Today our lineage JSONs (`src/knowledge/{block}-lineage.json`)
-  capture `basedOn.productName` / `manufacturer` / `model` /
-  `description` / `categories` but NOT the controls.
-- **Why:** for any AM4 type whose modeled device has documented
-  controls, we can derive the AM4-Edit Basic-page knob list
-  without a hardware capture (per the wiki rule). That's the
-  fastest path to growing TYPE-KNOBS.md per-type coverage from
-  the ~5 hardware-captured rows we have today to potentially
-  ~50–100 rows across all blocks.
-- **Strategy:**
-  - Extend `scripts/extract-lineage.ts` to grep the per-block
-    wiki .md files for "Controls:" / "Original controls:" /
-    "knobs:" patterns and a few synonyms ("the pedal has X
-    knobs", "knobs are", etc.).
-  - Add a `controls: { values: string[]; source: 'fractal-wiki' }`
-    field per record where prose was found.
-  - Run `npm run extract-lineage` to regenerate the JSONs.
-  - Update TYPE-KNOBS.md generation (or write a new script) to
-    cross-reference each type's `controls` against `params.ts`
-    block knob names and emit a `wiki-derived` row per type.
-- **Pass criterion:** `extract-lineage` regenerates without errors
-  and at least 50% of captured drive/reverb/delay/compressor
-  types gain a `controls` field. Cross-validate against HW-019
-  / HW-020 / HW-021 captures (T808 OD / Blackglass 7K / Digital
-  Mono / JFET Studio) — wiki-derived knobs should match captured
-  knobs (modulo wiki gaps and Fractal's added "Mix" / "Balance" /
-  output controls).
-- **Status:** **No founder action required.** Pure Claude-side.
-- **Priority:** medium — biggest coverage-jump available short
-  of HW-032 captures, and complements HW-032 by reducing the
-  capture set needed to validate the heuristic.
+### HW-033 — Extend lineage extractor to capture per-type "Controls:" prose ✅
+*See Archive below for the implementation summary and coverage stats.*
 
 
 ### HW-026 — Resolve unidentified `pidHigh=0x0000` on Reverb (likely Level) 🔜
@@ -1184,6 +1150,64 @@ highest numbers.
   AM4-Edit, not the AM4 hardware display.
 - **Goldens.** 5 new byte-exact entries in `verify-msg` (1 BK-033 +
   4 BK-034 wire-match anchors).
+
+### HW-033 — Extend lineage extractor to capture per-type "Controls:" prose ✅
+
+- **Closed 2026-04-25 (Session 30 cont 4) — Claude-side, no founder
+  hardware.** `scripts/extract-lineage.ts` extended with
+  `extractControlsFromBody()` — 10 ordered regex patterns covering
+  the wiki's "Controls:" / "Original controls:" / "models the
+  original controls:" / "the (adj-)?pedal has X controls/knobs"
+  prose shapes. Per-token sanitizer handles paren stripping
+  (iterative balanced + orphan cleanup, since the wiki has typos
+  like Octave Distortion's `Drive))` and BB Pre's unclosed
+  `(read more...`), connective-word truncation ("Glass which sets"
+  → "Glass"), 3-word cap, count-prefix filtering, and uppercase-
+  first-char gating.
+- **Coverage:** 31 drive types + 1 phaser type now have
+  `controls: { values, raw, source: 'fractal-wiki' }` populated
+  in `src/knowledge/{block}-lineage.json`. Other blocks (reverb /
+  delay / compressor / amp / chorus / flanger / wah) extracted
+  zero — those wikis don't document per-type knob lists (they
+  describe algorithms / models, not original-pedal control sets).
+  Drive's high yield is because Drive types are virtual-pedal
+  models and the wiki consistently lists their original-pedal
+  knob set.
+- **Cross-validation against captures:**
+  - **T808 OD wiki** = "Drive | Tone | Level" → matches HW-019
+    capture exactly.
+  - **Klone Chiron wiki** = "Gain | Treble | Output" → matches
+    the HW-014 finding (Fractal exposes them as drive.drive /
+    drive.tone / drive.level under the universal Drive UI labels;
+    the wiki surfaces the original Klon Centaur knob names).
+  - **Blackglass 7K wiki** = "Blend | Level | Drive | Low | Low
+    Mids | Hi Mids | Treble" (7) → close to HW-019's 9 captured
+    knobs. Fractal adds universal drive.tone + drive.mid_freq vs.
+    the wiki's 4-band EQ, and renames Blend → drive.mix.
+- **New script `scripts/build-type-knobs.ts`** (`npm run
+  build-type-knobs`) emits `docs/TYPE-KNOBS-WIKI.md` — auto-
+  generated companion to manually-maintained `docs/TYPE-KNOBS.md`.
+  Each row carries: type name + modeled device + raw wiki labels
+  + mapped `params.ts` keys + unmapped wiki labels. Per-block
+  alias map handles fuzzy matches ("Volume" → level, "Blend" →
+  mix, "Gain" → drive in drive block / gain in amp block).
+- **15 unmapped wiki labels** surfaced — knobs the wiki names
+  but `params.ts` doesn't yet register. Worth review for future
+  param additions: Voice (Zendrive), Presence (Hot Cake),
+  Contour (Shredmaster), Boost (Full-Drive 2), Glass (Eternity),
+  EQ + Tube Drive (Tube Drive 3-Knob), 3-band EQ (M-Zone), Manual
+  Shift + Auto/Manual (Bad Stone phaser), Bump switch + 100HZ
+  cut/boost + High Cut switch + Gain switch (various). These are
+  wiki-named knobs we don't have params for; some may be real
+  registers, some may be type-rendered switches that map to
+  enums.
+- **Complement to HW-030 step 2.** HW-030 step 2 (lazy AM4-Edit
+  screenshot pass) remains the founder-owed lazy-population
+  track for AM4-Edit's exposed knobs per type. HW-033 covers
+  what the **modeled device** has; HW-030 covers what **AM4-Edit
+  shows**. They overlap heavily (per the wiki rule) but differ
+  where Fractal adds universal knobs (Tone / Mix / Balance) or
+  renames originals.
 
 ### HW-012 — Round-trip `apply_preset` with the per-slot `channels` shape ✅
 

@@ -1,6 +1,6 @@
 {
   "_source": "Fractal Audio wiki — Drive_block.md + Blocks Guide PDF",
-  "_extractedAt": "2026-04-18T01:21:44.597Z",
+  "_extractedAt": "2026-04-26T02:14:32.323Z",
   "_catalogSize": 78,
   "_recordCount": 83,
   "records": [
@@ -27,6 +27,17 @@
         "model": "M77",
         "productName": "Badass Modified OD",
         "source": "fractal-wiki"
+      },
+      "controls": {
+        "values": [
+          "Tone",
+          "Output",
+          "100HZ cut/boost",
+          "Gain",
+          "Bump switch"
+        ],
+        "raw": "Tone, Output, 100HZ cut/boost, Gain and Bump switch",
+        "source": "fractal-wiki"
       }
     },
     {
@@ -52,6 +63,17 @@
         "model": "V3",
         "productName": "Angry Charlie",
         "source": "fractal-wiki"
+      },
+      "controls": {
+        "values": [
+          "Drive",
+          "Volume",
+          "Bass",
+          "Middle",
+          "Treble"
+        ],
+        "raw": "Drive, Volume, Bass, Middle and Treble",
+        "source": "fractal-wiki"
       }
     },
     {
@@ -74,7 +96,17 @@
         "source": "fractal-wiki"
       },
       "description": "Based on the Xotic BB preamp standard (v1.5)",
-      "descriptionSource": "fractal-blocks-guide"
+      "descriptionSource": "fractal-blocks-guide",
+      "controls": {
+        "values": [
+          "Gain",
+          "Volume",
+          "Bass",
+          "Treble"
+        ],
+        "raw": "Gain, Volume, Bass and Treble",
+        "source": "fractal-wiki"
+      }
     },
     {
       "am4Name": "BB Pre AT",
@@ -154,7 +186,20 @@
         "source": "fractal-wiki"
       },
       "description": "Based on Darkglass Microtubes B7K bass preamp and drive.",
-      "descriptionSource": "fractal-blocks-guide"
+      "descriptionSource": "fractal-blocks-guide",
+      "controls": {
+        "values": [
+          "Blend",
+          "Level",
+          "Drive",
+          "Low",
+          "Low Mids",
+          "Hi Mids",
+          "Treble"
+        ],
+        "raw": "Blend , Level, Drive and four EQ knobs: Low , Low Mids , Hi Mids , Treble",
+        "source": "fractal-wiki"
+      }
     },
     {
       "am4Name": "Blues OD",
@@ -174,7 +219,15 @@
         "source": "fractal-wiki"
       },
       "description": "Based on the Marshall Bluesbreaker.",
-      "descriptionSource": "fractal-blocks-guide"
+      "descriptionSource": "fractal-blocks-guide",
+      "controls": {
+        "values": [
+          "Gain",
+          "Tone"
+        ],
+        "raw": "Gain, Tone, and Volume",
+        "source": "fractal-wiki"
+      }
     },
     {
       "am4Name": "Bosom Boost",
@@ -220,6 +273,14 @@
         "manufacturer": "MI Audio",
         "model": "V1",
         "productName": "Crunch Box",
+        "source": "fractal-wiki"
+      },
+      "controls": {
+        "values": [
+          "Gain",
+          "Tone"
+        ],
+        "raw": "Gain , Tone , and Vol",
         "source": "fractal-wiki"
       }
     },
@@ -352,7 +413,17 @@
         "source": "fractal-wiki"
       },
       "description": "Based on the Xotic AC Booster",
-      "descriptionSource": "fractal-blocks-guide"
+      "descriptionSource": "fractal-blocks-guide",
+      "controls": {
+        "values": [
+          "Gain",
+          "Volume",
+          "Bass",
+          "Treble"
+        ],
+        "raw": "Gain, Volume, Bass and Treble",
+        "source": "fractal-wiki"
+      }
     },
     {
       "am4Name": "Esoteric Bass RCB",
@@ -393,7 +464,17 @@
         "source": "fractal-wiki"
       },
       "description": "Based on the Xotic RC Booster",
-      "descriptionSource": "fractal-blocks-guide"
+      "descriptionSource": "fractal-blocks-guide",
+      "controls": {
+        "values": [
+          "Gain",
+          "Volume",
+          "Bass",
+          "Treble"
+        ],
+        "raw": "Gain, Volume, Bass and Treble",
+        "source": "fractal-wiki"
+      }
     },
     {
       "am4Name": "Eternal Love",
@@ -414,7 +495,16 @@
         "source": "fractal-wiki"
       },
       "description": "Based on a Lovepedal Eternity.",
-      "descriptionSource": "fractal-blocks-guide"
+      "descriptionSource": "fractal-blocks-guide",
+      "controls": {
+        "values": [
+          "Level",
+          "Drive",
+          "Glass"
+        ],
+        "raw": "Level, Drive and Glass  which sets the amount of presence",
+        "source": "fractal-wiki"
+      }
     },
     {
       "am4Name": "Face Fuzz",
@@ -546,7 +636,17 @@
         "source": "fractal-wiki"
       },
       "description": "Based on the Fulltone Fulldrive OD Pedal.",
-      "descriptionSource": "fractal-blocks-guide"
+      "descriptionSource": "fractal-blocks-guide",
+      "controls": {
+        "values": [
+          "Volume",
+          "Tone",
+          "Overdrive",
+          "Boost"
+        ],
+        "raw": "Volume, Tone, Overdrive, Boost",
+        "source": "fractal-wiki"
+      }
     },
     {
       "am4Name": "Gauss Drive",
@@ -563,6 +663,16 @@
         "primary": "Mesa Flux-Drive",
         "manufacturer": "Mesa",
         "productName": "Flux-Drive",
+        "source": "fractal-wiki"
+      },
+      "controls": {
+        "values": [
+          "Level",
+          "Gain",
+          "Bass",
+          "Treble"
+        ],
+        "raw": "Level, Gain, Bass, Treble",
         "source": "fractal-wiki"
       }
     },
@@ -583,7 +693,16 @@
         "source": "fractal-wiki"
       },
       "description": "Based on the Crowther Hot Cake.",
-      "descriptionSource": "fractal-blocks-guide"
+      "descriptionSource": "fractal-blocks-guide",
+      "controls": {
+        "values": [
+          "Level",
+          "Presence",
+          "Drive"
+        ],
+        "raw": "Level, Presence, Drive, and a XLF switch which extends low frequencies",
+        "source": "fractal-wiki"
+      }
     },
     {
       "am4Name": "Guardian Photon Speed",
@@ -599,6 +718,15 @@
       "flags": [],
       "basedOn": {
         "primary": "Greer Lightspeed",
+        "source": "fractal-wiki"
+      },
+      "controls": {
+        "values": [
+          "Loudness",
+          "Drive",
+          "Freq"
+        ],
+        "raw": "Loudness , Drive, Freq",
         "source": "fractal-wiki"
       }
     },
@@ -635,7 +763,17 @@
         "source": "fractal-wiki"
       },
       "description": "Based on Lovepedal OD11",
-      "descriptionSource": "fractal-blocks-guide"
+      "descriptionSource": "fractal-blocks-guide",
+      "controls": {
+        "values": [
+          "Level",
+          "Drive",
+          "Bass",
+          "Tone"
+        ],
+        "raw": "Level, Drive, Bass , Tone",
+        "source": "fractal-wiki"
+      }
     },
     {
       "am4Name": "Hoodoo Drive",
@@ -707,7 +845,17 @@
         "source": "fractal-wiki"
       },
       "description": "Based on Vemuram Jan Ray",
-      "descriptionSource": "fractal-blocks-guide"
+      "descriptionSource": "fractal-blocks-guide",
+      "controls": {
+        "values": [
+          "Volume",
+          "Bass",
+          "Treble",
+          "Gain"
+        ],
+        "raw": "Volume, Bass , Treble, Gain",
+        "source": "fractal-wiki"
+      }
     },
     {
       "am4Name": "Klone Chiron",
@@ -727,7 +875,16 @@
         "source": "fractal-wiki"
       },
       "description": "Based on the Klon Centaur",
-      "descriptionSource": "fractal-blocks-guide"
+      "descriptionSource": "fractal-blocks-guide",
+      "controls": {
+        "values": [
+          "Gain",
+          "Treble",
+          "Output"
+        ],
+        "raw": "Gain, Treble, Output",
+        "source": "fractal-wiki"
+      }
     },
     {
       "am4Name": "M-Zone Distortion",
@@ -749,7 +906,16 @@
         "source": "fractal-wiki"
       },
       "description": "Simulates the Boss Metal Zone, popular for extreme gain settings.",
-      "descriptionSource": "fractal-blocks-guide"
+      "descriptionSource": "fractal-blocks-guide",
+      "controls": {
+        "values": [
+          "Level",
+          "3-band EQ",
+          "Distortion"
+        ],
+        "raw": "Level, 3-band EQ , active), Distortion: amount of distortion",
+        "source": "fractal-wiki"
+      }
     },
     {
       "am4Name": "Master Fuzz",
@@ -905,6 +1071,16 @@
         "model": "ODR-1",
         "productName": "Nobels BC Natural",
         "source": "fractal-wiki"
+      },
+      "controls": {
+        "values": [
+          "Drive",
+          "Spectrum",
+          "Level",
+          "Bass Cut"
+        ],
+        "raw": "Drive, Spectrum , Level, Bass Cut",
+        "source": "fractal-wiki"
       }
     },
     {
@@ -920,6 +1096,14 @@
         "primary": "Tycobrahe Octavia",
         "manufacturer": "Tycobrahe",
         "productName": "Octavia",
+        "source": "fractal-wiki"
+      },
+      "controls": {
+        "values": [
+          "Volume",
+          "Boost"
+        ],
+        "raw": "Volume and Boost )",
         "source": "fractal-wiki"
       }
     },
@@ -941,7 +1125,15 @@
         "source": "fractal-wiki"
       },
       "description": "Based on the DOD OD 250, yellow version",
-      "descriptionSource": "fractal-blocks-guide"
+      "descriptionSource": "fractal-blocks-guide",
+      "controls": {
+        "values": [
+          "Gain",
+          "Level"
+        ],
+        "raw": "Gain  and Level",
+        "source": "fractal-wiki"
+      }
     },
     {
       "am4Name": "OD 250 Gray",
@@ -1015,7 +1207,16 @@
         "source": "fractal-wiki"
       },
       "description": "Based on the Big Muff Pi fuzz.",
-      "descriptionSource": "fractal-blocks-guide"
+      "descriptionSource": "fractal-blocks-guide",
+      "controls": {
+        "values": [
+          "Volume",
+          "Tone",
+          "Sustain"
+        ],
+        "raw": "Volume, Tone and Sustain",
+        "source": "fractal-wiki"
+      }
     },
     {
       "am4Name": "PI Fuzz - Bass",
@@ -1076,6 +1277,14 @@
         "primary": "Electro-Harmonix Russian Big Muff Pi",
         "manufacturer": "Electro-Harmonix",
         "productName": "Russian Big Muff Pi",
+        "source": "fractal-wiki"
+      },
+      "controls": {
+        "values": [
+          "Output",
+          "Distortion"
+        ],
+        "raw": "Output and Distortion",
         "source": "fractal-wiki"
       }
     },
@@ -1161,6 +1370,17 @@
         "manufacturer": "Marshall",
         "productName": "Shredmaster",
         "source": "fractal-wiki"
+      },
+      "controls": {
+        "values": [
+          "Gain",
+          "Bass",
+          "Treble",
+          "Contour",
+          "Volume"
+        ],
+        "raw": "Gain, Bass, Treble, Contour  and Volume",
+        "source": "fractal-wiki"
       }
     },
     {
@@ -1183,7 +1403,16 @@
         "source": "fractal-wiki"
       },
       "description": "Based on Ibanez SD9M Sonic Distortion",
-      "descriptionSource": "fractal-blocks-guide"
+      "descriptionSource": "fractal-blocks-guide",
+      "controls": {
+        "values": [
+          "Distortion",
+          "Level",
+          "Tone"
+        ],
+        "raw": "Distortion, Level, Tone  and three-way voicing switch",
+        "source": "fractal-wiki"
+      }
     },
     {
       "am4Name": "Sunrise Splendor",
@@ -1201,6 +1430,17 @@
         "manufacturer": "JHS",
         "model": "V4",
         "productName": "Morning Glory",
+        "source": "fractal-wiki"
+      },
+      "controls": {
+        "values": [
+          "Volume",
+          "Drive",
+          "Tone",
+          "Gain switch",
+          "High Cut switch"
+        ],
+        "raw": "Volume, Drive, Tone, Gain switch , High Cut switch",
         "source": "fractal-wiki"
       }
     },
@@ -1227,6 +1467,14 @@
       "flags": [],
       "basedOn": {
         "primary": "Univox Super-Fuzz",
+        "source": "fractal-wiki"
+      },
+      "controls": {
+        "values": [
+          "Balance",
+          "Expander"
+        ],
+        "raw": "Balance , Expander , two-position tone switch",
         "source": "fractal-wiki"
       }
     },
@@ -1287,7 +1535,16 @@
         "source": "fractal-wiki"
       },
       "description": "Based on the Ibanez TS-9 Tube Screamer overdrive.",
-      "descriptionSource": "fractal-blocks-guide"
+      "descriptionSource": "fractal-blocks-guide",
+      "controls": {
+        "values": [
+          "Drive",
+          "Tone",
+          "Level"
+        ],
+        "raw": "Drive, Tone  and Level",
+        "source": "fractal-wiki"
+      }
     },
     {
       "am4Name": "T808 Mod",
@@ -1343,6 +1600,16 @@
         "model": "V4",
         "productName": "Timmy",
         "source": "fractal-wiki"
+      },
+      "controls": {
+        "values": [
+          "Bass",
+          "Gain",
+          "Volume",
+          "Treble"
+        ],
+        "raw": "Bass , Gain, Volume and Treble",
+        "source": "fractal-wiki"
       }
     },
     {
@@ -1397,7 +1664,16 @@
         "source": "fractal-wiki"
       },
       "description": "Based on the King of Tone by Analog Man, a sought-after variant Bluesbreaker pedal",
-      "descriptionSource": "fractal-blocks-guide"
+      "descriptionSource": "fractal-blocks-guide",
+      "controls": {
+        "values": [
+          "Drive",
+          "Volume",
+          "Tone"
+        ],
+        "raw": "Drive, Volume and Tone",
+        "source": "fractal-wiki"
+      }
     },
     {
       "am4Name": "Treble Boost",
@@ -1480,6 +1756,15 @@
       "basedOn": {
         "primary": "Butler Tube Driver",
         "source": "fractal-wiki"
+      },
+      "controls": {
+        "values": [
+          "Out Level",
+          "EQ",
+          "Tube Drive"
+        ],
+        "raw": "Out Level, EQ and Tube Drive",
+        "source": "fractal-wiki"
       }
     },
     {
@@ -1543,7 +1828,17 @@
         "source": "fractal-wiki"
       },
       "description": "Based on Hermida Zen Drive.",
-      "descriptionSource": "fractal-blocks-guide"
+      "descriptionSource": "fractal-blocks-guide",
+      "controls": {
+        "values": [
+          "Vol",
+          "Gain",
+          "Tone",
+          "Voice"
+        ],
+        "raw": "Vol, Gain , Tone  and Voice",
+        "source": "fractal-wiki"
+      }
     }
   ]
 }

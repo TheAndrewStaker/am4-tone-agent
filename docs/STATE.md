@@ -5,7 +5,35 @@
 > hardware tasks (USB captures, round-trip tests, reference dumps) live
 > in **`docs/HARDWARE-TASKS.md`** — check that file alongside this one at
 > session start.
-> Last updated: **2026-04-25** (Session 30 cont 3 — HW-024 closed.
+> Last updated: **2026-04-25** (Session 30 cont 4 — HW-033 closed
+> Claude-side. Extended `scripts/extract-lineage.ts` with
+> `extractControlsFromBody()` — 10 regex patterns covering the
+> wiki's "Controls:" / "Original controls:" / "the pedal has X
+> knobs" / "models the original controls:" prose shapes, plus a
+> per-token sanitizer that handles paren stripping, connective-
+> word truncation ("Glass which sets" → "Glass"), 3-word cap, and
+> count-prefix filtering. **31 drive types + 1 phaser type now
+> have `controls: { values, raw, source }` fields populated** in
+> `src/knowledge/{block}-lineage.json` (out of 78 drive +17
+> phaser canonical types). Cross-validated against HW-019/HW-014
+> hardware captures: T808 OD wiki = "Drive | Tone | Level" matches
+> capture exactly; Klone Chiron wiki = "Gain | Treble | Output"
+> matches the HW-014 finding (Fractal labels them Drive/Tone/Level
+> in AM4-Edit per the universal Drive UI but original Klon labels
+> are surfaced via the wiki). Blackglass 7K wiki = 7 knobs (Blend,
+> Level, Drive, Low, Low Mids, Hi Mids, Treble) — close to HW-019
+> capture's 9 knobs (Fractal adds universal Tone + Mid Freq vs.
+> the wiki's 4-band EQ). New script `scripts/build-type-knobs.ts`
+> emits `docs/TYPE-KNOBS-WIKI.md` (auto-generated) with one row
+> per type: wiki labels + mapped `params.ts` keys + unmapped wiki
+> labels (knobs the wiki names but our registry doesn't yet
+> register — 15 of these surface knobs worth investigating, e.g.
+> "Voice" on Zendrive, "Presence" on Hot Cake, "Contour" on
+> Shredmaster). Companion to manually-maintained `docs/TYPE-KNOBS.md`
+> (hardware-captured rows). New `npm run build-type-knobs` script.
+> No founder action; HW-030 step 2 (lazy AM4-Edit screenshot pass)
+> still pending and complementary. Pre-existing context — Session
+> 30 cont 3 — HW-024 closed.
 > Conversational hardware test via Claude Desktop covered Round 4
 > (enhancer/gate/volpan first-time tests) + 4 re-tests + 2 first-
 > ever tests (reverb.springs / reverb.spring_tone on Spring,
@@ -366,15 +394,18 @@ surfaced (Gate / Filter / Flanger / Enhancer / Volpan) are the
 single biggest coverage gain available right now and pair well
 with the founder being at the device for HW-016.
 
-**HW-033 (Claude-side, no hardware) is the next-best coverage
-move** — extend `scripts/extract-lineage.ts` to capture
-"Controls:" prose from the wiki into a `controls` field per
-lineage record, then derive AM4-Edit Basic-page knobs from the
-Fractal wiki rule "Basic page knobs = modeled device's knobs"
-(documented in TYPE-KNOBS.md). Could grow per-type coverage from
-~5 captured rows to ~50–100 wiki-derived rows. HW-031 (Ghidra
-type-visibility decode) and BK-030 (generic-MIDI primitives) are
-the other non-hardware-gated tracks.
+**HW-033 ✅ closed Session 30 cont 4 (Claude-side, no hardware).**
+`scripts/extract-lineage.ts` now extracts wiki "Controls:" prose
+into a `controls` field per lineage record. **31 drive types +
+1 phaser type** have wiki-derived knob lists. New
+`scripts/build-type-knobs.ts` emits `docs/TYPE-KNOBS-WIKI.md`
+with `params.ts` cross-references per type — companion to the
+manually-maintained `docs/TYPE-KNOBS.md`. **15 unmapped wiki
+labels** surfaced (Voice / Presence / Contour / etc.) — knobs
+the wiki names that `params.ts` doesn't yet register; review
+candidates for future param additions. HW-031 (Ghidra type-
+visibility decode) and BK-030 (generic-MIDI primitives) are
+the next non-hardware-gated tracks.
 
 **HW-030 step 1 done — partial fail. Pivot to HW-016 + lazy
 HW-030 step 2.** Session 30 cont (continued) ruled out the

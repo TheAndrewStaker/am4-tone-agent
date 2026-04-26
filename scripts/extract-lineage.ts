@@ -67,6 +67,23 @@ interface FractalQuote {
   attribution?: string;
 }
 
+/** HW-033: per-type knob list extracted from wiki "Controls:" prose. The
+ *  Fractal wiki's per-type bodies frequently document the modeled device's
+ *  physical control set ("The pedal has these controls: Drive, Tone, Level").
+ *  Combined with the Drive_block.md line 232 rule — "The controls on the
+ *  Basic page of the Drive correspond with the knobs on the modeled
+ *  devices" — these labels tare a strong wiki-derived prior for the AM4-Edit
+ *  Basic-page knob list per type. Used by `scripts/build-type-knobs.ts` to
+ *  populate `docs/TYPE-KNOBS.md` rows for types we haven't hardware-captured.
+ *  Always treat as a prior, not a guarantee — see TYPE-KNOBS.md notes. */
+interface ControlsList {
+  values: string[];
+  /** The raw text captured before splitting + cleaning. Lets reviewers
+   *  cross-check the parser's output against the source sentence. */
+  raw: string;
+  source: SourceTag;
+}
+
 interface BaseRecord {
   am4Name: string;
   wikiName?: string;
@@ -74,6 +91,7 @@ interface BaseRecord {
   description?: string;
   /** Where `description` came from. Nullable when description is absent. */
   descriptionSource?: SourceTag;
+  controls?: ControlsList;
   fractalQuotes: FractalQuote[];
   flags: string[];
 }
@@ -571,6 +589,154 @@ function extractFirstUrl(s: string): string | undefined {
   return m ? m[1] : undefined;
 }
 
+// ─── Controls extractor (HW-033) ─────────────────────────────────────────────
+//
+// Parses per-type wiki bodies for "Controls:" / "the pedal has these
+// controls:" / "the pedal has X, Y, Z knobs" / etc. patterns and returns the
+// comma-separated list of modeled-device knob names. See `ControlsList` doc
+// comment for design rationale.
+//
+// Patterns are tried in priority order; first successful match wins. The
+// captured raw text is then split on commas / "and" / "&" / colons (for
+// inline sub-lists like "four EQ knobs: Low, Low Mids, ..."), parentheticals
+// stripped, and tokens that don't look like knob names dropped.
+
+const CONTROLS_PATTERNS: readonly RegExp[] = [
+  // 1. "Original controls (on the N-knob version)? (are)?: <list>."
+  /\b[Oo]riginal\s+controls(?:\s+on\s+the\s+\S+-knob\s+version)?(?:\s+are)?\s*[:.]\s*([^.!?\n]+?)\s*[.!?\n]/,
+  // 2. "Controls on the (original\s+)?(pedal|amp|unit|model)(\s+include)?: <list>."
+  /\b[Cc]ontrols\s+on\s+the\s+(?:original\s+)?(?:pedal|amp|unit|model)(?:\s+include)?\s*:\s*([^.!?\n]+?)\s*[.!?\n]/,
+  // 3. "models the original controls: <list>." (Phaser inline form)
+  /\bmodels\s+the\s+original\s+controls?\s*:?\s*([^.!?\n]+?)\s*[.!?\n]/i,
+  // 4. "Controls: <list>." anchored at sentence start
+  /(?:^|[.!?\n]\s*)[Cc]ontrols\s*:\s*([^.!?\n]+?)\s*[.!?\n]/,
+  // 5. "Controls are (:) <list>." anchored at sentence start
+  /(?:^|[.!?\n]\s*)[Cc]ontrols\s+are\s*:?\s*([^.!?\n]+?)\s*[.!?\n]/,
+  // 6. "the pedal's/amp's controls are (:) <list>." (curly + straight quotes)
+  /\b[Tt]he\s+(?:pedal|amp|unit)[’']s\s+controls?\s+are\s*:?\s*([^.!?\n]+?)\s*[.!?\n]/,
+  // 7. "the (adj-)?pedal has (these|just|the)? (N)? control(s): <list>." Note
+  //    optional "s" — wiki sometimes typos "control" (TS808 entry). Allow one
+  //    optional adjective ("The diode-based pedal has...", "The classic
+  //    pedal has...") since several drive entries use that phrasing.
+  /\b[Tt]he\s+(?:[\w-]+\s+)?(?:pedal|amp|unit)\s+has\s+(?:these\s+|just\s+|the\s+)?(?:two\s+|three\s+|four\s+|five\s+|six\s+|seven\s+)?controls?\s*:\s*([^.!?\n]+?)\s*[.!?\n]/,
+  // 8. "the pedal has N knobs: <list>."
+  /\b[Tt]he\s+(?:[\w-]+\s+)?(?:pedal|amp|unit)\s+has\s+(?:two|three|four|five|six)\s+knobs\s*:\s*([^.!?\n]+?)\s*[.!?\n]/,
+  // 9. "the (adj-)?pedal has <Title-Case list> knobs[.]?" — e.g. "Gain,
+  //    Volume, Bass and Treble knobs". Title-cased start anchors against
+  //    random prose.
+  /\b[Tt]he\s+(?:[\w-]+\s+)?(?:pedal|amp|unit)\s+has\s+([A-Z][A-Za-z0-9 ,/\-']*?)\s+knobs\b/,
+  // 10. "the X has Y, Z and W controls" — e.g. "Original controls are: Vol,
+  //     Gain, Tone and Voice." (covered by #1) but also "the model has
+  //     Drive, Tone and Level controls."
+  /\b[Tt]he\s+(?:model|original)\s+has\s+([A-Z][A-Za-z0-9 ,/\-']*?)\s+controls\b/,
+];
+
+const NON_KNOB_TOKENS = new Set([
+  // Prose count-prefix words that survive splitting before "EQ knobs:"
+  'two', 'three', 'four', 'five', 'six', 'seven', 'eight',
+  // Pure descriptors that occasionally bleed in. Keep "EQ" — it's a real
+  // knob label on some pedals (Tube Drive 4-Knob version, etc.).
+  'active', 'passive', 'modeled', 'optional',
+]);
+
+/** Split the raw captured list into individual knob tokens.
+ *
+ *  Steps:
+ *    1. Strip parentheticals so embedded commas don't fragment the list
+ *       ("Drive (model: X)" → "Drive"; "Bass (cuts bass), Tone" → "Bass, Tone").
+ *    2. Strip leading articles + "a/the/an".
+ *    3. Split on `,` `;` `:` `and` `&`.
+ *    4. Drop tokens not starting with [A-Z0-9] (prose continuation).
+ *    5. Drop count-prefix phrases like "four EQ knobs" (after a colon split,
+ *       "four EQ knobs" + "Low" become two tokens — only the second is a knob).
+ *    6. Cap each token at 3 words to avoid catching trailing prose; knob
+ *       names like "Low Cut" / "Mid Freq" / "Auto Makeup" stay intact.
+ */
+function splitControlList(raw: string): string[] {
+  // First strip balanced inline parens iteratively, then strip orphan parens
+  // (the wiki has typos like "Drive))" — the outer `)` sits outside any
+  // balanced pair after iterative removal).
+  let noParens = raw;
+  let prev = '';
+  while (noParens !== prev) {
+    prev = noParens;
+    noParens = noParens.replace(/\s*\([^()]*\)/g, '');
+  }
+  noParens = noParens.replace(/[()]/g, '').trim();
+
+  const parts = noParens
+    .split(/\s*[,;:]\s*|\s+and\s+|\s*&\s*/)
+    .map(t => t.replace(/^(?:a|an|the)\s+/i, '').trim())
+    .filter(Boolean);
+
+  // Connective words signal that a relative clause has leaked into the
+  // token (e.g. wiki prose like "Glass switch which sets the type to..."
+  // becomes "Glass which sets" after the comma split). Truncate before
+  // them so only the knob noun phrase survives.
+  const CONNECTIVE_RE = /\s+(?:which|that|when|where|sets?|setting|controls|controlling|of|in|on|at|for|with|to)\s/i;
+
+  const keep: string[] = [];
+  for (const p of parts) {
+    if (!/^[A-Z0-9]/.test(p)) continue;
+    // Drop count-prefix phrases ("four EQ knobs", "three knobs", etc.)
+    if (/^(?:Two|Three|Four|Five|Six|Seven|Eight)\s+/.test(p)) continue;
+    if (/^(?:EQ\s+)?[Kk]nobs?$/.test(p)) continue;
+    if (/^(?:EQ|Tone)\s+(?:knob|control)s?$/i.test(p)) continue;
+    // Truncate before any leaked relative clause.
+    const connMatch = p.match(CONNECTIVE_RE);
+    const trimmed = connMatch && connMatch.index !== undefined
+      ? p.slice(0, connMatch.index).trim()
+      : p;
+    if (!trimmed) continue;
+    // Cap at 3 words; knob names beyond that are usually wiki prose.
+    const words = trimmed.split(/\s+/).slice(0, 3);
+    const truncated = words.join(' ').replace(/[.,;:)]+$/, '').trim();
+    if (!truncated) continue;
+    if (NON_KNOB_TOKENS.has(truncated)) continue;
+    keep.push(truncated);
+  }
+  return keep;
+}
+
+/** Iteratively strip *balanced* parenthetical content. Wiki prose like
+ *  "Tone (doesn't affect the mid-hump) and Level" contains periods inside
+ *  parens ("(2.8 kHz)") that break sentence-boundary regexes, so we strip
+ *  them before pattern matching.
+ *
+ *  Important: must NOT use a depth-counting strip — the wiki has unbalanced
+ *  parens (BB Pre's body has an unclosed `(` on the "Bluesbreakers (read
+ *  more...)" line whose closer never arrives, plus Octave Distortion has a
+ *  stray extra `)`). A depth-based strip would eat the entire rest of the
+ *  body. The iterative-innermost approach only removes balanced pairs and
+ *  leaves orphan parens in place. */
+function stripParensForMatching(text: string): string {
+  let prev = '';
+  let curr = text;
+  while (curr !== prev) {
+    prev = curr;
+    curr = curr.replace(/\([^()]*\)/g, '');
+  }
+  return curr;
+}
+
+/** Run all CONTROLS_PATTERNS over the body text; return the first match's
+ *  cleaned token list, or undefined. Body should be raw wiki text including
+ *  newlines — the patterns use `\n` as a sentence boundary. Parentheticals
+ *  are stripped before matching so periods like "(2.8 kHz)" don't bound the
+ *  match early. */
+function extractControlsFromBody(body: string): ControlsList | undefined {
+  const masked = stripParensForMatching(body);
+  for (const re of CONTROLS_PATTERNS) {
+    const m = masked.match(re);
+    if (!m) continue;
+    const raw = m[1].trim();
+    const values = splitControlList(raw);
+    if (values.length === 0) continue;
+    return { values, raw, source: 'fractal-wiki' };
+  }
+  return undefined;
+}
+
 // ─── Amp parser ──────────────────────────────────────────────────────────────
 
 function parseAmpFamilies(lines: string[]): Map<string, string> {
@@ -640,6 +806,7 @@ function extractAmps(): AmpRecord[] {
     if (fam) rec.family = fam;
 
     const body = lines.slice(e.start + 1, e.end);
+    const bodyText = body.join('\n');
     for (let i = 0; i < body.length; i++) {
       const line = body[i];
       if (/^Power tubes:/.test(line)) {
@@ -661,6 +828,11 @@ function extractAmps(): AmpRecord[] {
         });
       }
     }
+    // HW-033: most amp wiki bodies don't document a knob list (amps are
+    // usually described by tonestack / power-section topology), but some do
+    // — e.g. signature artist amps with custom knob layouts. Try anyway.
+    const controls = extractControlsFromBody(bodyText);
+    if (controls) rec.controls = controls;
     records.push(rec);
   }
 
@@ -897,6 +1069,7 @@ function extractDrives(): DriveRecord[] {
     }
 
     const body = lines.slice(e.start + 1, e.end);
+    const bodyText = body.join('\n');
     for (const line of body) {
       const q = line.match(FRACTAL_QUOTE_RE);
       if (q) {
@@ -907,6 +1080,11 @@ function extractDrives(): DriveRecord[] {
         });
       }
     }
+    // HW-033: pull modeled-device knob list from wiki "Controls:" / "the
+    // pedal has X knobs" prose. Drive is the highest-yield block — most
+    // pedal-style entries document their knob set explicitly.
+    const controls = extractControlsFromBody(bodyText);
+    if (controls) rec.controls = controls;
     records.push(rec);
   }
   return records;
@@ -1107,6 +1285,13 @@ function extractReverbs(): ReverbRecord[] {
         }
       }
     }
+    // HW-033: reverb wiki almost never lists modeled-device knobs (algorithmic
+    // descriptions dominate), but try the family description anyway in case a
+    // hardware-emulation entry like "EMT 140" or "Bricasti M7" mentions them.
+    if (familyDesc) {
+      const controls = extractControlsFromBody(familyDesc);
+      if (controls) rec.controls = controls;
+    }
     records.push(rec);
   }
 
@@ -1212,6 +1397,12 @@ function extractDelays(): DelayRecord[] {
       const inferred = inferBasedOnFromAm4Name(canonical);
       if (inferred) rec.basedOn = inferred;
     }
+    // HW-033: delay wiki rarely lists per-type knobs (the block is mostly
+    // algorithmic), but Blocks Guide rows + forum quotes occasionally do.
+    // Try extraction over both sources concatenated.
+    const haystack = [desc ?? '', ...quotes.map(q => q.text)].join('\n');
+    const controls = extractControlsFromBody(haystack);
+    if (controls) rec.controls = controls;
     records.push(rec);
   }
   return records;
@@ -1437,6 +1628,16 @@ function extractCompressors(): CompressorRecord[] {
       rec.flags.push('VERIFY: wiki entry has no description, lineage, or quotes');
     }
 
+    // HW-033: compressor wiki occasionally documents modeled-pedal knobs
+    // (Solo Dallas Schaffer, Keeley, Xotic SP have explicit knob lines).
+    // Run extraction over description + concatenated quote bodies.
+    const haystack = [
+      cleanDesc ?? '',
+      ...rec.fractalQuotes.map(q => q.text),
+    ].join('\n');
+    const controls = extractControlsFromBody(haystack);
+    if (controls) rec.controls = controls;
+
     records.push(rec);
   }
   return records;
@@ -1528,6 +1729,14 @@ function extractSimpleBlock(cfg: SimpleBlockConfig): BaseRecord[] {
     if (!rec.basedOn && !rec.description) {
       rec.flags.push('VERIFY: no description or lineage identified');
     }
+    // HW-033: phaser / chorus / flanger / wah inline entries occasionally
+    // document the modeled device's knobs ("models the original controls:
+    // Rate, Manual Shift, Feedback, Auto/Manual"). Run over the inline
+    // description for each.
+    if (match?.description) {
+      const controls = extractControlsFromBody(match.description);
+      if (controls) rec.controls = controls;
+    }
     records.push(rec);
   }
   return records;
@@ -1592,12 +1801,13 @@ function coverage(label: string, canonical: readonly string[], records: BaseReco
   const withInspired = matched.filter(r => r.basedOn).length;
   const withQuotes = matched.filter(r => r.fractalQuotes.length > 0).length;
   const withDesc = matched.filter(r => r.description).length;
+  const withControls = matched.filter(r => r.controls && r.controls.values.length > 0).length;
   const unmatched = records.filter(r => !canonical.includes(r.am4Name) && r.am4Name !== '__block_level__');
   console.log(
     `  ${label.padEnd(8)} ` +
     `catalog=${canonical.length}  matched=${matched.length}  ` +
     `basedOn=${withInspired}  quotes=${withQuotes}  desc=${withDesc}  ` +
-    `unmatched=${unmatched.length}`,
+    `controls=${withControls}  unmatched=${unmatched.length}`,
   );
 }
 

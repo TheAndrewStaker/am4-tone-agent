@@ -6,6 +6,69 @@ file is the chronological trail that reference is built from.
 
 ---
 
+## 2026-04-25 — Session 30 cont 4 — HW-033 closed Claude-side (31 drive + 1 phaser wiki-derived knob lists)
+
+No hardware. `scripts/extract-lineage.ts` extended with
+`extractControlsFromBody()` — 10 ordered regex patterns covering
+the wiki's "Controls:" / "Original controls:" / "models the
+original controls:" / "the (adj-)?pedal has X controls/knobs"
+prose shapes. Per-token cleanup includes iterative balanced-
+paren strip (with orphan-paren cleanup, since the wiki has
+typos like Octave Distortion's `Drive))` and BB Pre's unclosed
+`(read more...`), connective-word truncation ("Glass which sets"
+→ "Glass"), 3-word cap, count-prefix filtering, and uppercase-
+first-char gating.
+
+**Coverage:** 31 drive types + 1 phaser type (Naughty Rock) now
+have `controls: { values, raw, source: 'fractal-wiki' }` fields
+populated in `src/knowledge/{block}-lineage.json`. Other blocks
+extracted zero — those wikis don't document per-type knob lists
+(reverb is family-level, delay is algorithmic, compressor is
+behavior-described, amp is tonestack-described).
+
+**Cross-validation against existing captures:**
+
+| Type | Wiki-derived | Hardware capture | Notes |
+|---|---|---|---|
+| T808 OD | Drive, Tone, Level | drive.drive, drive.tone, drive.level | exact match |
+| Klone Chiron | Gain, Treble, Output | drive.drive, drive.tone, drive.level | wiki = original Klon labels; AM4-Edit shows Fractal universal labels |
+| Blackglass 7K | Blend, Level, Drive, Low, Low Mids, Hi Mids, Treble (7) | drive.{drive,tone,level,mix,low_cut,bass,mid,mid_freq,treble} (9) | Fractal adds universal Tone + 5-band EQ vs. wiki's 4-band |
+
+**New script `scripts/build-type-knobs.ts`** (`npm run
+build-type-knobs`) emits `docs/TYPE-KNOBS-WIKI.md` — per-type
+markdown table with raw wiki labels, mapped `params.ts` keys,
+and unmapped wiki labels. Per-block alias map handles fuzzy
+matches (Volume → level, Blend → mix, Gain → drive in drive
+block / gain in amp block, Tone → tone in drive block, etc.).
+
+**15 unmapped wiki labels** surfaced as candidates for review:
+Voice (Zendrive), Presence (Hot Cake), Contour (Shredmaster),
+Boost (Full-Drive 2 / Octavia), Glass (Eternity), EQ + Tube
+Drive (Tube Drive 3-Knob), 3-band EQ (M-Zone), Manual Shift +
+Auto/Manual (Bad Stone phaser), Bump switch + 100HZ cut/boost
+(MXR M77), High Cut switch + Gain switch (Morning Glory),
+Spectrum (ODR-1) — already mapped to mid_freq via alias.
+Several are real registers we haven't decoded (Voice, Presence,
+Contour); others are switches that may map to existing enums
+or new enum-shaped registers. None gate release directly —
+they're a backlog of additions to consider.
+
+**Companion to HW-030 step 2** (lazy AM4-Edit screenshot pass,
+founder hardware). HW-033 covers the modeled device's knob
+set per the wiki rule; HW-030 step 2 covers what AM4-Edit
+actually exposes. They overlap heavily but differ where Fractal
+adds universal knobs (Mix / Tone / Balance) or renames originals.
+
+**Files updated:** `scripts/extract-lineage.ts`,
+`scripts/build-type-knobs.ts` (new), `package.json` (new
+`build-type-knobs` npm script), all 10 `src/knowledge/*-
+lineage.json` files (regenerated), `docs/TYPE-KNOBS.md` (HW-033
+status update + cross-reference to wiki-derived companion file),
+`docs/TYPE-KNOBS-WIKI.md` (new, auto-generated). Preflight
+green.
+
+---
+
 ## 2026-04-25 — Session 30 cont 3 — HW-024 closed (9 params verified, 4 findings, ~25 unmapped knobs queued)
 
 Conversational hardware test via Claude Desktop. Two phases on

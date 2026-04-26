@@ -12,6 +12,7 @@
     "diff-syx": "tsx scripts/diff-syx.ts",
     "scrape-wiki": "tsx scripts/scrape-wiki.ts",
     "extract-lineage": "tsx scripts/extract-lineage.ts",
+    "build-type-knobs": "tsx scripts/build-type-knobs.ts",
     "verify-pack": "tsx scripts/verify-pack.ts",
     "verify-msg": "tsx scripts/verify-msg.ts",
     "verify-transpile": "tsx scripts/verify-transpile.ts",
