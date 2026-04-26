@@ -1,4 +1,4 @@
-# AM4 Tone Agent — Project Vision
+# MCP MIDI Tools — Project Vision
 
 ## One-Line Pitch
 Talk to Claude, get authentic guitar tones instantly loaded onto your Fractal AM4.

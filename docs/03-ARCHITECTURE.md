@@ -1,4 +1,4 @@
-# Architecture — AM4 Tone Agent
+# Architecture — MCP MIDI Tools
 
 ## System Overview
 
@@ -185,7 +185,7 @@ Flat index mapping (for internal use):
 
 ## Repo Structure
 ```
-am4-tone-agent/
+mcp-midi-tools/
   src/
     server/         — MCP server, tool definitions
     protocol/       — SysEx encoder/decoder, block maps

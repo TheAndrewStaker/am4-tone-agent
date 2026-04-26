@@ -1,7 +1,7 @@
 {
-  "name": "am4-tone-agent",
+  "name": "mcp-midi-tools",
   "version": "0.1.0",
-  "description": "Talk to Claude, get AM4 tones. Local MCP server for Fractal AM4.",
+  "description": "Talk to Claude, control your MIDI gear. Local MCP server with first-class Fractal AM4 support.",
   "private": true,
   "license": "Apache-2.0",
   "author": "Stephen Staker <stephenstaker@gmail.com>",
@@ -12,6 +12,7 @@
     "diff-syx": "tsx scripts/diff-syx.ts",
     "scrape-wiki": "tsx scripts/scrape-wiki.ts",
     "extract-lineage": "tsx scripts/extract-lineage.ts",
+    "build-type-knobs": "tsx scripts/build-type-knobs.ts",
     "verify-pack": "tsx scripts/verify-pack.ts",
     "verify-msg": "tsx scripts/verify-msg.ts",
     "verify-transpile": "tsx scripts/verify-transpile.ts",

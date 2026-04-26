@@ -72,6 +72,38 @@ function typeEnum(loc: BlockLoc): string[] {
   return rec.values!;
 }
 
+/**
+ * Tempo division dictionary (79 entries: NONE / 1/64 TRIP / 1/64 / ... /
+ * 63/64). Identical across every block that exposes a Tempo Sync knob —
+ * captured 14 times in the cache (delay × 6, chorus × 2, reverb / flanger
+ * / rotary / phaser / tremolo / filter × 1 each). Source-of-truth here
+ * is delay sub-block 1 id=19 (the wire-captured `delay.tempo` register
+ * from session-30-delay-basic-digital-mono); cross-checked byte-identical
+ * against the chorus + flanger + phaser + tremolo first-tempo records.
+ */
+function tempoDivisionsEnum(): string[] {
+  const rec = s3.find((r) => r.block === 1 && r.id === 19 && r.kind === 'enum');
+  if (!rec || !rec.values || rec.values.length !== 79 || rec.values[0] !== 'NONE ') {
+    throw new Error('tempoDivisionsEnum: cache no longer has 79-entry tempo enum at delay/id=19');
+  }
+  return rec.values;
+}
+
+/**
+ * LFO waveform dictionary (10 entries: SINE / TRIANGLE / ... / ASTABLE).
+ * Identical across every modulation block that exposes a Waveform/LFO Type
+ * knob — captured 4 times in the cache (chorus id=18, flanger id=18, phaser
+ * id=13, tremolo id=11). Source-of-truth here is chorus sub-block 2 id=18;
+ * cross-checked byte-identical against the other three.
+ */
+function lfoWaveformsEnum(): string[] {
+  const rec = s3.find((r) => r.block === 2 && r.id === 18 && r.kind === 'enum');
+  if (!rec || !rec.values || rec.values.length !== 10 || rec.values[0] !== 'SINE') {
+    throw new Error('lfoWaveformsEnum: cache no longer has 10-entry waveform enum at chorus/id=18');
+  }
+  return rec.values;
+}
+
 // -- cacheEnums.ts --
 
 function formatTsArray(name: string, values: string[]): string {
@@ -101,13 +133,29 @@ const header = `/**
 const arrays = BLOCKS.map((b) => formatTsArray(b.constName, typeEnum(b))).join('\n\n');
 const mapsSection = BLOCKS.map((b) => toEnumValuesObject(`${b.constName}_VALUES`, typeEnum(b))).join('\n');
 
-const ts = `${header}\n${arrays}\n\n${mapsSection}\n`;
+// Shared non-Type enums — extracted from the cache, used by per-block
+// non-Type registrations (tempo, etc.) where a block's `enumImport` would
+// otherwise mis-target the block's TYPES_VALUES.
+const tempoDivisions = tempoDivisionsEnum();
+const lfoWaveforms = lfoWaveformsEnum();
+const sharedArrays = [
+  formatTsArray('TEMPO_DIVISIONS', tempoDivisions),
+  formatTsArray('LFO_WAVEFORMS', lfoWaveforms),
+].join('\n\n');
+const sharedMaps = [
+  toEnumValuesObject('TEMPO_DIVISIONS_VALUES', tempoDivisions),
+  toEnumValuesObject('LFO_WAVEFORMS_VALUES', lfoWaveforms),
+].join('\n');
+
+const ts = `${header}\n${arrays}\n\n${sharedArrays}\n\n${mapsSection}\n${sharedMaps}\n`;
 const outPath = 'src/protocol/cacheEnums.ts';
 writeFileSync(outPath, ts);
 console.log(`wrote ${outPath}`);
 for (const b of BLOCKS) {
   console.log(`  ${b.constName}: ${typeEnum(b).length} entries`);
 }
+console.log(`  TEMPO_DIVISIONS: ${tempoDivisions.length} entries`);
+console.log(`  LFO_WAVEFORMS: ${lfoWaveforms.length} entries`);
 
 // -- docs/CACHE-DUMP.md --
 

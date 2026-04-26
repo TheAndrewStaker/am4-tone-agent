@@ -1,4 +1,4 @@
-# Product Backlog — AM4 Tone Agent
+# Product Backlog — MCP MIDI Tools
 
 Priority: P0 = must have for phase, P1 = should have, P2 = nice to have
 
@@ -754,7 +754,7 @@ without installing Node, a C++ toolchain, or editing JSON by hand. See
 - Deliverable: short writeup in `docs/DECISIONS.md` with the chosen tool
 
 ### P5-002 Build the Windows `.exe`
-- Produce a single `am4-tone-agent.exe` that embeds the MCP server + bundled
+- Produce a single `mcp-midi-tools.exe` that embeds the MCP server + bundled
   `node-midi` prebuild
 - Verify it runs on a clean Windows machine with no Node and no Visual Studio
 - ACCEPTANCE: on a fresh VM, downloading + double-clicking the `.exe` starts
@@ -2291,7 +2291,9 @@ Skip until explicit user demand materializes.
     `save_to_location`, etc.) — tool names are device-neutral
     already.
 
-### BK-030 General-MIDI primitive tools (earns the "MCP MIDI Tools" name)
+### BK-030 General-MIDI primitive tools (earns the "MCP MIDI Tools" name) — ✅ Closed (Session 30 cont 5–7)
+
+**Status:** All three sessions shipped. Tool count 17 → 22 (`send_cc`, `send_note`, `send_program_change`, `send_nrpn`, `send_sysex`). Pure builder functions live in `src/protocol/generic/midiMessages.ts` (the future `midi-core` package boundary). README has a Generic MIDI quick-start with five conversational examples; `docs/MCP-SETUP.md` updated. BK-029 (project rename) is unblocked.
 
 - **Context.** The current 16 tools are almost all AM4-specific
   wrappers. `list_midi_ports` enumeration is already generic (it
@@ -2361,26 +2363,44 @@ Skip until explicit user demand materializes.
     so they're obviously portable. When BK-012 splits into
     packages, these become `packages/midi-core/`.
 - **Session breakdown:**
-  1. **Session A — Registry + generalized list/reconnect.**
-     Refactor the connection layer to a port-keyed registry.
-     Generalize `list_midi_ports` (drop the hard-coded tag,
-     keep a visible "Port includes 'am4' — tagged as AM4" in
-     the returned metadata so existing AM4 tool flows stay
-     intelligible). Generalize `reconnect_midi` to accept a
-     port argument, default to AM4. Smoke-server picks up
-     the new arg shape.
+  1. **Session A — Registry + generalized list/reconnect. ✅
+     Shipped Session 30 cont 5.**
+     Connection layer is now keyed by `label`
+     (`connections: Map<string, RegistryEntry>` in
+     `src/server/index.ts`); the default label `"am4"` keeps every
+     existing AM4 callsite identical. `MidiConnection` type and
+     `connect({ needles, notFoundLeadIn?, notFoundHints? })` live
+     in `src/protocol/midi.ts`; `connectAM4()` is a thin wrapper.
+     `list_midi_ports` accepts optional `pattern`; `reconnect_midi`
+     accepts optional `port`. `looksLikeAM4` stays as a back-compat
+     field on `MidiPortInfo` alongside the new generic `matched`.
+     Tool count unchanged (17). Preflight green; smoke covers the
+     new pattern arg.
   2. **Session B — Send primitives (cc, note, program_change,
-     nrpn, sysex).** Five new MCP tools. Zod-validate every
-     input. Smoke-server coverage for each (happy path +
-     out-of-range rejection). No hardware needed — validation-
-     layer assertions only. Tool count: 16 → 21.
-  3. **Session C — Docs + examples.** Tool descriptions
-     explicit about MIDI semantics (channel is 0-indexed
-     internally but the tool takes 1-indexed to match musician
-     conventions; document this once, consistently). Add a
-     short "general MIDI quick-start" section to the README
-     with one example per primitive, targeting a non-AM4
-     device so readers see the generality immediately.
+     nrpn, sysex). ✅ Shipped Session 30 cont 6.** Five new MCP
+     tools registered in `src/server/index.ts`; pure message
+     builders live in `src/protocol/generic/midiMessages.ts`.
+     Tool count 17 → 22 (one above the original spec target
+     because the AM4 server also has `lookup_lineage` from a
+     later session). Channel convention: 1..16 at the tool
+     boundary, 0..15 internally. send_* primitives bypass the
+     AM4 stale-handle counter — most non-Fractal devices don't
+     echo writes. 8 new smoke assertions covering happy paths
+     against a bogus port (proves wiring) plus Zod / framing /
+     range rejections.
+  3. **Session C — Docs + examples. ✅ Shipped Session 30 cont 7.**
+     README rewritten with a two-table tool catalog (17 AM4-specific
+     + 5 generic-MIDI primitives) and a new **Generic MIDI
+     quick-start** section: five conversational examples paired
+     with the literal tool-call shape (filter cutoff via CC 74,
+     single-note trigger, bank-select-prefixed Program Change,
+     14-bit NRPN, raw SysEx). Examples target a Hydrasynth so
+     the generality is obvious; the SysEx example targets the
+     AM4 to show the escape hatch is bidirectional. Tool-
+     description audit was already satisfied at write time
+     (every send_* tool leads with the standard call-to-action
+     template). `docs/MCP-SETUP.md` had a stale "3 tools" line
+     in the Connectors discovery section; updated to 22.
 - **Dependencies + relation to other items:**
   - **BK-029** — blocker. Rename lands after this ships so the
     new name isn't aspirational.

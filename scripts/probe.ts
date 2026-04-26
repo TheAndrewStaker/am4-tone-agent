@@ -1,5 +1,5 @@
 /**
- * AM4 Tone Agent — Phase 0 Feasibility Probe
+ * MCP MIDI Tools — Phase 0 Feasibility Probe
  *
  * Run this first. It will:
  * 1. List all MIDI devices

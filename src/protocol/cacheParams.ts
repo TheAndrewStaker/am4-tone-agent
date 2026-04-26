@@ -116,6 +116,31 @@ export const CACHE_PARAMS = {
     pidLow: 0x0076, pidHigh: 0x000e,
     unit: 'percent', displayMin: 0, displayMax: 100,
   },
+  'drive.low_cut': {
+    block: 'drive', name: 'low_cut',
+    pidLow: 0x0076, pidHigh: 0x0010,
+    unit: 'hz', displayMin: 20, displayMax: 2000,
+  },
+  'drive.bass': {
+    block: 'drive', name: 'bass',
+    pidLow: 0x0076, pidHigh: 0x0014,
+    unit: 'knob_0_10', displayMin: 0, displayMax: 10,
+  },
+  'drive.mid': {
+    block: 'drive', name: 'mid',
+    pidLow: 0x0076, pidHigh: 0x0015,
+    unit: 'knob_0_10', displayMin: 0, displayMax: 10,
+  },
+  'drive.mid_freq': {
+    block: 'drive', name: 'mid_freq',
+    pidLow: 0x0076, pidHigh: 0x0016,
+    unit: 'hz', displayMin: 200, displayMax: 2000,
+  },
+  'drive.treble': {
+    block: 'drive', name: 'treble',
+    pidLow: 0x0076, pidHigh: 0x0017,
+    unit: 'knob_0_10', displayMin: 0, displayMax: 10,
+  },
   'reverb.mix': {
     block: 'reverb', name: 'mix',
     pidLow: 0x0042, pidHigh: 0x0001,
@@ -187,6 +212,11 @@ export const CACHE_PARAMS = {
     block: 'delay', name: 'feedback',
     pidLow: 0x0046, pidHigh: 0x000e,
     unit: 'bipolar_percent', displayMin: -100, displayMax: 100,
+  },
+  'delay.ducking': {
+    block: 'delay', name: 'ducking',
+    pidLow: 0x0046, pidHigh: 0x002e,
+    unit: 'db', displayMin: 0, displayMax: 80,
   },
   'chorus.mix': {
     block: 'chorus', name: 'mix',
@@ -292,6 +322,26 @@ export const CACHE_PARAMS = {
     pidLow: 0x002e, pidHigh: 0x0002,
     unit: 'bipolar_percent', displayMin: -100, displayMax: 100,
   },
+  'compressor.threshold': {
+    block: 'compressor', name: 'threshold',
+    pidLow: 0x002e, pidHigh: 0x000a,
+    unit: 'db', displayMin: -60, displayMax: 20,
+  },
+  'compressor.ratio': {
+    block: 'compressor', name: 'ratio',
+    pidLow: 0x002e, pidHigh: 0x000b,
+    unit: 'ratio', displayMin: 1, displayMax: 20,
+  },
+  'compressor.attack': {
+    block: 'compressor', name: 'attack',
+    pidLow: 0x002e, pidHigh: 0x000c,
+    unit: 'ms', displayMin: 0.1, displayMax: 100,
+  },
+  'compressor.release': {
+    block: 'compressor', name: 'release',
+    pidLow: 0x002e, pidHigh: 0x000d,
+    unit: 'ms', displayMin: 2, displayMax: 2000,
+  },
   'compressor.type': {
     block: 'compressor', name: 'type',
     pidLow: 0x002e, pidHigh: 0x0013,
@@ -329,6 +379,26 @@ export const CACHE_PARAMS = {
     block: 'filter', name: 'freq',
     pidLow: 0x0072, pidHigh: 0x000b,
     unit: 'hz', displayMin: 20, displayMax: 20000,
+  },
+  'filter.low_cut': {
+    block: 'filter', name: 'low_cut',
+    pidLow: 0x0072, pidHigh: 0x0012,
+    unit: 'hz', displayMin: 20, displayMax: 2000,
+  },
+  'filter.high_cut': {
+    block: 'filter', name: 'high_cut',
+    pidLow: 0x0072, pidHigh: 0x0013,
+    unit: 'hz', displayMin: 200, displayMax: 20000,
+  },
+  'filter.feedback': {
+    block: 'filter', name: 'feedback',
+    pidLow: 0x0072, pidHigh: 0x0015,
+    unit: 'bipolar_percent', displayMin: -100, displayMax: 100,
+  },
+  'filter.order': {
+    block: 'filter', name: 'order',
+    pidLow: 0x0072, pidHigh: 0x001c,
+    unit: 'count', displayMin: 1, displayMax: 12,
   },
   'tremolo.mix': {
     block: 'tremolo', name: 'mix',
@@ -377,11 +447,36 @@ export const CACHE_PARAMS = {
     pidLow: 0x0092, pidHigh: 0x0002,
     unit: 'bipolar_percent', displayMin: -100, displayMax: 100,
   },
+  'gate.threshold': {
+    block: 'gate', name: 'threshold',
+    pidLow: 0x0092, pidHigh: 0x000a,
+    unit: 'db', displayMin: -100, displayMax: 0,
+  },
+  'gate.attack': {
+    block: 'gate', name: 'attack',
+    pidLow: 0x0092, pidHigh: 0x000b,
+    unit: 'ms', displayMin: 0, displayMax: 1000,
+  },
+  'gate.hold': {
+    block: 'gate', name: 'hold',
+    pidLow: 0x0092, pidHigh: 0x000c,
+    unit: 'ms', displayMin: 0, displayMax: 1000,
+  },
+  'gate.release': {
+    block: 'gate', name: 'release',
+    pidLow: 0x0092, pidHigh: 0x000d,
+    unit: 'ms', displayMin: 0, displayMax: 1000,
+  },
   'gate.type': {
     block: 'gate', name: 'type',
     pidLow: 0x0092, pidHigh: 0x0013,
     unit: 'enum', displayMin: 0, displayMax: 3,
     enumValues: GATE_TYPES_VALUES,
+  },
+  'gate.attenuation': {
+    block: 'gate', name: 'attenuation',
+    pidLow: 0x0092, pidHigh: 0x0014,
+    unit: 'db', displayMin: -80, displayMax: 0,
   },
   'volpan.balance': {
     block: 'volpan', name: 'balance',
@@ -393,6 +488,16 @@ export const CACHE_PARAMS = {
     pidLow: 0x0066, pidHigh: 0x000f,
     unit: 'enum', displayMin: 0, displayMax: 1,
     enumValues: VOLPAN_MODES_VALUES,
+  },
+  'volpan.threshold': {
+    block: 'volpan', name: 'threshold',
+    pidLow: 0x0066, pidHigh: 0x0010,
+    unit: 'db', displayMin: -100, displayMax: 0,
+  },
+  'volpan.attack': {
+    block: 'volpan', name: 'attack',
+    pidLow: 0x0066, pidHigh: 0x0011,
+    unit: 'ms', displayMin: 1, displayMax: 5000,
   },
 } as const satisfies Record<string, Param>;
 

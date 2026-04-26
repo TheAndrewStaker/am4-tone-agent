@@ -23,7 +23,7 @@ capture or a manual review to label.
 
 ## Amp — pidLow = 0x3a
 
-Cache location: S2 block 5. 151 records (38 enums, 113 floats).
+Cache location: S2 block 5. 151 records (39 enums, 112 floats).
 
 | pidHigh | kind | details |
 |--------:|------|---------|
@@ -174,8 +174,8 @@ Cache location: S2 block 5. 151 records (38 enums, 113 floats).
 | `0x0091` | float | float — min=0, max=1, display-scale=10, step=0.0010000000474974513 |
 | `0x0092` | enum | enum × 2 — `OFF`, `ON` |
 | `0x0093` | enum | enum × 2 — `OFF`, `ON` |
-| `0x0094` | enum | enum × 4 — `mode 1`, `mode 2`, `mode 3`, `mode 4` |
-| `0x0095` | float | float — min=0, max=3, display-scale=1, step=0 |
+| `0x0094` | enum | enum × 3 — `V1 (Right)`, `V2 (Center)`, `V3 (Left)` |
+| `0x0095` | enum | enum × 2 — `OFF`, `ON` |
 | `0x0096` | enum | enum × 2 — `OFF`, `ON` |
 | `0x0097` | float | float — min=0, max=1, display-scale=1, step=0 |
 

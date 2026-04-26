@@ -1,6 +1,6 @@
 {
   "_source": "Fractal Audio wiki — Phaser_block.md",
-  "_extractedAt": "2026-04-18T01:21:44.604Z",
+  "_extractedAt": "2026-04-26T02:14:32.327Z",
   "_catalogSize": 17,
   "_recordCount": 17,
   "records": [
@@ -99,6 +99,16 @@
         "primary": "Electro-Harmonix Bad Stone",
         "manufacturer": "Electro-Harmonix",
         "productName": "Bad Stone",
+        "source": "fractal-wiki"
+      },
+      "controls": {
+        "values": [
+          "Rate",
+          "Manual Shift",
+          "Feedback",
+          "Auto/Manual"
+        ],
+        "raw": "Rate, Manual Shift, Feedback, Auto/Manual",
         "source": "fractal-wiki"
       }
     },

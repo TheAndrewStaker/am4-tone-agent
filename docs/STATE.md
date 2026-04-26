@@ -5,7 +5,308 @@
 > hardware tasks (USB captures, round-trip tests, reference dumps) live
 > in **`docs/HARDWARE-TASKS.md`** — check that file alongside this one at
 > session start.
-> Last updated: **2026-04-25** (Session 30 — HW-025 + HW-018
+> Last updated: **2026-04-26** (Session 34 — HW-035 + HW-036 Gate /
+> In-Gate decode landed. Founder captured a Modern Gate (slot)
+> + an Intelligent In-Gate with paired AM4-Edit screenshots
+> (`samples/captured/session-34-{slotgate,inputgate}-extended.pcapng`
+> + `.png`). **10 new hardware-verified params** — slot-Gate
+> gains level/threshold/attack/hold/release/sidechain/attenuation
+> (all on Modern Gate); In-Gate gains threshold/release/type
+> closing every HW-032 residual. KNOWN_PARAMS 123 → 133;
+> verify-msg 100 → 110; verify-cache-params 85 → 90.
+>
+> **In-Gate threshold curve confirmed:** HW-032 left the curve
+> ambiguous (internal 0..1 → display -100..0 dB hypothesis). The
+> capture writes raw dB directly (-44 dB → wire -44.0), matching
+> `unit: 'db'` not a normalized 0..1 mapping. Same answer for
+> Release: `display = wire × 1000` ms, the standard ms encoding
+> across the registry — no curve.
+>
+> **gate.sidechain enum sourced from cache id=15** (cacheBlock 11):
+> `[BLOCK L+R, INPUT 1, BLOCK L, BLOCK R]`. Hand-authored in
+> params.ts because the gen-params script only attaches one
+> enum import per block (used for `type` at id=19).
+>
+> Previous: Session 33 — HW-034 Filter / Flanger residuals landed.
+> Founder captured an All-Pass Filter + 80's Rack
+> Flanger with paired AM4-Edit screenshots
+> (`samples/captured/session-33-{filter,flanger}-extended.pcapng` +
+> `.png`). **2 new hardware-verified Filter params** (feedback,
+> order) plus full re-verification of every previously-decoded
+> flanger / filter pidHigh in the capture against display values.
+> Type-agnostic capture spec validated — All-Pass surfaced Order
+> + Feedback that HW-032's Low-Pass didn't expose. KNOWN_PARAMS
+> 121 → 123; verify-msg 98 → 100; verify-cache-params 83 → 85.
+>
+> Previous: Session 31 cont — HW-022 modulation-block decode landed.
+> Founder captured 4 of 4 expected pcapngs (chorus /
+> flanger / phaser / tremolo) with paired AM4-Edit screenshots
+> (`samples/captured/session-30-{block}-basic.pcapng` +
+> `session-30-{block}-screenshot.png`). **15 new hardware-verified
+> params** + new `degrees` Unit + shared `LFO_WAVEFORMS_VALUES`
+> dictionary.
+>
+> New params by block: chorus.level (db) / chorus.time (ms,
+> 0x0010) / chorus.mod_phase (degrees, 0x0011) /
+> chorus.phase_reverse (enum NONE/RIGHT/LEFT/BOTH, 0x0014);
+> flanger.manual (knob_0_10, 0x000f) / flanger.mod_phase
+> (degrees, 0x0011); phaser.level (db) / phaser.depth
+> (knob_0_10, 0x000f) / phaser.mod_phase (degrees, 0x0013) /
+> phaser.manual (knob_0_10, 0x0022); tremolo.waveform (enum
+> LFO_WAVEFORMS, 0x000b) / tremolo.phase (degrees, 0x0010) /
+> tremolo.width (percent, 0x0011) / tremolo.center
+> (bipolar_percent, 0x0012) / tremolo.ducking (knob_0_10,
+> 0x0018). KNOWN_PARAMS 106 → 121; verify-msg goldens 83 →
+> 98; verify-cache-params 83/83 unchanged; smoke-server
+> list_params 118 → 133 lines.
+>
+> **New unit `degrees`**: Mod Phase / Phase knobs encode wire-
+> radians but display in degrees. Cache c=180/π=57.295780;
+> DISPLAY_TO_INTERNAL.degrees=57.29577951308232. e.g. 10 deg →
+> 0.17453 rad / 90 deg → 1.5708 rad / 180 deg → π rad. Used by
+> 5 new params (mod_phase across chorus/flanger/phaser, phase
+> on tremolo).
+>
+> **HW-022 methodology corrections (founder feedback during
+> capture):** (a) original spec listed Number-Of-Voices on Chorus
+> and Low-Cut/High-Cut/Bass-Focus/Drive on Flanger — none of those
+> are first-page knobs on the Analog Stereo type; the founder
+> verified no flanger type has Low-Cut. Lesson saved as a feedback
+> memory: don't pre-name knobs in capture instructions when the
+> AM4-Edit UI is type-dependent — just say "wiggle every visible
+> knob." (b) Phaser Manual lives at pidHigh=0x0022 (cache id=34),
+> not in the 0x000c..0x0011 cluster — it's at the high end of the
+> register space because it's a less-common control. HW-023 spec
+> rewritten in HARDWARE-TASKS.md to match the new methodology.
+>
+> **Phaser.depth float-precision note**: AM4-Edit's pipeline does
+> float32 math throughout (slider value × float32(0.1)), JS does
+> float64 then casts. `6.7 / 10` rounds to a different float32 ULP
+> than AM4-Edit's `float32(6.7) / float32(10)`. Verify-msg golden
+> uses pre-rounded `6.6999998092651367` (= float32(6.7) read back
+> as float64) so both paths produce byte-identical wire — same
+> trick already in use for `compressor.release` etc.
+>
+> **BK-032 release-gate progress:** modulation cluster (chorus /
+> flanger / phaser / tremolo) flips from 🟡 partial → 🟢 first-
+> page coverage minus the residuals queued below. Only HW-023
+> (wah / filter / gate / GEQ secondary blocks) remains in the
+> capture-driven critical path before BK-032 closes.
+>
+> **Residuals queued:**
+> - `tremolo.level` at pidHigh=0x0000 (universal Level pattern
+>   — capture didn't move it from 0 dB; can be added with one
+>   future wiggle).
+> - Phaser `id=34` is `phaser.manual` *(closed in this session;
+>   formerly an HW-017 candidate)*.
+> - HW-035 (slot-Gate first-page knobs) and HW-023 (wah / filter
+>   / gate / GEQ first-page coverage) remain pending.
+>
+> Preflight green: tsc clean, 98/98 verify-msg, 16/16 verify-pack,
+> 16/16 verify-enum-lookup, 8/8 verify-echo, 83/83 verify-cache-
+> params, smoke-server 22/22 tools + 8/8 send_* assertions + 14
+> apply_preset validation rejections + startup banner. Pre-existing
+> context — Session 31 — BK-029 project
+> rename to **MCP MIDI Tools** landed. Mechanical pass across
+> code + docs: `package.json` / `package-lock.json` `name` →
+> `mcp-midi-tools`; `NOTICE` title; `README.md` title + lede +
+> all install snippets + git clone URL; `src/server/index.ts`
+> McpServer name + header doc + list_params live-confirmation
+> string + stderr boot banner; `scripts/smoke-server.ts`
+> assertion text; `CLAUDE.md` title + Project System Prompt
+> connector references + Claude Desktop config example;
+> `docs/01-PROJECT-VISION.md` / `03-ARCHITECTURE.md` (incl.
+> repo-tree dir name) / `DECISIONS.md` / `REFERENCES.md` /
+> `MCP-SETUP.md` / `LAUNCH-POST-OUTLINE.md` / `04-BACKLOG.md`
+> titles + their few install/path snippets; 10 script header
+> banners (`probe`, `sniff`, `parse-capture`, `verify-pack`,
+> `write-test`, `extract-lineage`, `scrape-wiki`, `diff-syx`,
+> `decode-float-pack`, `build-type-knobs`); `scripts/ghidra/*`
+> hardcoded paths `C:\dev\am4-tone-agent\` →
+> `C:\dev\mcp-midi-tools\`. Historical session-log entries
+> (SESSIONS.md, HARDWARE-TASKS.md HW-024/HW-012, BK-029
+> narrative quoting the old name) deliberately preserved as
+> accurate records of past state. Preflight green:
+> `mcp-midi-tools@0.1.0` in npm output, tsc clean, 83/83
+> verify-msg, 16/16 verify-pack, 16/16 verify-enum-lookup,
+> 8/8 verify-echo, 83/83 verify-cache-params, smoke-server
+> 22 tools + live-confirmation line + all 14 validation
+> assertions + send_* primitives. Founder still owes: (a)
+> rename local working dir `C:\dev\am4-tone-agent` →
+> `C:\dev\mcp-midi-tools` (safe to do once any open shells /
+> editors / Claude Desktop / Claude Code instances pointing
+> at the old path are restarted); (b) update Claude Desktop
+> config at `%APPDATA%\Claude\claude_desktop_config.json`
+> (server key + path); (c) update any `claude mcp add` Code
+> registrations; (d) GitHub repo rename (lower friction than
+> a fresh-repo push — auto-redirects existing clones);
+> (e) `git remote set-url origin` after the GitHub rename.
+> Pre-existing context — Session 30 cont 8 — HW-032
+> partial-decode landed. Founder captured 5 of 5 expected pcapngs
+> (gate / filter / flanger / enhancer / volpan) plus screenshots
+> for gate / filter / flanger / volpan (enhancer screenshot
+> pending). **8 hardware-verified params landed** + identified
+> the **Input Noise Gate** as a NEW BLOCK. New block:
+> `ingate` (pidLow=0x0025, "In-Gate" tab in AM4-Edit) — always-on
+> input stage, conceptually distinct from the slot-placeable Gate
+> effect block (pidLow=0x0092). Wired params: `filter.level` /
+> `filter.low_cut` / `filter.high_cut` (0x0000 / 0x0012 / 0x0013,
+> +12 dB / 100 Hz / 1800 Hz on Low-Pass), `flanger.level` (0x0000,
+> +10 dB on Analog Stereo), `volpan.level` / `volpan.threshold` /
+> `volpan.attack` (0x0000 / 0x0010 / 0x0011, +12 dB / -20 dB /
+> 300 ms on Auto-Swell), `ingate.level` (0x0000, -10 dB).
+> KNOWN_PARAMS 98 → 106; verify-msg goldens 75 → 83;
+> verify-cache-params 79 → 83. Residuals queued: HW-034 (filter Q +
+> Order + Mod-page knobs, flanger Manual + Mod Phase — 7 unmapped
+> pidHighs); HW-035 (slot-Gate first-page knobs — currently only
+> type/balance registered); HW-036 (Input Noise Gate full decode
+> — Threshold / Release / Type encodings need new Unit + type-walk
+> capture); HW-037 (Enhancer screenshot to map the 5 captured
+> pidHighs). Methodology footnote: hdr2/action=0x0001 = single
+> knob-drag write, action=0x0002 = AM4-Edit-initiated dropdown
+> click — both work on hardware (per HW-015 SYSEX-MAP §6i).
+> Pre-existing context — Session 30 cont 7 — BK-030
+> Session C shipped Claude-side; **BK-030 closed end-to-end**.
+> Documentation pass — no code changes. README rewritten with
+> a two-table tool catalog (17 AM4-specific + 5 generic-MIDI
+> primitives) and a new **Generic MIDI quick-start** section:
+> five conversational examples paired with the literal tool-call
+> shape (filter cutoff via CC 74 on a Hydrasynth, single-note
+> trigger, bank-select-prefixed Program Change, 14-bit NRPN, raw
+> SysEx targeting the AM4 to show the escape hatch is
+> bidirectional). Status / "under the hood" / tool-count lines
+> refreshed 16-or-17 → 22 throughout. `docs/MCP-SETUP.md` had a
+> stale "listed with its 3 tools" line in the Connectors
+> discovery section — fixed to 22. Em dashes avoided in the new
+> README copy per founder preference (`memory/feedback_em_dashes_
+> read_as_ai.md`). Tool-description audit (Session C item 1) was
+> already satisfied at write time — every send_* tool leads with
+> the standard `Use this tool to {X}. Do not produce a written
+> spec instead...` template, names the channel convention
+> (1..16 user / 0..15 wire), and warns about device-specific
+> gotchas. Test surface unchanged: tsc clean, 75/75 verify-msg,
+> 16/16 verify-pack, 16/16 verify-transpile, 8/8 verify-echo,
+> 79/79 verify-cache-params, smoke-server 22/22 tools + all
+> assertions. **BK-029 (project rename to MCP MIDI Tools) is
+> now unblocked.** Pre-existing context — Session 30 cont 6 — BK-030
+> Session B shipped Claude-side. **Five new generic-MIDI
+> primitive tools** registered in `src/server/index.ts`:
+> `send_cc`, `send_note` (Note On + delayed Note Off, default
+> 500 ms, capped 5000 ms), `send_program_change` (with optional
+> Bank Select MSB/LSB prefix), `send_nrpn` (3- or 4-message
+> sequence; 7-bit or 14-bit values), `send_sysex` (raw frame
+> with F0/F7 framing validation). Tool count 17 → 22. Pure
+> message builders live in `src/protocol/generic/midiMessages.ts`
+> — deliberately AM4-free, designed as the seed of the future
+> `midi-core` package per BK-012. Channel convention: 1..16 at
+> the tool boundary (musician), 0..15 internally; conversion
+> happens once at the tool layer. send_* primitives bypass
+> the AM4 stale-handle counter (most non-Fractal devices don't
+> echo writes). 8 new smoke assertions covering happy paths
+> against a bogus port name (proves Zod + builder validation
+> pass and the connection registry surfaces port-not-found
+> correctly), Zod channel/duration rejection, and three
+> validateSysEx framing/body-byte rejections. Preflight green:
+> tsc clean, all goldens, smoke-server 22/22 tools + 8 new
+> assertions. Only BK-030 Session C (docs + README quick-start
+> + tool-description audit) remains. Pre-existing context —
+> Session 30 cont 5 — BK-030
+> Session A shipped Claude-side. Connection layer in
+> `src/protocol/midi.ts` + `src/server/index.ts` refactored from
+> single-handle to a port-keyed registry (`connections: Map<string,
+> RegistryEntry>`). `MidiConnection` type replaces `AM4Connection`
+> (alias retained); generic `connect({ needles, notFoundLeadIn?,
+> notFoundHints? })` factored out of the AM4-specific path.
+> `connectAM4()` is now a thin wrapper supplying AM4-specific
+> install hints + `AM4 not found in the MIDI device list.` lead-in
+> verbatim. Default registry label `"am4"` keeps every existing
+> AM4 callsite (every `ensureMidi()` / `recordAckOutcome()` /
+> tool handler) byte-for-byte equivalent. `consecutiveTimeouts`
+> moved per-port — once Session B's send_* primitives land,
+> apply_preset all-time-outs on AM4 won't drag down a separate
+> Hydrasynth handle. Two tools generalized: `list_midi_ports`
+> accepts optional `pattern` (string | string[]) for tagging
+> non-AM4 devices; `reconnect_midi` accepts optional `port`
+> (substring) defaulting to AM4. Tool count unchanged (17).
+> Preflight green: tsc clean, 75/75 verify-msg, 79/79
+> verify-cache-params, smoke-server 17 tools + new pattern-arg
+> assertion. BK-030 Session B (send_cc / send_note /
+> send_program_change / send_nrpn / send_sysex) and Session C
+> (docs) still pending. Pre-existing context — Session 30 cont 4
+> — HW-033 closed Claude-side. Extended `scripts/extract-lineage.ts` with
+> `extractControlsFromBody()` — 10 regex patterns covering the
+> wiki's "Controls:" / "Original controls:" / "the pedal has X
+> knobs" / "models the original controls:" prose shapes, plus a
+> per-token sanitizer that handles paren stripping, connective-
+> word truncation ("Glass which sets" → "Glass"), 3-word cap, and
+> count-prefix filtering. **31 drive types + 1 phaser type now
+> have `controls: { values, raw, source }` fields populated** in
+> `src/knowledge/{block}-lineage.json` (out of 78 drive +17
+> phaser canonical types). Cross-validated against HW-019/HW-014
+> hardware captures: T808 OD wiki = "Drive | Tone | Level" matches
+> capture exactly; Klone Chiron wiki = "Gain | Treble | Output"
+> matches the HW-014 finding (Fractal labels them Drive/Tone/Level
+> in AM4-Edit per the universal Drive UI but original Klon labels
+> are surfaced via the wiki). Blackglass 7K wiki = 7 knobs (Blend,
+> Level, Drive, Low, Low Mids, Hi Mids, Treble) — close to HW-019
+> capture's 9 knobs (Fractal adds universal Tone + Mid Freq vs.
+> the wiki's 4-band EQ). New script `scripts/build-type-knobs.ts`
+> emits `docs/TYPE-KNOBS-WIKI.md` (auto-generated) with one row
+> per type: wiki labels + mapped `params.ts` keys + unmapped wiki
+> labels (knobs the wiki names but our registry doesn't yet
+> register — 15 of these surface knobs worth investigating, e.g.
+> "Voice" on Zendrive, "Presence" on Hot Cake, "Contour" on
+> Shredmaster). Companion to manually-maintained `docs/TYPE-KNOBS.md`
+> (hardware-captured rows). New `npm run build-type-knobs` script.
+> No founder action; HW-030 step 2 (lazy AM4-Edit screenshot pass)
+> still pending and complementary. Pre-existing context — Session
+> 30 cont 3 — HW-024 closed.
+> Conversational hardware test via Claude Desktop covered Round 4
+> (enhancer/gate/volpan first-time tests) + 4 re-tests + 2 first-
+> ever tests (reverb.springs / reverb.spring_tone on Spring,
+> Large reverb). 9 params verified, 4 findings: F1 — `enhancer.mix`
+> is a hardware-display phantom (wire-acks but no Mix knob exposed
+> on Enhancer's pages); F2 — `enhancer.balance` IS visible (breaks
+> the "balance hidden everywhere" HW-014 pattern, validates that
+> visibility is block-type-dependent); F3 — `filter.freq` has 0.1 Hz
+> quantization drift at 1250 Hz (functionally inaudible); F4 —
+> ~25 unmapped first-page knobs surfaced via hardware-page
+> inventories during readback (queued as HW-032). Cumulative
+> status across HW-014 + HW-024: 73 params hardware-confirmed,
+> 15 wire-acked-but-hidden, 1 marginal. `params.ts` comments
+> updated per finding. Pre-existing context — Session 30 cont 2 —
+> HW-027 closed Claude-side. Extended `gen-cache-enums.ts` to emit shared
+> `TEMPO_DIVISIONS_VALUES` (79-entry enum, source-of-truth at
+> delay/id=19). **5 new tempo params**: `delay.tempo` (wire-
+> verified from session-30 capture), `chorus.tempo` /
+> `flanger.tempo` / `phaser.tempo` / `tremolo.tempo` (structural-
+> by-symmetry — every modulation block has a Tempo Sync knob per
+> Blocks Guide §Common LFO Parameters). KNOWN_PARAMS 93 → 98;
+> verify-msg goldens 74 → 75 (1 new wire anchor for delay.tempo;
+> the 4 structural entries lack captures). Pre-existing context —
+> Session 30 cont — HW-019 +
+> HW-020 + HW-021 decoded and archived. **14 new params**: 5
+> drive (low_cut / bass / mid / mid_freq / treble), 3 delay
+> (level / stack_hold / ducking), 6 compressor (level /
+> threshold / ratio / attack / release / auto_makeup). **New
+> unit `ratio`** added for compression ratios (display = internal,
+> scale 1; semantic label so Claude reads "ratio 4" as 4:1 not 4
+> dB). KNOWN_PARAMS 79 → 93; verify-msg goldens 60 → 74;
+> CACHE_PARAMS 69 → 79.
+> **Methodology finding**: AM4-Edit's UI is type-dependent —
+> different types expose different first-page knobs. TS808 OD
+> showed only drive/tone/level (3 knobs); Blackglass 7K added
+> 6 EQ-page knobs. Compressor JFET Studio exposed 8 knobs
+> including JFET-specific ones not in the canonical comp spec.
+> Caught us off-guard; queued as **HW-030** = research task to
+> map "type → exposed first-page knobs" for every block before
+> HW-022/023 are written. Three residual addresses queued as
+> HW-027 (delay tempo enum extraction; no hardware), HW-028
+> (compressor 0x17 + 0x29 unidentified), HW-029 (drive 0x2d
+> unidentified). **BK-032 drive + delay + compressor lines
+> all hardware-verified for the knobs each AM4-Edit type
+> exposed**; full first-page coverage gated on HW-030 mapping.
+> Pre-existing context — Session 30: HW-025 + HW-018
 > decoded and archived. **BK-033 fixed** (predelay address
 > 0x10 → 0x13; AM4-Edit byte-exact). **BK-034 cleared as
 > not-a-code-bug** — captures show our wire is byte-identical
@@ -13,9 +314,8 @@
 > screen-rendering quirk, not a wire bug. **HW-018 added 10 new
 > reverb registers**: high_cut / low_cut / input_gain / density /
 > dwell / stereo_spread / ducking / quality / stack_hold / drip.
-> KNOWN_PARAMS 69 → 79; goldens 53 → 60; cacheParams 69
-> (unchanged — new entries hand-authored). One residual register
-> at pidHigh=0x0000 queued as HW-026 (likely `reverb.level`).
+> One residual register at pidHigh=0x0000 queued as HW-026 (likely
+> `reverb.level`).
 > **BK-032 reverb-line ✅ first-page complete.** Pre-existing
 > context — Session 29 cont 7:
 > HW-014 closed with structured findings. 28 params hardware-verified,
@@ -314,38 +614,100 @@ float32. One open question remains before the IR can cover full presets:
 
 ## The single next action
 
-**Continue BK-032 first-page coverage — Reverb done, Drive next.**
-Session 30 closed Reverb (HW-018), the predelay bug (BK-033), and
-proved the per-block encoding cluster (BK-034) was a hardware-
-screen rendering quirk rather than a wire-layer bug. Next block in
-priority order is Drive (BK-032 #2). Bug-fix wave is now empty —
-no known-broken params, the per-block-encoding-overrides plumbing
-proposed for BK-034 is unnecessary and not built.
+**Most-likely next session: HW-037 (Enhancer first-page knob
+mapping) or BK-032 closure check.**
+HW-035 + HW-036 closed Session 34 — 10 new Gate / In-Gate
+params landed in one combined capture pass. The remaining
+HW-032 residual is HW-037 (Enhancer first-page knob mapping).
+HW-032 captured the Enhancer pcapng but didn't pair a
+screenshot, so 5 captured pidHighs (0x0000=11, 0x000a=0.20,
+0x000b=0.10, 0x000c=11, 0x000d=3200) still can't be matched
+to UI labels. One screenshot of the Enhancer Config page
+showing every knob's value is enough — no recapture needed
+unless the existing pcapng's state has drifted. With HW-037
+done, BK-032 first-page-knob coverage hits its release-gate
+target across every block. After that the protocol track
+mostly winds down for this phase; preset-management UX (auto-
+backup, save flow polish) takes over as the critical path.
 
-1. **HW-019 — Drive first-page capture** (founder action). Single
-   pcapng on a TS808 drive type; ~5 min. Decoder yields ~12 new
-   drive registers (Low/High Cut, Bass/Mid/Treble, Mid Frequency,
-   Clip Type, Bass Response, Dry Level, Bias, Slew Rate). See
-   `docs/HARDWARE-TASKS.md` for the exact wiggle order.
-2. **HW-020 — Delay first-page capture** (founder action). Single
-   pcapng on Digital Mono delay; resolves HW-017 delay id=64
-   ambiguity (Taps vs Bit Reduction) along the way.
+**Earlier (still applicable):**
+BK-030 closed Session 30 cont 7 — connection registry, five
+generic-MIDI primitive tools, and the Generic MIDI quick-start
+section in the README all shipped. The rename was explicitly
+gated on BK-030 landing first (so the new name doesn't
+over-promise); that gate is now clear. BK-029 is the natural
+next non-hardware track: rename the npm package, GitHub repo,
+README headline, MCP server `name` field, and any user-visible
+identifiers from "AM4 Tone Agent" to "MCP MIDI Tools". Tool
+behaviour stays identical. Alternatively, the founder can run
+HW-032 + HW-016 at the device — see below.
+
+**HW-033 ✅ closed Session 30 cont 4 (Claude-side, no hardware).**
+`scripts/extract-lineage.ts` now extracts wiki "Controls:" prose
+into a `controls` field per lineage record. **31 drive types +
+1 phaser type** have wiki-derived knob lists. New
+`scripts/build-type-knobs.ts` emits `docs/TYPE-KNOBS-WIKI.md`
+with `params.ts` cross-references per type — companion to the
+manually-maintained `docs/TYPE-KNOBS.md`. **15 unmapped wiki
+labels** surfaced (Voice / Presence / Contour / etc.) — knobs
+the wiki names that `params.ts` doesn't yet register; review
+candidates for future param additions. HW-031 (Ghidra type-
+visibility decode) and BK-030 (generic-MIDI primitives) are
+the next non-hardware-gated tracks.
+
+**HW-030 step 1 done — partial fail. Pivot to HW-016 + lazy
+HW-030 step 2.** Session 30 cont (continued) ruled out the
+simplest cache-decode hypotheses for per-type knob visibility:
+no per-type subset table after section 3 (only 2 bytes unparsed
+in a 129 KB file), `english.laxml` is just UI strings, no other
+metadata files installed by AM4-Edit. Per-type rendering logic
+appears compiled into AM4-Edit.exe (21.7 MB). Partial signal:
+the `extra` field per cache record correlates with "universal vs
+type-dependent" knob status, but isn't a complete per-type map.
+Findings + seeded type rows in **`docs/TYPE-KNOBS.md`** (new
+this session). Lazy growth strategy adopted: Claude collects
+type→knob rows opportunistically as captures land, doesn't try
+to enumerate all 700+ block-type combos upfront. HW-022 and
+HW-023 unblocked — they just append rows as new types are
+encountered.
+
+**Recommended next action: HW-016 prompts #1 + #3** (10 min
+founder action) — closes the last P5-011 release gate. After
+that, HW-022/023 can run any time and grow TYPE-KNOBS.md.
+
+1. **HW-016 prompts #1 + #3 (founder, ~10 min)** — Claude
+   Desktop first-turn smoke. Three prompts in three fresh
+   conversations. Closes P5-011 item 5 (the last release gate
+   before BK-029 rename / BK-030 generic-MIDI / BK-014 Axe-Fx II).
+2. **HW-024 (founder, ~20 min)** — finish HW-014 spot-check
+   residuals. Lower priority than HW-016 since none are known-
+   broken; just lacks datapoints.
 
 **Then or in parallel — remaining queue:**
 
-- **HW-024** — finish HW-014 spot-check coverage (Round 4 =
-  enhancer/gate/volpan, re-test `filter.freq` on Low-Pass,
-  re-test `amp.level` non-default, confirm
-  `flanger.rate`/`phaser.rate`, test `reverb.springs`/
-  `spring_tone` on Spring reverb).
-- **BK-032 first-page captures (remaining)** — HW-019 (drive) >
-  HW-020 (delay) > HW-021 (compressor) > HW-022 (modulation
-  bundle) > HW-023 (secondary). HW-018 closed Session 30.
+- **HW-032** — capture the ~25 first-page knobs that HW-024's
+  hardware-page inventories surfaced as currently-unmapped
+  (Gate core: Threshold/Attenuation/Attack/Release/Hold/
+  Sidechain Source/Level; Filter: Q/Order/Low Cut/High Cut/
+  Level + page-2 modulation; Flanger: Manual/Mod Phase/Level;
+  Enhancer: Width/Phase Invert/Pan L/Pan R/Level; Volpan
+  Auto-Swell: Threshold/Attack/Taper/Level). 5 captures, ~30
+  min total. Pair with HW-016 next time at the device.
+- **BK-032 first-page captures (remaining)** — HW-022
+  (modulation bundle) > HW-023 (secondary). Both should wait
+  on HW-030 so they can be specced from a real
+  type→knob-list map, not Blocks Guide guesswork. HW-019/020/021
+  closed Session 30 cont.
 - **HW-016 prompts #1 + #3** for P5-011 item 5 closure (Claude
   Desktop smoke). Prompt #2 effectively passed during HW-013.
 - **HW-026** — single-knob capture to disambiguate the Reverb
   `pidHigh=0x0000` register left over from HW-018 (likely
   `reverb.level`). Low priority; doesn't block release.
+- **HW-028** — single-knob capture to disambiguate
+  `compressor.0x0017` and `compressor.0x0029` (Knee/Detector
+  Type or JFET-specific knobs).
+- **HW-029** — single-knob capture to disambiguate
+  `drive.0x002d` (knob_0_10 in cache id=45 tail zone).
 
 **Remaining AM4-depth queue (non-HW, gates Wave 1 device expansion
 per `memory/feedback_am4_depth_gates_wave_expansion.md`):**
@@ -477,7 +839,15 @@ sub-block 1 = Delay (89 recs, id=10 enum × 29), sub-block 9 = Drive
 ## Decoded parameters and unit conventions
 
 Live source of truth: `src/protocol/params.ts` (`KNOWN_PARAMS` + `Unit`
-union). **78 hand-authored params** (Session 29 cont 2 added Amp
+union). **98 hand-authored params** (Session 30 cont 2 added 5:
+delay/chorus/flanger/phaser/tremolo `.tempo` enums sharing the new
+`TEMPO_DIVISIONS_VALUES` 79-entry dictionary). Session 30 cont added 14:
+5 drive EQ-page knobs (low_cut, bass, mid, mid_freq, treble) +
+3 delay registers (level, stack_hold, ducking) + 6 compressor
+registers (level, threshold, ratio, attack, release, auto_makeup);
+**new unit `ratio`** added for compression ratios.
+Session 30 added 10 reverb registers (HW-018) + corrected
+predelay address (BK-033). Session 29 cont 2 added Amp
 Advanced-panel enums `amp.tonestack_location` + `amp.master_vol_location`;
 Session 29 cont added `reverb.shift_1` / `reverb.shift_2` semitones
 from Blocks Guide cross-reference; Session 29 added 10 wire-verified
@@ -492,12 +862,13 @@ level/mix, reverb predelay + time, universal Mix across 8 effect
 blocks, LFO rates for chorus/flanger/phaser/tremolo, filter freq,
 and modulation depths; Session 25 shipped P1-010 Session A generator
 + 20 seeds)
-across 15 confirmed blocks, using **10 unit conventions** (`knob_0_10`,
+across 15 confirmed blocks, using **11 unit conventions** (`knob_0_10`,
 `db`, `hz`, `seconds`, `percent`, `bipolar_percent`, `count`,
-`semitones`, `ms`, `enum`). `count` and `semitones` are typing-
-only today — cache has candidates (phaser stages, delay voices,
-reverb shimmer shifts, drive bit depth) but each needs a specific
-Blocks-Guide page cross-reference before naming.
+`semitones`, `ratio`, `ms`, `enum`). `count` and `semitones` are
+typing-only today — cache has candidates (phaser stages, delay
+voices, reverb shimmer shifts, drive bit depth) but each needs a
+specific Blocks-Guide page cross-reference before naming. `ratio`
+is in active use for `compressor.ratio` (1..20:1).
 `pidLow` = block ID, `pidHigh` = parameter index within block;
 address is preset-independent. `CACHE_PARAMS` mirrors every
 cache-derivable entry (verify-cache-params = 44/44 byte-match against
@@ -812,7 +1183,7 @@ Session 08 highlights (still load-bearing):
 - Preset dump format (`0x77/0x78/0x79`) + slot addressing — **🟢 confirmed**.
 - `0x01` SET_PARAM message format + value encoding — **🟢 fully decoded**.
 - Parameter ID structure — **🟢 (Session 06, preset-independent)**.
-- 78 hand-authored params / 15 confirmed blocks / 10 units — **🟢 in `params.ts`** (Session 29 cont 2: HW-015 decode + count/semitones follow-up + Amp Advanced enums).
+- 98 hand-authored params / 15 confirmed blocks / 11 units — **🟢 in `params.ts`** (Session 30 cont 2: HW-027 added 5 tempo enums sharing TEMPO_DIVISIONS_VALUES; Session 30 cont: HW-019/020/021 — drive EQ + delay/comp universal + comp config; new `ratio` unit).
 - Channel A/B/C/D addressing — **🟢 (Session 08: Amp `pidHigh=0x07D2`,
   float32 index 0..3; other blocks' channel pidHigh unverified)**.
 - Drive Type enum table — **🟡 only `8 → TS808` known**.

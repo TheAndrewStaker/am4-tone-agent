@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 /**
- * AM4 Tone Agent — MCP server (stdio).
+ * MCP MIDI Tools — MCP server (stdio).
  *
  * Exposes Claude Desktop tools that talk to a local Fractal AM4 over
- * USB/MIDI. MVP tools:
+ * USB/MIDI plus generic-MIDI primitives that work against any USB MIDI
+ * device. MVP tools:
  *
  *   - set_param          write one parameter (numeric or enum-by-name),
  *                        verified by waiting for the device's write echo
@@ -20,9 +21,9 @@
  *
  * Claude Desktop wiring — add to `%APPDATA%\Claude\claude_desktop_config.json`:
  *
- *   "am4": {
+ *   "mcp-midi-tools": {
  *     "command": "npx",
- *     "args": ["tsx", "C:\\\\dev\\\\am4-tone-agent\\\\src\\\\server\\\\index.ts"],
+ *     "args": ["tsx", "C:\\\\dev\\\\mcp-midi-tools\\\\src\\\\server\\\\index.ts"],
  *     "env": {}
  *   }
  */
@@ -61,11 +62,20 @@ import {
 } from '../protocol/blockTypes.js';
 import { formatLocationCode, parseLocationCode } from '../protocol/locations.js';
 import {
+  connect,
   connectAM4,
   listMidiPorts,
-  type AM4Connection,
+  type MidiConnection,
   toHex,
 } from '../protocol/midi.js';
+import {
+  buildControlChange,
+  buildNoteOff,
+  buildNoteOn,
+  buildNRPN,
+  buildProgramChange,
+  validateSysEx,
+} from '../protocol/generic/midiMessages.js';
 
 /**
  * Max time we wait for the device to echo a WRITE after we send it. The
@@ -85,9 +95,25 @@ const WRITE_ECHO_TIMEOUT_MS = 300;
 const SCRATCH_LOCATION = 'Z04';
 
 // -- MIDI lazy-init + self-healing reconnect -------------------------------
+//
+// The connection layer is keyed by `label` so the server can hold open
+// handles to multiple MIDI ports concurrently (BK-030 prerequisite for
+// generic-MIDI primitives). Today only the AM4 label is used — every
+// AM4-tool call hits `ensureConnection()` with the default label and
+// behaves exactly like the previous single-handle implementation. When
+// the send_cc / send_note / send_program_change / send_nrpn / send_sysex
+// tools land in BK-030 Session B, they'll pass their own `label` so each
+// device gets an independent stale-handle counter and reconnect path.
 
-let midi: AM4Connection | undefined;
-let midiError: Error | undefined;
+const AM4_LABEL = 'am4';
+
+interface RegistryEntry {
+  conn: MidiConnection;
+  consecutiveTimeouts: number;
+}
+
+const connections = new Map<string, RegistryEntry>();
+const connectionErrors = new Map<string, Error>();
 
 /**
  * How many ack-less writes we tolerate before assuming the MIDI handle is
@@ -97,20 +123,21 @@ let midiError: Error | undefined;
  * any tool calls looks like the handle is actually dead.
  */
 const STALE_HANDLE_TIMEOUT_THRESHOLD = 2;
-let consecutiveTimeouts = 0;
 
 /**
  * Call after a write/ack pair completes. Resets the stale-handle counter on
- * success; increments it on timeout. The counter is process-global, not
- * per-tool, so patterns like "apply_preset 3 writes all time out" count as
- * 3 consecutive and trip the reconnect threshold.
+ * success; increments it on timeout. Counter is per-port — patterns like
+ * "apply_preset 3 AM4 writes all time out" count as 3 consecutive against
+ * the AM4 entry only, and don't drag down a separate Hydrasynth handle.
  */
-function recordAckOutcome(acked: boolean): void {
-  if (acked) consecutiveTimeouts = 0;
-  else consecutiveTimeouts++;
+function recordAckOutcome(acked: boolean, label: string = AM4_LABEL): void {
+  const entry = connections.get(label);
+  if (!entry) return;
+  if (acked) entry.consecutiveTimeouts = 0;
+  else entry.consecutiveTimeouts++;
 }
 
-function closeMidiSafely(conn: AM4Connection | undefined): void {
+function closeMidiSafely(conn: MidiConnection | undefined): void {
   if (!conn) return;
   try {
     conn.close();
@@ -119,25 +146,53 @@ function closeMidiSafely(conn: AM4Connection | undefined): void {
   }
 }
 
-function ensureMidi(forceReconnect = false): AM4Connection {
-  if (forceReconnect || consecutiveTimeouts >= STALE_HANDLE_TIMEOUT_THRESHOLD) {
-    closeMidiSafely(midi);
-    midi = undefined;
-    midiError = undefined;
-    consecutiveTimeouts = 0;
+/**
+ * Open or return a cached connection for `label`. The default label is
+ * the AM4; future device packages will pass their own label.
+ *
+ * For non-AM4 labels, `label` itself is used as the port-name needle —
+ * callers wanting a different needle can plumb a separate connect call.
+ */
+function ensureConnection(
+  label: string = AM4_LABEL,
+  forceReconnect = false,
+): MidiConnection {
+  const cached = connections.get(label);
+  const stale = (cached?.consecutiveTimeouts ?? 0) >= STALE_HANDLE_TIMEOUT_THRESHOLD;
+  if (forceReconnect || stale) {
+    if (cached) closeMidiSafely(cached.conn);
+    connections.delete(label);
+    connectionErrors.delete(label);
   }
-  if (midi) return midi;
-  if (midiError) throw midiError;
+  const existing = connections.get(label);
+  if (existing) return existing.conn;
+  const cachedErr = connectionErrors.get(label);
+  if (cachedErr) throw cachedErr;
   try {
-    midi = connectAM4();
-    return midi;
+    const conn = label === AM4_LABEL
+      ? connectAM4()
+      : connect({ needles: [label] });
+    connections.set(label, { conn, consecutiveTimeouts: 0 });
+    return conn;
   } catch (err) {
-    midiError = err instanceof Error ? err : new Error(String(err));
-    throw midiError;
+    const e = err instanceof Error ? err : new Error(String(err));
+    connectionErrors.set(label, e);
+    throw e;
   }
 }
 
-process.on('exit', () => closeMidiSafely(midi));
+/**
+ * Back-compat shim — every AM4-only call site continues to call this.
+ * Forwards to `ensureConnection()` with the default AM4 label.
+ */
+function ensureMidi(forceReconnect = false): MidiConnection {
+  return ensureConnection(AM4_LABEL, forceReconnect);
+}
+
+process.on('exit', () => {
+  for (const entry of connections.values()) closeMidiSafely(entry.conn);
+  connections.clear();
+});
 
 // -- Channel awareness (P1-012) ---------------------------------------------
 //
@@ -227,7 +282,7 @@ function channelStatusLine(block: string, justSwitched: boolean): string {
  * was issued.
  */
 async function switchBlockChannel(
-  conn: AM4Connection,
+  conn: MidiConnection,
   block: string,
   channel: string | number,
 ): Promise<{ switched: boolean }> {
@@ -424,7 +479,7 @@ function formatLineageRecord(rec: LineageRecord, includeQuotes: boolean, maxQuot
 // -- Server setup -----------------------------------------------------------
 
 const server = new McpServer({
-  name: 'am4-tone-agent',
+  name: 'mcp-midi-tools',
   version: '0.1.0',
 });
 
@@ -519,7 +574,7 @@ server.registerTool('set_param', {
 server.registerTool('list_params', {
   description: [
     'List every parameter the server can write. Use this to discover',
-    'capabilities — or as a quick sanity check that the am4-tone-agent MCP',
+    'capabilities — or as a quick sanity check that the mcp-midi-tools MCP',
     'connector is live and its tools are callable (the response opens with',
     'a confirmation line). If you were about to tell the user "I don\'t',
     'have the connector in this session" without having actually tried a',
@@ -540,7 +595,7 @@ server.registerTool('list_params', {
   // schemas hadn't been loaded yet. Getting this response proves the
   // connector is live.
   const liveConfirmation =
-    'am4-tone-agent MCP server is live and reachable. All AM4 tools ' +
+    'mcp-midi-tools MCP server is live and reachable. All AM4 tools ' +
     '(apply_preset, set_param, set_params, set_block_type, set_block_bypass, ' +
     'switch_preset, switch_scene, save_preset, save_to_location, ' +
     'set_preset_name, set_scene_name, reconnect_midi) are available to ' +
@@ -1346,7 +1401,7 @@ server.registerTool('apply_preset', {
  * counter stays accurate.
  */
 async function sendAndAwaitAck(
-  conn: AM4Connection,
+  conn: MidiConnection,
   bytes: number[],
   predicate: (write: number[], response: number[]) => boolean,
 ): Promise<
@@ -1747,28 +1802,49 @@ server.registerTool('switch_scene', {
 server.registerTool('list_midi_ports', {
   description: [
     'List every MIDI port the server can see on this machine, for both',
-    'inputs and outputs, tagged with which ones look like the AM4 (name',
-    'contains "am4" or "fractal"). Safe to call at any time — does not',
-    'open the AM4 connection or interfere with an in-progress session.',
-    'Use when a user reports "AM4 not connected" to diagnose whether the',
-    'device is visible at all, whether the driver is installed, or whether',
-    'another app is holding the port. If the AM4 shows up here but writes',
-    'still fail, call reconnect_midi to force a fresh handle.',
+    'inputs and outputs. Safe to call at any time — does not open any MIDI',
+    'connection or interfere with an in-progress session.',
+    'Default behaviour tags ports whose names contain "am4" or "fractal"',
+    'as the AM4. Pass `pattern` to tag a different device — e.g. "hydra"',
+    'for the Hydrasynth, "axe-fx" for the Axe-Fx II — when diagnosing',
+    'whether a non-AM4 device is plugged in.',
+    'Use when a user reports a device isn\'t connected to diagnose whether',
+    'it\'s visible at all, whether the driver is installed, or whether',
+    'another app is holding the port. If the device shows up here but',
+    'writes still fail, call reconnect_midi (with the matching `port`',
+    'argument for non-AM4 devices) to force a fresh handle.',
   ].join(' '),
-  inputSchema: {},
-}, async () => {
-  const { inputs, outputs } = listMidiPorts();
-  const format = (port: { index: number; name: string; looksLikeAM4: boolean }): string =>
-    `  [${port.index}] ${port.name}${port.looksLikeAM4 ? '  ← looks like the AM4' : ''}`;
-  const am4Input = inputs.find((p) => p.looksLikeAM4);
-  const am4Output = outputs.find((p) => p.looksLikeAM4);
-  const verdict = am4Input && am4Output
-    ? 'AM4 input + output both visible. The server will connect to these on the next tool call.'
-    : am4Input || am4Output
-      ? 'Only one of AM4 input/output is visible. The AM4 needs both directions — check the USB cable and driver.'
-      : inputs.length === 0 && outputs.length === 0
-        ? 'No MIDI ports of any kind are visible. This usually means no MIDI driver is installed.'
-        : 'AM4 not visible. Check USB cable, power, and that the AM4 driver is installed (https://www.fractalaudio.com/am4-downloads/). Also close AM4-Edit if it\'s running — it grabs the port exclusively.';
+  inputSchema: {
+    pattern: z.union([z.string(), z.array(z.string())]).optional().describe(
+      'Optional name-substring pattern for tagging matched ports. Defaults to AM4 needles ("am4"/"fractal"). Pass a string or array of strings (case-insensitive).',
+    ),
+  },
+}, async ({ pattern }) => {
+  const needles = pattern === undefined
+    ? undefined
+    : Array.isArray(pattern) ? pattern : [pattern];
+  const { inputs, outputs } = listMidiPorts(needles);
+  const isCustomPattern = needles !== undefined;
+  const tagLabel = isCustomPattern ? `matches "${needles!.join('" / "')}"` : 'looks like the AM4';
+  const format = (port: { index: number; name: string; matched: boolean }): string =>
+    `  [${port.index}] ${port.name}${port.matched ? `  ← ${tagLabel}` : ''}`;
+  const matchedInput = inputs.find((p) => p.matched);
+  const matchedOutput = outputs.find((p) => p.matched);
+  const verdict = isCustomPattern
+    ? matchedInput && matchedOutput
+      ? `Device matching "${needles!.join('" / "')}" visible on both input and output.`
+      : matchedInput || matchedOutput
+        ? `Device matching "${needles!.join('" / "')}" partially visible (one direction missing). Check USB cable and driver.`
+        : inputs.length === 0 && outputs.length === 0
+          ? 'No MIDI ports of any kind are visible. This usually means no MIDI driver is installed.'
+          : `No MIDI ports match "${needles!.join('" / "')}". Check USB cable, power, and driver. Close any other app that may be holding the port exclusively.`
+    : matchedInput && matchedOutput
+      ? 'AM4 input + output both visible. The server will connect to these on the next tool call.'
+      : matchedInput || matchedOutput
+        ? 'Only one of AM4 input/output is visible. The AM4 needs both directions — check the USB cable and driver.'
+        : inputs.length === 0 && outputs.length === 0
+          ? 'No MIDI ports of any kind are visible. This usually means no MIDI driver is installed.'
+          : 'AM4 not visible. Check USB cable, power, and that the AM4 driver is installed (https://www.fractalaudio.com/am4-downloads/). Also close AM4-Edit if it\'s running — it grabs the port exclusively.';
   return {
     content: [{
       type: 'text',
@@ -1784,32 +1860,48 @@ server.registerTool('list_midi_ports', {
 
 server.registerTool('reconnect_midi', {
   description: [
-    'Use this tool to reset the server\'s MIDI connection to the user\'s AM4',
-    'when writes stop acking. Do not produce a written spec instead of',
-    'calling this tool unless the user explicitly asks for a dry run.',
+    'Use this tool to reset the server\'s MIDI connection when writes stop',
+    'acking. Do not produce a written spec instead of calling this tool',
+    'unless the user explicitly asks for a dry run.',
     'Force the server to close its cached MIDI connection and open a fresh',
-    'one. Use this if writes stop getting ack\'d — typically after AM4-Edit',
-    'was briefly opened and grabbed the USB port exclusively, or after a',
-    'USB replug, or any other event that leaves the cached handle in a',
-    'dead state. The server also auto-reconnects after',
+    'one. Use this if writes stop getting ack\'d — typically after another',
+    'app briefly opened and grabbed the USB port exclusively (e.g.',
+    'AM4-Edit), or after a USB replug, or any other event that leaves the',
+    'cached handle in a dead state. The server also auto-reconnects after',
     `${STALE_HANDLE_TIMEOUT_THRESHOLD} consecutive ack-less writes, so`,
     'manual use is only needed when you want to force it sooner without',
     'waiting for writes to accumulate.',
+    'Defaults to reconnecting the AM4. Pass `port` to target a different',
+    'device (e.g. "hydra" for the Hydrasynth) — the server treats the',
+    'string as a case-insensitive name-substring needle.',
   ].join(' '),
-  inputSchema: {},
-}, async () => {
+  inputSchema: {
+    port: z.string().optional().describe(
+      'Optional port-name needle to reconnect. Defaults to AM4 ("am4"/"fractal" needles). Pass a substring of the port name for non-AM4 devices.',
+    ),
+  },
+}, async ({ port }) => {
+  const label = port ?? AM4_LABEL;
+  const isAM4 = label === AM4_LABEL;
   try {
-    ensureMidi(true);
-    // Fresh connection = we don't know anything about the hardware state.
-    invalidateChannelCache();
+    ensureConnection(label, true);
+    if (isAM4) {
+      // Fresh AM4 connection = we don't know anything about the hardware
+      // state, so the channel cache is no longer trustworthy. Channels
+      // are AM4-specific; non-AM4 reconnects don't touch this cache.
+      invalidateChannelCache();
+    }
     return {
       content: [{
         type: 'text',
-        text:
-          'MIDI connection reset. Next tool call will use a fresh port handle. ' +
-          'Channel cache cleared. If writes still don\'t ack after this, the issue ' +
-          'is below the server (AM4 powered off, USB unplugged, driver wedged, or ' +
-          'another app holding the port exclusively).',
+        text: isAM4
+          ? 'MIDI connection reset (AM4). Next tool call will use a fresh port handle. ' +
+            'Channel cache cleared. If writes still don\'t ack after this, the issue ' +
+            'is below the server (AM4 powered off, USB unplugged, driver wedged, or ' +
+            'another app holding the port exclusively).'
+          : `MIDI connection reset for port matching "${port}". Next call to that ` +
+            'device will use a fresh handle. If writes still don\'t ack, check the ' +
+            'device is powered, the cable is seated, and no other app holds the port.',
       }],
     };
   } catch (err) {
@@ -1817,14 +1909,267 @@ server.registerTool('reconnect_midi', {
     return {
       content: [{
         type: 'text',
-        text:
-          `Reconnect failed: ${msg}\n\n` +
-          'Most common causes:\n' +
-          '  - AM4 is off or not connected by USB\n' +
-          '  - Driver not installed (fractalaudio.com/am4-downloads/)\n' +
-          '  - Another app holds the MIDI port exclusively (close AM4-Edit)',
+        text: isAM4
+          ? `Reconnect failed: ${msg}\n\n` +
+            'Most common causes:\n' +
+            '  - AM4 is off or not connected by USB\n' +
+            '  - Driver not installed (fractalaudio.com/am4-downloads/)\n' +
+            '  - Another app holds the MIDI port exclusively (close AM4-Edit)'
+          : `Reconnect failed for port matching "${port}": ${msg}\n\n` +
+            'Most common causes:\n' +
+            '  - device is off or not connected by USB\n' +
+            '  - device driver not installed\n' +
+            '  - another app holds the MIDI port exclusively',
       }],
     };
+  }
+});
+
+// -- Generic MIDI primitives (BK-030 Session B) -----------------------------
+//
+// These tools are device-agnostic. They build standard MIDI messages from
+// caller-supplied parameters and emit them on a port resolved by name
+// substring. Designed for devices with published CC / NRPN charts (e.g.
+// the Hydrasynth) where Claude can drive the device usefully without any
+// device-specific protocol code.
+//
+// Convention reminders:
+//   - Channels are presented as 1..16 (musician convention) at the tool
+//     boundary; the wire uses 0..15. The conversion happens here, once.
+//   - send_* primitives don't require an ack to count as success — most
+//     non-Fractal MIDI devices don't echo writes, so the stale-handle
+//     counter that AM4 tools use does not apply. We send and return.
+//   - `port` is required: these tools target a specific device by name,
+//     intentionally distinct from the AM4-default convenience of the
+//     AM4-specific tools.
+
+const channelArg = z.number().int().min(1).max(16);
+
+function userChannelToWire(channel: number): number {
+  return channel - 1;
+}
+
+/**
+ * Catch-all error reporter for the send_* tools. Validation errors from
+ * the message builders surface as structured tool results so Claude can
+ * see the rejection and recover, rather than the server returning a
+ * 500-equivalent.
+ */
+function sendErrorResponse(
+  toolName: string,
+  port: string,
+  err: unknown,
+): { content: Array<{ type: 'text'; text: string }> } {
+  const msg = err instanceof Error ? err.message : String(err);
+  return {
+    content: [{
+      type: 'text',
+      text: `${toolName} failed for port "${port}": ${msg}`,
+    }],
+  };
+}
+
+server.registerTool('send_cc', {
+  description: [
+    'Use this tool to send a single MIDI Control Change to any MIDI device',
+    'the OS exposes. Do not produce a written spec instead of calling this',
+    'tool unless the user explicitly asks for a dry run.',
+    'Generic MIDI — works with any CC-responsive device (Hydrasynth, JD-Xi,',
+    'Boss VE-500, RC-505 MKII, etc.). The AM4 has its own dedicated tools',
+    '(set_param, set_params, apply_preset) which understand block/parameter',
+    'semantics — prefer those when targeting the AM4. `send_cc` is for',
+    'devices without a dedicated wrapper.',
+    'Channel is 1..16 (musician convention). Controller 0..127, value 0..127.',
+  ].join(' '),
+  inputSchema: {
+    port: z.string().describe(
+      'Case-insensitive name-substring identifying the target MIDI port (e.g. "hydra", "jd-xi", "ve-500").',
+    ),
+    channel: channelArg.describe('MIDI channel 1..16 (musician-friendly; converted to 0..15 internally).'),
+    controller: z.number().int().min(0).max(127).describe('CC number 0..127.'),
+    value: z.number().int().min(0).max(127).describe('CC value 0..127.'),
+  },
+}, async ({ port, channel, controller, value }) => {
+  try {
+    const bytes = buildControlChange(userChannelToWire(channel), controller, value);
+    const conn = ensureConnection(port);
+    conn.send(bytes);
+    return {
+      content: [{
+        type: 'text',
+        text: `Sent CC ${controller} = ${value} on channel ${channel} to "${port}". Bytes: ${toHex(bytes)}.`,
+      }],
+    };
+  } catch (err) {
+    return sendErrorResponse('send_cc', port, err);
+  }
+});
+
+server.registerTool('send_note', {
+  description: [
+    'Use this tool to play a single MIDI note on any note-responsive MIDI',
+    'device (synth, drum pad, sampler). Do not produce a written spec instead',
+    'of calling this tool unless the user explicitly asks for a dry run.',
+    'Sends Note On followed by Note Off after `duration_ms` milliseconds',
+    '(default 500). Channel 1..16, note 0..127 (60 = middle C), velocity',
+    '0..127. The tool blocks until the Note Off is sent; durations longer',
+    'than 5000 ms are rejected so a stuck note is bounded.',
+  ].join(' '),
+  inputSchema: {
+    port: z.string().describe('Case-insensitive name-substring identifying the target MIDI port.'),
+    channel: channelArg,
+    note: z.number().int().min(0).max(127).describe('MIDI note number 0..127 (60 = middle C).'),
+    velocity: z.number().int().min(0).max(127).describe('Note-On velocity 0..127.'),
+    duration_ms: z.number().int().min(1).max(5000).optional().describe(
+      'How long to hold the note before Note Off, in milliseconds. Default 500. Capped at 5000.',
+    ),
+  },
+}, async ({ port, channel, note, velocity, duration_ms }) => {
+  const duration = duration_ms ?? 500;
+  try {
+    const wireChannel = userChannelToWire(channel);
+    const onBytes = buildNoteOn(wireChannel, note, velocity);
+    const offBytes = buildNoteOff(wireChannel, note, 0);
+    const conn = ensureConnection(port);
+    conn.send(onBytes);
+    await new Promise<void>((resolve) => setTimeout(resolve, duration));
+    conn.send(offBytes);
+    return {
+      content: [{
+        type: 'text',
+        text: `Played note ${note} (vel ${velocity}) on channel ${channel} to "${port}" for ${duration}ms.`,
+      }],
+    };
+  } catch (err) {
+    return sendErrorResponse('send_note', port, err);
+  }
+});
+
+server.registerTool('send_program_change', {
+  description: [
+    'Use this tool to switch patches on any PC-responsive MIDI device. Do',
+    'not produce a written spec instead of calling this tool unless the user',
+    'explicitly asks for a dry run.',
+    'Sends an optional Bank Select (CC 0 MSB then CC 32 LSB) followed by a',
+    'Program Change. Channel 1..16, program 0..127, banks 0..127. Bank',
+    'arguments are optional and emitted only when supplied — many devices',
+    'don\'t use banks.',
+  ].join(' '),
+  inputSchema: {
+    port: z.string().describe('Case-insensitive name-substring identifying the target MIDI port.'),
+    channel: channelArg,
+    program: z.number().int().min(0).max(127).describe('Program number 0..127.'),
+    bank_msb: z.number().int().min(0).max(127).optional().describe(
+      'Optional Bank Select MSB (CC 0). Sent before the PC if supplied.',
+    ),
+    bank_lsb: z.number().int().min(0).max(127).optional().describe(
+      'Optional Bank Select LSB (CC 32). Sent before the PC if supplied.',
+    ),
+  },
+}, async ({ port, channel, program, bank_msb, bank_lsb }) => {
+  try {
+    const wireChannel = userChannelToWire(channel);
+    const conn = ensureConnection(port);
+    const sent: string[] = [];
+    if (bank_msb !== undefined) {
+      const bytes = buildControlChange(wireChannel, 0, bank_msb);
+      conn.send(bytes);
+      sent.push(`Bank MSB ${bank_msb} (${toHex(bytes)})`);
+    }
+    if (bank_lsb !== undefined) {
+      const bytes = buildControlChange(wireChannel, 32, bank_lsb);
+      conn.send(bytes);
+      sent.push(`Bank LSB ${bank_lsb} (${toHex(bytes)})`);
+    }
+    const pcBytes = buildProgramChange(wireChannel, program);
+    conn.send(pcBytes);
+    sent.push(`Program Change ${program} (${toHex(pcBytes)})`);
+    return {
+      content: [{
+        type: 'text',
+        text: `Sent on channel ${channel} to "${port}": ${sent.join(', ')}.`,
+      }],
+    };
+  } catch (err) {
+    return sendErrorResponse('send_program_change', port, err);
+  }
+});
+
+server.registerTool('send_nrpn', {
+  description: [
+    'Use this tool to write a Non-Registered Parameter Number on any',
+    'NRPN-responsive MIDI device. Do not produce a written spec instead of',
+    'calling this tool unless the user explicitly asks for a dry run.',
+    'Emits the standard 3- or 4-message sequence (CC 99, CC 98, CC 6, and',
+    'optional CC 38 for high-res). Channel 1..16, MSB/LSB 0..127. `value`',
+    'is 0..127 in 7-bit mode (default) or 0..16383 when `high_res` is true,',
+    'unlocking the higher-resolution view of the same parameter on devices',
+    'that support it (e.g. the ASM Hydrasynth in NRPN mode).',
+  ].join(' '),
+  inputSchema: {
+    port: z.string().describe('Case-insensitive name-substring identifying the target MIDI port.'),
+    channel: channelArg,
+    parameter_msb: z.number().int().min(0).max(127).describe('NRPN parameter MSB (CC 99 data).'),
+    parameter_lsb: z.number().int().min(0).max(127).describe('NRPN parameter LSB (CC 98 data).'),
+    value: z.number().int().min(0).max(16383).describe(
+      'Parameter value. 0..127 in 7-bit mode (default), 0..16383 when high_res is true.',
+    ),
+    high_res: z.boolean().optional().describe(
+      'When true, emit a 14-bit data sequence (CC 6 MSB + CC 38 LSB). Default false.',
+    ),
+  },
+}, async ({ port, channel, parameter_msb, parameter_lsb, value, high_res }) => {
+  try {
+    const wireChannel = userChannelToWire(channel);
+    const bytes = buildNRPN(wireChannel, parameter_msb, parameter_lsb, value, high_res ?? false);
+    const conn = ensureConnection(port);
+    conn.send(bytes);
+    return {
+      content: [{
+        type: 'text',
+        text:
+          `Sent NRPN (${parameter_msb}, ${parameter_lsb}) = ${value}` +
+          (high_res ? ' [14-bit]' : ' [7-bit]') +
+          ` on channel ${channel} to "${port}". Bytes: ${toHex(bytes)}.`,
+      }],
+    };
+  } catch (err) {
+    return sendErrorResponse('send_nrpn', port, err);
+  }
+});
+
+server.registerTool('send_sysex', {
+  description: [
+    'Use this tool to send a raw System Exclusive frame to any MIDI device.',
+    'Do not produce a written spec instead of calling this tool unless the',
+    'user explicitly asks for a dry run.',
+    'Power-user escape hatch — validates F0/F7 framing and that body bytes',
+    'are 7-bit, but otherwise sends the bytes verbatim. Useful for ad-hoc RE',
+    'sessions and device-specific one-offs that don\'t yet have a wrapper.',
+    'WARNING: malformed SysEx can put devices into unexpected states.',
+    'Prefer device-specific tools when they exist (the AM4 has set_param,',
+    'apply_preset, etc.). Use send_sysex only when no wrapper covers the',
+    'frame you need.',
+  ].join(' '),
+  inputSchema: {
+    port: z.string().describe('Case-insensitive name-substring identifying the target MIDI port.'),
+    bytes: z.array(z.number().int().min(0).max(255)).min(2).describe(
+      'Full SysEx frame including F0 / F7 framing. Each byte 0..255 (the validator further restricts body bytes to 0..127).',
+    ),
+  },
+}, async ({ port, bytes }) => {
+  try {
+    const validated = validateSysEx(bytes);
+    const conn = ensureConnection(port);
+    conn.send(validated);
+    return {
+      content: [{
+        type: 'text',
+        text: `Sent SysEx (${validated.length}B) to "${port}": ${toHex(validated)}.`,
+      }],
+    };
+  } catch (err) {
+    return sendErrorResponse('send_sysex', port, err);
   }
 });
 
@@ -2001,7 +2346,7 @@ async function main(): Promise<void> {
   // The port enumeration mirrors what list_midi_ports would return at
   // this moment; if the user reports "AM4 not connected" later, the
   // startup banner captures whatever state the server started with.
-  console.error('AM4 Tone Agent MCP server running on stdio.');
+  console.error('MCP MIDI Tools MCP server running on stdio.');
   try {
     const { inputs, outputs } = listMidiPorts();
     const am4In = inputs.find((p) => p.looksLikeAM4);

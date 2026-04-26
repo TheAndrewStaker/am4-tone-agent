@@ -1,12 +1,14 @@
-# AM4 Tone Agent
+# MCP MIDI Tools
 
-Talk to Claude. Get Fractal AM4 tones.
+Talk to Claude. Control your MIDI gear.
 
-AM4 Tone Agent is a local [Model Context Protocol](https://modelcontextprotocol.io)
-(MCP) server that lets Claude control a Fractal Audio **AM4** guitar amp
-modeler over USB/MIDI. Ask Claude for a tone in plain English and the AM4
-updates in real time — block layout, amp type, drive, delay, reverb,
-scenes, and preset naming.
+MCP MIDI Tools is a local [Model Context Protocol](https://modelcontextprotocol.io)
+(MCP) server that lets Claude drive USB MIDI hardware in plain English.
+First-class support today for the **Fractal Audio AM4** guitar amp
+modeler — block layout, amp type, drive, delay, reverb, scenes, and
+preset naming all updateable in real time. Five generic-MIDI primitives
+work against any CC/NRPN/SysEx-addressable device, so synths, looper
+pedals, and other gear are reachable from day one.
 
 > **Unaffiliated community tool.** "Fractal Audio", "AM4", and related
 > product names are trademarks of Fractal Audio Systems, Inc. This project
@@ -19,11 +21,12 @@ scenes, and preset naming.
 
 ## Status
 
-Early preview (v0.1). The protocol layer is hardware-verified, 16 MCP
-tools are live, and every tool ships with byte-exact goldens against
-real captures. Distribution is still a clone-and-run flow — the signed
-Windows `.exe` and one-click installer tracked in the backlog (P5-002,
-P5-005, P5-008) haven't shipped yet.
+Early preview (v0.1). The protocol layer is hardware-verified, 22 MCP
+tools are live (17 AM4-specific plus 5 generic-MIDI primitives that
+work against any USB MIDI device), and every tool ships with byte-exact
+goldens against real captures. Distribution is still a clone-and-run
+flow; the signed Windows `.exe` and one-click installer tracked in the
+backlog (P5-002, P5-005, P5-008) haven't shipped yet.
 
 ---
 
@@ -46,10 +49,16 @@ Once connected, Claude can:
   Klon?"* / *"Which amp on the AM4 is inspired by a Matchless DC-30?"*
 - **Switch presets.** *"Load A01."*
 
-Under the hood Claude picks one of 17 tools (`apply_preset`,
+Under the hood Claude picks one of 22 tools (`apply_preset`,
 `set_param`, `save_preset`, `switch_scene`, `lookup_lineage`, …) and
 sends SysEx to the device. Tool round-trips land in roughly 30–60 ms;
 whole-preset builds take under a second.
+
+Five of those tools are device-agnostic generic-MIDI primitives
+(`send_cc`, `send_note`, `send_program_change`, `send_nrpn`,
+`send_sysex`). They work against any USB MIDI device the OS exposes,
+not just the AM4. See [Generic MIDI quick-start](#generic-midi-quick-start)
+below.
 
 ---
 
@@ -78,8 +87,8 @@ Clone the repo, install dependencies, and run the hardware smoke test
 once before wiring anything into Claude:
 
 ```bash
-git clone https://github.com/TheAndrewStaker/am4-tone-agent.git
-cd am4-tone-agent
+git clone https://github.com/TheAndrewStaker/mcp-midi-tools.git
+cd mcp-midi-tools
 npm install
 npm run preflight    # typecheck + protocol goldens + MCP smoke test
 npm run write-test   # changes amp gain on the device — confirms MIDI path
@@ -100,9 +109,9 @@ doesn't exist) and add:
 ```json
 {
   "mcpServers": {
-    "am4-tone-agent": {
+    "mcp-midi-tools": {
       "command": "npx",
-      "args": ["tsx", "C:\\path\\to\\am4-tone-agent\\src\\server\\index.ts"],
+      "args": ["tsx", "C:\\path\\to\\mcp-midi-tools\\src\\server\\index.ts"],
       "env": {}
     }
   }
@@ -127,7 +136,7 @@ Full walkthrough with screenshots-worth of detail:
 From your project directory:
 
 ```bash
-claude mcp add am4-tone-agent -- npx tsx C:\path\to\am4-tone-agent\src\server\index.ts
+claude mcp add mcp-midi-tools -- npx tsx C:\path\to\mcp-midi-tools\src\server\index.ts
 ```
 
 Then start `claude` and the tools are available in your session.
@@ -141,7 +150,7 @@ npm run server
 ```
 
 The server speaks MCP over stdio. Point your client at the command
-`npx tsx C:\path\to\am4-tone-agent\src\server\index.ts`.
+`npx tsx C:\path\to\mcp-midi-tools\src\server\index.ts`.
 
 ---
 
@@ -149,7 +158,7 @@ The server speaks MCP over stdio. Point your client at the command
 
 1. Open a new chat in your Claude client. Make sure the AM4 is powered
    on and connected by USB.
-2. Ask: **"Using am4-tone-agent, list the MIDI ports you can see."**
+2. Ask: **"Using mcp-midi-tools, list the MIDI ports you can see."**
    Claude calls `list_midi_ports` and reports a verdict like *"AM4
    detected (in: AM4, out: AM4)"*. If it says the AM4 isn't visible,
    close AM4-Edit and replug the USB cable.
@@ -161,11 +170,13 @@ If step 3 works, you're done. Move on to building full presets.
 
 ---
 
-## The 17 tools at a glance
+## The 22 tools at a glance
+
+### AM4-specific (17)
 
 | Tool | What it does |
 |---|---|
-| `apply_preset` | Build a whole preset in one call — blocks, per-channel params, optional name. Working buffer only; does not save. |
+| `apply_preset` | Build a whole preset in one call (blocks, per-channel params, optional name). Working buffer only; does not save. |
 | `set_param` | Write one parameter (amp gain, reverb mix, …). |
 | `set_params` | Batch write. Validates the whole batch before any MIDI leaves. |
 | `set_block_type` | Place a block (amp, drive, reverb, …) in a signal-chain slot. |
@@ -179,11 +190,88 @@ If step 3 works, you're done. Move on to building full presets.
 | `list_params` | Describe every param Claude can write. |
 | `list_block_types` | List the block types that fit each slot. |
 | `list_enum_values` | List enum choices for a given param (e.g. all amp types). |
-| `list_midi_ports` | Diagnose the USB/MIDI connection. |
-| `reconnect_midi` | Force-reopen the AM4 handle after an AM4-Edit excursion. |
+| `list_midi_ports` | Diagnose the USB/MIDI connection (any device; tags AM4 by default). |
+| `reconnect_midi` | Force-reopen the AM4 handle after an AM4-Edit excursion (also accepts a `port` arg for non-AM4 devices). |
 | `lookup_lineage` | "What real amp inspired this?" / "Find me a Klon-style drive." |
 
-Full tool descriptions surface inside Claude automatically — just ask.
+### Generic MIDI primitives (5)
+
+Work with any USB MIDI device the OS exposes. Channels are 1..16 at the
+tool boundary (musician convention); the wire layer converts to 0..15
+once. The AM4 has dedicated wrappers above (which understand block /
+parameter / scene semantics), so reach for these primitives when the
+target is a different device.
+
+| Tool | What it does |
+|---|---|
+| `send_cc` | Send a Control Change. Channel 1..16, controller 0..127, value 0..127. |
+| `send_note` | Play a note (Note On + Note Off after `duration_ms`, default 500, max 5000). |
+| `send_program_change` | Switch patches. Optional Bank Select MSB/LSB prefix. |
+| `send_nrpn` | Write a Non-Registered Parameter Number. 7-bit by default; `high_res: true` unlocks 14-bit values (0..16383). |
+| `send_sysex` | Send a raw System Exclusive frame. Validates F0/F7 framing; otherwise sends bytes verbatim. |
+
+Full tool descriptions surface inside Claude automatically (just ask).
+
+---
+
+## Generic MIDI quick-start
+
+The five `send_*` primitives let Claude drive any MIDI device with a
+published implementation chart. Below are conversational examples
+targeting non-AM4 gear so the generality is obvious; substitute the
+`port` substring for whatever name your device shows up as in
+`list_midi_ports`.
+
+**Tweak a synth filter cutoff (CC 74).** Most synths follow the standard
+MIDI CC chart for tone-shaping controls.
+
+> *"Set the filter cutoff on my Hydrasynth to 80."*
+
+Claude calls:
+
+```
+send_cc { port: "hydra", channel: 1, controller: 74, value: 80 }
+```
+
+**Play a single note.** Useful for confirming a synth is responding and
+for one-shot triggers.
+
+> *"Play middle C on the Hydrasynth for half a second."*
+
+```
+send_note { port: "hydra", channel: 1, note: 60, velocity: 100, duration_ms: 500 }
+```
+
+**Switch patches with a bank select.** Devices that expose more than 128
+patches need a Bank Select prefix before the Program Change.
+
+> *"Load patch 12 on bank 2 of the Hydrasynth."*
+
+```
+send_program_change { port: "hydra", channel: 1, program: 12, bank_msb: 0, bank_lsb: 2 }
+```
+
+**Address a 14-bit NRPN.** Some synths expose deeper engine controls
+through NRPN at higher resolution than CC.
+
+> *"Set Hydrasynth NRPN parameter (0, 74) to 8192 in 14-bit mode."*
+
+```
+send_nrpn { port: "hydra", channel: 1, parameter_msb: 0, parameter_lsb: 74, value: 8192, high_res: true }
+```
+
+**Send a raw SysEx frame.** The escape hatch for ad-hoc reverse
+engineering or one-offs that don't have a wrapper yet.
+
+> *"Send these bytes to the AM4 verbatim: F0 00 01 74 15 12 4A 48 F7"*
+
+```
+send_sysex { port: "am4", bytes: [0xF0, 0x00, 0x01, 0x74, 0x15, 0x12, 0x4A, 0x48, 0xF7] }
+```
+
+Tools default to the AM4 only on `reconnect_midi` and `list_midi_ports`;
+every `send_*` tool requires the `port` argument explicitly so there's
+no ambiguity about which device is being driven.
 
 ---
 

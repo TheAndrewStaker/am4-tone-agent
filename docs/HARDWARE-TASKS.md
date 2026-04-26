@@ -23,19 +23,35 @@
 > collection (replaced by the Hydrasynth Explorer) and is now a
 > community-support item with no founder-hardware validation.
 >
-> Last updated: 2026-04-25 (Session 30 — HW-018 + HW-025 decoded
-> + archived. BK-033 fixed (predelay address 0x10 → 0x13;
-> verified byte-for-byte against AM4-Edit). BK-034 cleared as
+> Last updated: 2026-04-25 (Session 30 cont — HW-019 + HW-020 +
+> HW-021 decoded + archived. **14 new params**: 5 drive (low_cut /
+> bass / mid / mid_freq / treble), 3 delay (level / stack_hold /
+> ducking), 6 compressor (level / threshold / ratio / attack /
+> release / auto_makeup). New unit `ratio` added for compression
+> ratios. KNOWN_PARAMS 79 → 93; verify-msg goldens 60 → 74;
+> CACHE_PARAMS 69 → 79.
+> **Methodology finding**: AM4-Edit's UI is type-dependent —
+> different drive types expose different first-page knobs.
+> TS808 OD only had drive/tone/level (3 knobs); Blackglass 7K
+> exposed those plus 6 EQ-page knobs. Compressor JFET Studio
+> exposed 8 knobs (vs the spec's Studio FF assumption). This
+> caught us by surprise; queued as **HW-030** = research task
+> to map "type → exposed first-page knobs" for every block,
+> either by AM4-Edit screenshot pass or by deeper cache-decode
+> for per-type visibility flags.
+> Three residual addresses queued: HW-027 (delay tempo enum
+> extraction at 0x0013), HW-028 (compressor 0x0017 + 0x0029
+> unidentified knobs), HW-029 (drive 0x002d unidentified knob).
+> Updated priority order: HW-022 > HW-023 > HW-024 > HW-016 >
+> HW-030 > HW-017 > HW-026/027/028/029 residuals.
+>
+> Pre-existing: Session 30 — HW-018 + HW-025 decoded + archived.
+> BK-033 fixed (predelay address 0x10 → 0x13). BK-034 cleared as
 > not-a-code-bug — captures show our wire is byte-identical to
 > AM4-Edit's for all 4 disputed params; HW-014 hardware-display
-> divergence is an AM4 screen-rendering quirk, not a wire-layer
-> encoding bug. HW-018 added 10 new reverb registers (high_cut,
-> low_cut, input_gain, density, dwell, stereo_spread, ducking,
-> quality, stack_hold, drip). KNOWN_PARAMS 69 → 79; goldens
-> 53 → 60. One unidentified register at pidHigh=0x0000 queued
-> as HW-026 (likely `reverb.level`; needs single-knob capture).
-> Updated priority order: HW-019 > HW-024 > HW-020 > HW-016 >
-> HW-021 > HW-022 > HW-023 > HW-017 > HW-026 residual.)
+> divergence is an AM4 screen-rendering quirk. HW-018 added 10
+> reverb registers; HW-026 queued for the residual `pidHigh=0x0000`
+> Reverb register.)
 
 ## Status key
 
@@ -53,45 +69,91 @@ Claude picks up from there and moves the item to ⏳ or ✅.
 
 ## Pending — next up
 
-### HW-024 — Complete HW-014 spot-check (Round 4 + re-tests + missed params) 🔜
+<!-- HW-024 completed 2026-04-25 (Session 30 cont 3) — see Archive
+     below for the test report and findings. -->
 
-- **For:** closes the residual coverage gaps from HW-014. HW-014's
-  Round 4 (enhancer/gate/volpan) wasn't reached, `filter.freq`
-  needs a re-test on a non-Envelope filter type, `amp.level`
-  needs a non-default test value, and `flanger.rate` /
-  `phaser.rate` weren't called out in readback.
-- **Why:** finishes the structurally-decoded-param coverage so
-  every shipped knob has a hardware datapoint, not just the 28
-  HW-014 verified.
-- **Setup:** AM4 plugged in, Claude Desktop with the connector
-  attached. No captures needed — *ear + display* verification.
-  Z04 recommended (scratch).
-- **Steps:** Conversational — tell Claude: *"Run HW-024 — finish
-  HW-014's Round 4. Build a preset on Z04 with enhancer + gate +
-  volpan blocks, write distinctive values to every mapped param,
-  and I'll read them back. Then re-test `filter.freq` on a
-  Low-Pass filter type, re-test `amp.level` at +8 dB, confirm
-  `flanger.rate` and `phaser.rate` from the previous run, and
-  test `reverb.springs` + `reverb.spring_tone` on a Spring
-  reverb."* Claude paces the writes for sequential verification.
-- **Param checklist (~13 params):**
-  - Round 4: `enhancer.type`, `enhancer.mix`, `enhancer.balance`,
-    `gate.type`, `gate.balance`, `volpan.mode`, `volpan.balance`.
-  - Re-tests: `filter.freq` (on Low-Pass), `amp.level` (+8 dB),
-    `flanger.rate`, `phaser.rate`.
-  - Spring-reverb-only: `reverb.springs`, `reverb.spring_tone`.
-- **Pass criterion:** each `set_param` produces the expected
-  display value on the AM4. Balance params should pan audibly
-  L/R as the value moves between -100 and +100. Hidden-on-display
-  params (likely `enhancer.balance`, `gate.balance`,
-  `volpan.balance`, `enhancer.mix`) noted as such — not failures.
-- **Signal completion:** *"HW-024 done"* + readback values
-  (verified / hidden / mismatch). Claude promotes the verified
-  params by removing the "pending HW-014" qualifier from
-  `params.ts` comments and updates PROMPT-COVERAGE.md rows.
-- **Priority:** medium — coverage completion. Lower urgency than
-  the bug-fix HW-025 captures because none of these are known
-  to be broken; they just lack a datapoint.
+### HW-032 — Capture newly-discovered first-page knobs (HW-024 finding F4) ⏳ partial-decode
+
+**Status (2026-04-25, Session 30 cont 8):** founder captured 5 of 5 expected
+pcapngs (gate / filter / flanger / enhancer / volpan) plus screenshots
+for gate / filter / flanger / volpan (enhancer screenshot pending).
+Decode landed **8 hardware-verified params** + identified the **Input
+Noise Gate** as a separate block (`pidLow=0x0025`, registered as
+`ingate`).
+
+Wired (verify-msg + verify-cache-params byte-exact):
+
+- `filter.level` (0x0000, dB, +12)
+- `filter.low_cut` (0x0012, Hz, 100)
+- `filter.high_cut` (0x0013, Hz, 1800)
+- `flanger.level` (0x0000, dB, +10)
+- `volpan.level` (0x0000, dB, +12)
+- `volpan.threshold` (0x0010, dB, -20)
+- `volpan.attack` (0x0011, ms, 300)
+- `ingate.level` (0x0000, dB, -10) — NEW BLOCK
+
+Residuals (queued as HW-034 / HW-035 / HW-036 below):
+
+- Filter Q + Order + page-2 modulation knobs (6 unmapped pidHighs).
+- Flanger Manual + Mod Phase (radians-encoded — needs `degrees` Unit).
+- Volpan Taper enum (Linear / Log / Exp candidate).
+- Ingate Threshold + Release + Type (non-trivial encodings + type-walk).
+- Enhancer first-page knob mapping (pcapng decoded but screenshot not
+  captured — re-queue with screenshot ask).
+
+
+
+- **For:** HW-024's Phase-2 readback inventoried the AM4 hardware
+  display pages for several blocks and surfaced ~25 first-page
+  knobs that aren't yet in our param registry. These are the next
+  batch of high-value coverage to add.
+- **Newly-discovered first-page knobs by block:**
+  - **Gate** (HIGH priority — core gate functionality currently
+    missing): Threshold, Attenuation, Attack, Release, Hold,
+    Sidechain Source, Level.
+  - **Filter** (Low-Pass) (HIGH priority — only freq + type
+    mapped): Q, Order, Low Cut, High Cut, Level. Plus filter
+    page 2: Mode Enable, Mod Type, Frequency, Mod Frequency,
+    Mod Rate, Mod Tempo (modulation subsystem).
+  - **Flanger** (HIGH priority — only rate + depth + feedback +
+    mix + tempo mapped after HW-027; missing Manual, Mod Phase,
+    Level).
+  - **Enhancer** (MEDIUM): Width, Phase Invert, Pan Left, Pan
+    Right, Level. Stereo utility params.
+  - **Volpan** (Auto-Swell mode) (MEDIUM): Threshold, Attack,
+    Taper, Level. Auto-Swell envelope params.
+- **Why:** these are knobs a typical user reaches for. Adding
+  them lifts MVP "we cover what users want to set" from "every
+  Type knob + the universal mix/balance" to "every block's first
+  page." Dovetails with TYPE-KNOBS.md growth.
+- **Capture strategy:** one pcapng per block, wiggling each new
+  knob in turn. Same methodology as HW-019/020/021. Rough
+  capture count: 5 pcapngs (gate, filter, flanger, enhancer,
+  volpan).
+- **Suggested filenames:**
+  - `samples/captured/session-32-gate-extended.pcapng`
+  - `samples/captured/session-32-filter-extended.pcapng`
+  - `samples/captured/session-32-flanger-extended.pcapng`
+  - `samples/captured/session-32-enhancer-extended.pcapng`
+  - `samples/captured/session-32-volpan-extended.pcapng`
+- **Signal completion:** *"HW-032 done"* + saved paths. Claude
+  decodes via `extract-final-writes`, registers the new pidHighs
+  in `params.ts` + `paramNames.ts`, and adds verify-msg goldens
+  for each.
+- **Audio-effect spot-check (bonus):** while at the device, do a
+  one-knob-at-a-time A/B for each of the **4 hidden-balance
+  blocks** that wire-ack but don't display (amp / chorus /
+  flanger / drive being most likely-to-have-stereo-effect). Set
+  balance to -100 vs +100; listen for L/R pan. Same for
+  `enhancer.mix` (HW-024 finding F1 — phantom on display, but
+  audio-effect status unknown). Reports back let us tag each
+  param accurately.
+- **Priority:** medium — biggest coverage jump for everyday
+  user knobs. Recommend pairing with HW-016 next time at the
+  device.
+
+### HW-024 — Complete HW-014 spot-check (Round 4 + re-tests + missed params) ✅
+*See Archive below for the test report and findings.*
 
 <!-- HW-025 completed 2026-04-25 (Session 30) — see Archive below for the
      decode summary. -->
@@ -140,6 +202,150 @@ Claude picks up from there and moves the item to ⏳ or ✅.
 <!-- HW-018 completed 2026-04-25 (Session 30) — see Archive below for the
      decode summary. -->
 
+### HW-030 — Map "type → exposed first-page knobs" for every block 🔜
+
+- **For:** removes the surprise-factor from every future BK-032 HW
+  capture. AM4-Edit's UI is type-dependent (TS808 OD shows 3 knobs
+  on Drive's first page; Blackglass 7K shows 9; Klone Chiron
+  relabels Tone→"Treble" / Level→"Output"). Today we have no
+  committed map of which type exposes which first-page knobs, so
+  every HW capture spec ends up partial.
+- **Step 1 (cache-side decode) — DONE, partial fail.** Session 30
+  cont investigation ruled out the simplest hypotheses: (a) no
+  per-type subset table after section 3 (only 2 bytes unparsed
+  in a 129 KB file), (b) `english.laxml` is just UI string
+  translations, (c) AM4-Edit installs no other metadata files.
+  The remaining `extra` field per cache record gives a partial
+  signal (extra=1 correlates with universal-knob status; extra=0
+  with type-dependent) but isn't a complete per-type map. The
+  per-type rendering logic appears compiled into AM4-Edit.exe
+  (21.7 MB binary). Findings written up in `docs/TYPE-KNOBS.md`
+  with the universal-knob set + Drive/Delay/Compressor/Reverb
+  per-type rows seeded from existing captures.
+- **Step 2 — Lazy AM4-Edit screenshot pass** (founder hardware,
+  ongoing). Don't try to enumerate all 700+ block-type
+  combinations upfront. Instead, when you next have AM4-Edit
+  open at the device, screenshot the Edit page for 2–3 types per
+  block (one minimalist + one feature-rich + one outlier), append
+  rows to `docs/TYPE-KNOBS.md`'s per-type tables. ~15 blocks × 3
+  types × ~5 min each = ~4 hours total spread across sessions.
+- **Why:** lazy population is enough for MVP. Claude can use
+  TYPE-KNOBS.md to give "knob X isn't on type Y, switch types
+  first" hints for the captured types, and fall back to a
+  permissive write-anyway behaviour for uncatalogued types
+  (preserving the wire-permissive nature we know from HW-014's
+  `geq.balance` finding). Full coverage doesn't gate release.
+- **Pass criterion:** `docs/TYPE-KNOBS.md` has at least 2–3 type
+  rows per block for the 5 most-used blocks (Amp, Drive, Delay,
+  Reverb, Compressor). Modulation + secondary blocks queued
+  behind HW-022/023.
+- **Signal completion:** *"HW-030 step 2 partial — added
+  {block}/{type} rows"* + path to AM4-Edit screenshot screenshots
+  if helpful. No single done-signal — file grows opportunistically.
+- **Priority:** medium — useful but not gating. HW-022/023 can
+  proceed in parallel (capture whatever AM4-Edit exposes for the
+  type the founder picks, document it as we go).
+- **Optional — HW-031 (Ghidra investigation of AM4-Edit.exe).**
+  If lazy step 2 turns out to be too tedious or Claude wants
+  full coverage automatically, queue a Ghidra session to look
+  for per-type Qt page-template resources inside the .exe. Not
+  scoped here — would need its own HW-NNN.
+
+<!-- HW-034 completed 2026-04-26 (Session 33) — see Archive below for the
+     decode summary. -->
+
+
+<!-- HW-035 completed 2026-04-26 (Session 34) — see Archive below for the
+     decode summary. -->
+
+
+<!-- HW-036 completed 2026-04-26 (Session 34) — see Archive below for the
+     decode summary. -->
+
+
+### HW-037 — Enhancer first-page knob mapping (HW-032 follow-up) 🔜
+
+- **For:** the founder captured `session-32-enhancer-extended.pcapng`
+  but didn't take a corresponding screenshot, so the 5 captured
+  pidHighs (0x0000=11.0, 0x000a=0.20, 0x000b=0.10, 0x000c=11.0,
+  0x000d=3200) can't be mapped to UI labels yet. The HW-024
+  hardware-page inventory listed Width / Phase Invert / Pan Left /
+  Pan Right / Balance / Level — five candidates plus the universal
+  Balance. 0x0000=11.0 is almost certainly `enhancer.level` per the
+  universal pattern, but the rest need pinning.
+- **Setup:** if the existing pcapng can be paired with a screenshot
+  of the same block state from AM4-Edit, that's enough — no
+  re-capture needed. Otherwise, recapture with one knob wiggled at
+  a time.
+- **Capture: 1 pcapng + 1 screenshot** —
+  `samples/captured/session-33-enhancer-extended.pcapng` + a
+  screenshot of the Enhancer's Config page showing every knob's
+  value. Or just the screenshot if the existing pcapng matches.
+- **Signal completion:** *"HW-037 done"* + saved paths.
+- **Priority:** low — Enhancer is a stereo utility, not core
+  tone-shaping.
+
+### HW-029 — Resolve unidentified Drive `pidHigh=0x002d` (knob_0_10) 🔜
+
+- **For:** closes the residual register from HW-019 decode. The
+  Blackglass 7K capture wrote 0x002d once with internal float 0.3.
+  Cache id=45 has signature `float a=0 b=1 c=10 d=0.001 extra=0`
+  (knob_0_10) but no Blocks Guide name match.
+- **Why:** the EQ-page knobs (Bass/Mid/Treble/Mid Freq/Low Cut)
+  were registered by cache-id sequence; this register sits in the
+  cache "tail" zone (ids 39+ where Diode A/B + post-EQ + advanced
+  knobs live). Without a wiggle-isolation capture, naming it
+  would replay the Session 26 Master/Presence mis-inference class
+  of bug.
+- **Setup:** AM4 plugged in, AM4-Edit open, USBPcap recording.
+  Same methodology as HW-015.
+- **Capture: 1 pcapng** —
+  `samples/captured/session-31-drive-id45.pcapng`. Load
+  Blackglass 7K. Switch to AM4-Edit's Advanced page. Identify
+  the knob whose adjustment writes to `pidLow=0x0076 / pidHigh=0x2d`
+  (move each Advanced-page knob in turn until you see the wire
+  match the address). Note the knob's UI label.
+- **Signal completion:** *"HW-029 done"* + saved path + UI label
+  observed.
+- **Priority:** low — bounded scope. Does not block release.
+
+### HW-028 — Resolve unidentified Compressor `pidHigh=0x0017` + `pidHigh=0x0029` 🔜
+
+- **For:** closes residual registers from HW-021 decode. JFET
+  Studio capture wrote both addresses but neither matches a
+  Blocks Guide knob clearly. Cache id=23 (0x17) is `float a=0
+  b=1 c=20 d=0.0005` (display 0..20, fine step). Cache id=41
+  (0x29) is `float a=0 b=1 c=10 d=0.001` (knob_0_10 cap b=1) but
+  the capture wrote internal 1.2 — exceeds cache cap, suggesting
+  either the cap is inaccurate or this register is something
+  else entirely.
+- **Why:** like HW-029, registering these without a wiggle-
+  isolation capture risks mis-inference. Knee Type (cache id=14
+  enum HARD/MED-HARD/MEDIUM/MED-SOFT/SOFT) and Detector Type
+  (cache id=16 enum RMS/PEAK/RMS+PEAK/HALF-WAVE) are the
+  obvious "missing" comp-page knobs we'd expect; one or both of
+  0x17 / 0x29 might map elsewhere on the JFET Studio's UI (a
+  type-specific knob like JFET Drive or Saturation).
+- **Setup:** as HW-029.
+- **Capture: 1 pcapng** —
+  `samples/captured/session-31-comp-jfet-id23-id41.pcapng`. Load
+  JFET Studio. Wiggle each remaining first-page knob (Knee Type,
+  Detector Type, Output, JFET-specific knobs) in turn, pausing
+  ~1s between, until 0x17 and 0x29 are each isolated.
+- **Signal completion:** *"HW-028 done"* + saved path + which
+  knobs landed at 0x17 and 0x29.
+- **Priority:** low — bounded scope.
+
+<!-- HW-027 completed 2026-04-25 (Session 30 cont 2) — see Archive
+     below for the decode summary. -->
+
+<!-- HW-033 completed 2026-04-25 (Session 30 cont 4) — Claude-side
+     extraction landed. See Archive below. -->
+
+### HW-033 — Extend lineage extractor to capture per-type "Controls:" prose ✅
+*See Archive below for the implementation summary and coverage stats.*
+
+
 ### HW-026 — Resolve unidentified `pidHigh=0x0000` on Reverb (likely Level) 🔜
 
 - **For:** closes the residual register from HW-018 decode. Both Hall
@@ -165,178 +371,137 @@ Claude picks up from there and moves the item to ⏳ or ✅.
 - **Priority:** low — bounded scope. Output Level is a "quality of
   life" knob, not core to MVP tone-shaping. Does not block release.
 
-### HW-019 — Drive first-page completion 🔜
+<!-- HW-019 + HW-020 + HW-021 completed 2026-04-25 (Session 30 cont)
+     — see Archive below for the decode summaries. -->
 
-- **For:** BK-032 — #2 priority. Drive is the most popular effect
-  after amp.
-- **Why:** BG §Drive Basic Page is type-dependent; EQ 1 + Advanced
-  pages carry the rest of Basic-tier user intent (Low/High Cut,
-  tone-stack shaping, clipping behavior).
-- **Captures: 1 pcapng.**
+### HW-022 — Modulation blocks first-page completion ✅
 
-  **Capture — TS808 drive type (covers all common EQ/Advanced knobs):**
-  `samples/captured/session-30-drive-basic-ts808.pcapng`
+- **Closed 2026-04-26 (Session 31 cont).** 4 pcapngs +
+  4 paired AM4-Edit screenshots captured. **15 new params
+  registered**, byte-exact verify-msg goldens for each;
+  KNOWN_PARAMS 106 → 121, verify-msg goldens 83 → 98,
+  list_params catalog 118 → 133 lines. New `degrees` Unit
+  (cache c=180/π). Shared `LFO_WAVEFORMS_VALUES` dictionary
+  added to `cacheEnums.ts`.
 
-  Load a TS808 drive type. Wiggle in this order:
-  1. Low Cut (EQ 1 page, Hz)
-  2. High Cut (EQ 1 page, Hz)
-  3. Bass (EQ 1 page, dB)
-  4. Mid (EQ 1 page, dB)
-  5. Mid Frequency (EQ 1 page, Hz)
-  6. Treble (EQ 1 page, dB)
-  7. High Mid (if exposed on TS808, dB)
-  8. Switch to Advanced page. Wiggle Clip Type through 2-3 enum
-     options (Soft → Hard → Silicon, etc.)
-  9. Bass Response
-  10. Dry Level
-  11. Bias (if exposed)
-  12. Slew Rate
+  Captures (paired pcapng + screenshot under `samples/captured/`):
 
-  If any knob isn't exposed on TS808, skip it and note which ones —
-  I'll queue a follow-up capture on a different drive type.
+  - **Chorus (Analog Stereo):** `session-30-chorus-basic.pcapng` /
+    `session-30-chorus-screenshot.png`. New params:
+    `chorus.level` (0x0000 db) / `chorus.time` (0x0010 ms,
+    0.1..50) / `chorus.mod_phase` (0x0011 degrees, 0..180) /
+    `chorus.phase_reverse` (0x0014 enum NONE/RIGHT/LEFT/BOTH).
+    Existing-confirmed: `chorus.mix` / `chorus.rate` /
+    `chorus.tempo` / `chorus.depth`.
+  - **Flanger (Analog Stereo):** `session-30-flanger-basic.pcapng`
+    + screenshot. New params: `flanger.manual` (0x000f
+    knob_0_10) / `flanger.mod_phase` (0x0011 degrees).
+    Existing-confirmed: `flanger.level` / `flanger.mix` /
+    `flanger.rate` / `flanger.tempo` / `flanger.depth` /
+    `flanger.feedback`.
+  - **Phaser (Digital Stereo):** `session-30-phaser-basic.pcapng`
+    + screenshot. New params: `phaser.level` (0x0000 db) /
+    `phaser.depth` (0x000f knob_0_10) / `phaser.mod_phase`
+    (0x0013 degrees) / `phaser.manual` (0x0022 knob_0_10).
+    Existing-confirmed: `phaser.mix` / `phaser.rate` /
+    `phaser.tempo` / `phaser.feedback`.
+  - **Tremolo (Panner):** `session-30-tremolo-basic.pcapng` +
+    screenshot. New params: `tremolo.waveform` (0x000b enum
+    LFO_WAVEFORMS) / `tremolo.phase` (0x0010 degrees) /
+    `tremolo.width` (0x0011 percent, Panner-replaces-Depth) /
+    `tremolo.center` (0x0012 bipolar_percent) / `tremolo.ducking`
+    (0x0018 knob_0_10). Existing-confirmed: `tremolo.rate` /
+    `tremolo.tempo`.
 
-- **Signal:** *"HW-019 done"* + path + any skipped-knob notes.
+- **Methodology corrections (founder feedback):** original spec
+  listed Number-Of-Voices on Chorus and Low-Cut/High-Cut/Bass-Focus/
+  Drive on Flanger — none are first-page knobs on the Analog
+  Stereo type the founder loaded. Founder verified no flanger
+  type has Low-Cut. Lesson saved as feedback memory: don't pre-
+  name knobs in capture instructions when the AM4-Edit UI is
+  type-dependent — say "wiggle every visible knob" instead.
 
-### HW-020 — Delay first-page completion 🔜
+- **HW-017 partial closure:** HW-017's "phaser id=22" ambiguity
+  was a different register than this capture surfaced. Phaser
+  Manual landed at id=34 (pidHigh=0x0022), not id=22. The
+  HW-017 phaser/Order question for id=22 is still open and
+  needs a separate capture wiggling phaser Stages/Order on a
+  type that exposes it.
 
-- **For:** BK-032 — #3 priority. Also resolves HW-017's delay id=64
-  (Taps vs Bit Reduction) question.
-- **Why:** BG §Delay Config names ~9 universal knobs; 2 registered
-  (Time / Feedback). Type-specific knobs (Tape / Reverse / Sweep)
-  are deferred.
-- **Captures: 1 pcapng.**
-
-  **Capture — Digital Mono delay:**
-  `samples/captured/session-30-delay-basic-digital.pcapng`
-
-  Load a Digital Mono delay type. Wiggle in this order:
-  1. Tempo (enum NONE → 1/4 → 1/8)
-  2. Master Feedback (percent 0..200)
-  3. Drive (knob 0..10)
-  4. Bit Reduction (count 0..24) — **this resolves the HW-017
-     ambiguity on delay pidHigh=0x40**
-  5. Echo Pan
-  6. Spread
-  7. Right Post Delay
-
-- **Signal:** *"HW-020 done"* + path.
-
-### HW-021 — Compressor first-page completion 🔜
-
-- **For:** BK-032 — #4 priority. Biggest coverage jump — comp is
-  nearly empty right now.
-- **Why:** BG §Compressor Config Page has ~10 universal controls; 0
-  currently registered beyond Type/Mix/Balance.
-- **Captures: 1 pcapng.**
-
-  **Capture — Studio FF Compressor type, switching to Optical at end:**
-  `samples/captured/session-30-comp-basic-studio.pcapng`
-
-  Load a Studio FF Compressor type. Wiggle in this order:
-  1. Threshold (dB)
-  2. Ratio (2:1 → 4:1 → ∞)
-  3. Attack Time (ms)
-  4. Release Time (ms)
-  5. Knee Type (enum — click through options)
-  6. Auto Makeup (OFF/ON toggle)
-  7. Detector Type (enum — RMS → PEAK → RMS+PEAK)
-  8. **Switch Type dropdown to Optical Compressor.** Wiggle Light
-     Type through its enum options — this is the only type-
-     specific knob in the capture.
-
-- **Signal:** *"HW-021 done"* + path.
-
-### HW-022 — Modulation blocks first-page completion 🔜
-
-- **For:** BK-032 — #5 priority. Bundles chorus / flanger / phaser
-  / tremolo since they share LFO-based structure.
-- **Why:** Each has Rate / Depth / Mix registered; Tempo, Manual,
-  LFO controls, block-specific structure (chorus.voices,
-  phaser.order) missing.
-- **Captures: 4 pcapngs** (one per block — each has its own pidLow
-  so they must be in separate recordings).
-
-  **Capture A — Chorus:**
-  `samples/captured/session-30-chorus-basic.pcapng`
-
-  Load any Chorus type. Wiggle in this order:
-  1. Number Of Voices (count 2..8)
-  2. Tempo (enum)
-  3. Delay Time (ms)
-
-  **Capture B — Flanger:**
-  `samples/captured/session-30-flanger-basic.pcapng`
-
-  Load any Flanger type. Wiggle in this order:
-  1. Tempo (enum)
-  2. Manual (ms)
-  3. Low Cut (Hz)
-  4. High Cut (Hz)
-  5. Bass Focus (if exposed)
-  6. Drive (if exposed)
-
-  **Capture C — Phaser:**
-  `samples/captured/session-30-phaser-basic.pcapng`
-
-  Load any Phaser type. Wiggle in this order:
-  1. Tempo (enum)
-  2. Depth (%)
-  3. Manual
-  4. Tone
-  5. Order / Stages — **this resolves the HW-017 phaser id=22
-     ambiguity**
-
-  **Capture D — Tremolo:**
-  `samples/captured/session-30-tremolo-basic.pcapng`
-
-  Load any Tremolo/Panner type. Wiggle in this order:
-  1. Tempo (enum)
-  2. LFO Type (waveform enum)
-  3. LFO Duty Cycle
-
-- **Signal:** *"HW-022 done"* + 4 saved paths.
+- **Residual: tremolo.level.** The Panner capture didn't move
+  the right-panel Level knob from 0.0 dB, so no wire write was
+  emitted at pidHigh=0x0000 for the tremolo block. Universal
+  Level pattern says it lives there; one future single-knob
+  wiggle of tremolo Level produces the byte anchor we need.
+  Queue under HW-NNN if needed; otherwise pick up
+  opportunistically.
 
 ### HW-023 — Secondary blocks first-page completion 🔜
 
-- **For:** BK-032 — #6 priority. Catches wah / filter / gate / GEQ.
-  Also resolves HW-017's filter id=28 question.
-- **Why:** These blocks currently have only Type + Balance (+
-  Filter Freq). User-facing knobs missing for each.
-- **Captures: 4 pcapngs** (one per block).
+- **For:** BK-032 — last capture-driven item. Closes wah / filter /
+  gate / GEQ first-page coverage. Once decoded, BK-032 (release-
+  gate first-page param scope) is done and Wave 1 device expansion
+  (BK-014 Axe-Fx II / BK-031 Hydrasynth) is formally unblocked.
+- **Why:** these blocks currently have only Type + Balance
+  registered (plus filter.freq + filter.level + filter.low_cut +
+  filter.high_cut from HW-032). Filter modulation page knobs +
+  Q + Order are missing; Wah / Gate / GEQ have nearly no first-
+  page coverage at all.
+- **Methodology (per HW-022 founder feedback):** AM4-Edit's UI is
+  type-dependent. **Don't try to anticipate which knobs will be on
+  screen — just wiggle every visible knob.** Pick whichever Type
+  the founder finds convenient (default loaded type is fine).
+- **Capture discipline (same as HW-022):**
+  1. Start USBPcap recording on the AM4 USB interface.
+  2. Open AM4-Edit and place the target block in any slot.
+  3. Pick any Type (default is fine — type-dependent UI variation
+     is documented in HW-030).
+  4. **Wiggle every knob visible on the Config page**, one at a
+     time, with **~1 s gaps** between knobs. Discrete moves only
+     (e.g. 3 → 7), don't sweep. For enum dropdowns, click through
+     2–3 options.
+  5. Stop recording, save the pcapng with the suggested name.
+  6. **Take a screenshot** of the final Config page state — the
+     decode aligns wire pidHighs to whatever knobs the screenshot
+     shows.
 
-  **Capture A — Wah:**
-  `samples/captured/session-30-wah-basic.pcapng`
+- **Captures (4 pcapngs + 4 screenshots — one per block, each has
+  its own pidLow so they must be separate recordings):**
 
-  Load any Wah type. Wiggle in this order:
-  1. Frequency (Hz — move the wah-pedal position simulation)
-  2. Resonance / Q
-  3. Min Frequency (Expert page)
-  4. Max Frequency (Expert page)
+  - `samples/captured/session-NN-wah-basic.pcapng` +
+    `session-NN-wah-screenshot.png` (Wah block, any type)
+  - `samples/captured/session-NN-filter-basic.pcapng` +
+    `session-NN-filter-screenshot.png` (Filter block, any type
+    — Low-Pass already partially decoded in HW-032, so picking
+    Hi-Pass / Band-Pass / Band-Reject would maximise coverage of
+    type-specific knobs)
+  - `samples/captured/session-NN-gate-basic.pcapng` +
+    `session-NN-gate-screenshot.png` (Gate/Expander block,
+    any type — closes HW-035's slot-Gate scope alongside)
+  - `samples/captured/session-NN-geq-basic.pcapng` +
+    `session-NN-geq-screenshot.png` (Graphic EQ — wiggle all 10
+    band-gain sliders, low → high frequency)
 
-  **Capture B — Filter:**
-  `samples/captured/session-30-filter-basic.pcapng`
+  Pick `NN = 31` if this happens in the next session; founder can
+  use any number — the decode reads the file regardless of name.
 
-  Load any Filter type. Wiggle in this order:
-  1. Order — **resolves HW-017 filter id=28** (2nd vs 4th order)
-  2. Q / Resonance
+- **Signal completion:** *"HW-023 done"* + 4 saved pcapng paths +
+  any screenshots taken. Decode walks each capture against its
+  screenshot and registers new pidHighs in `params.ts` /
+  `paramNames.ts` with byte-exact verify-msg goldens.
 
-  **Capture C — Gate/Expander:**
-  `samples/captured/session-30-gate-basic.pcapng`
+- **Note on HW-035 overlap:** the slot-Gate first-page knobs
+  task (HW-035) is the same block as HW-023's Gate capture — one
+  Gate pcapng covers both. After HW-023's Gate decode lands, mark
+  HW-035 ✅ alongside.
 
-  Load any Gate/Expander type. Wiggle in this order:
-  1. Threshold (dB)
-  2. Ratio
-  3. Attack (ms)
-  4. Release / Hold Time (ms)
+- **Note on HW-017 partial closure:** HW-017's "filter id=28"
+  question (filter Order knob) gets resolved by HW-023's Filter
+  capture. The other HW-017 candidates (delay id=64, drive id=24,
+  gate id=14) stay separate.
 
-  **Capture D — Graphic EQ:**
-  `samples/captured/session-30-geq-basic.pcapng`
-
-  Load a Graphic EQ. Wiggle each of the 10 band-gain sliders in
-  order (lowest frequency band first, highest last). One wiggle per
-  band, then move to the next.
-
-- **Signal:** *"HW-023 done"* + 4 saved paths.
+- **Priority:** high — last BK-032 capture. After this, BK-032
+  closes and the Wave 1 device expansion path opens.
 
 ---
 
@@ -838,6 +1003,193 @@ highest numbers.
   AM4-Edit open). P5-009 #2 (graceful "AM4 not found" error)
   is doing what it was designed to do.
 
+### HW-024 — Complete HW-014 spot-check (Round 4 + re-tests + missed params) ✅
+
+- **Tested 2026-04-25 (Session 30 cont 3)** via Claude Desktop
+  with the `am4-tone-agent` connector attached. Two phases on
+  Z04 — Phase 1 covered Round 4 + flanger.rate re-check
+  (4 slots: enhancer + gate + volpan + flanger), Phase 2
+  covered targeted re-tests (4 slots: amp.level + filter.freq +
+  reverb springs + phaser.rate). 28 wire writes total, all
+  acked.
+- **Verified params (9)**: `enhancer.type` (Classic),
+  `gate.type` (Modern Gate), `volpan.mode` (Auto-Swell),
+  `flanger.rate` (1.7 Hz, was unconfirmed from HW-014 Round 2),
+  `phaser.rate` (2.3 Hz, ditto), `amp.level` (+8 dB at non-
+  default positive), `filter.freq` (1250 → 1249.9 Hz on
+  Low-Pass type — 0.1 Hz quantization drift, see F3),
+  `reverb.springs` (5, first-ever test), `reverb.spring_tone`
+  (7.30, first-ever test).
+- **Finding F1 — `enhancer.mix` is a phantom on hardware
+  display.** Wire writes ack but the Enhancer block has no
+  Mix knob on any page. Visible knobs are Width / Phase Invert
+  / Pan Left / Pan Right / Balance / Level. Pre-HW-024 we had
+  `enhancer.mix` registered via the universal Mix-Page rule
+  (cache id=1, percent signature). Comment added in `params.ts`
+  flagging "wire-acked, no observed hardware effect"; audio-
+  effect spot-check queued under HW-032.
+- **Finding F2 — `enhancer.balance` IS visible on hardware
+  display** at the expected -33%. Breaks the HW-014 pattern of
+  "balance hidden on every block tested." Implication: balance
+  visibility is block-type-dependent; effect blocks hide it
+  as an output mixer, but stereo-utility blocks like the
+  enhancer expose it. Comment in `params.ts` per-block balance
+  block now lists visible vs hidden per block.
+- **Finding F3 — `filter.freq` shows sub-Hz quantization at
+  high values.** Wrote 1250 Hz; readback was 1249.9 Hz
+  (0.008% relative error). Likely float→fixed-point rounding
+  in the firmware's filter-coefficient solver; drift scales
+  with frequency. Functionally inaudible. Comment in
+  `params.ts` warns against assuming exact equality on
+  round-trip for filter.freq.
+- **Finding F4 — ~25 unmapped first-page knobs surfaced.**
+  Hardware page inventories during readback revealed knobs
+  the Blocks Guide describes generically but we hadn't
+  registered: Gate (Threshold/Attenuation/Attack/Release/Hold/
+  Sidechain Source/Level), Filter Low-Pass (Q/Order/Low Cut/
+  High Cut/Level + page 2 modulation subsystem), Flanger
+  (Manual/Mod Phase/Level), Enhancer (Width/Phase Invert/
+  Pan L/Pan R/Level), Volpan Auto-Swell (Threshold/Attack/
+  Taper/Level). Queued as **HW-032** (next-up capture pass).
+- **Cumulative status across HW-014 + HW-024**: 73 params
+  hardware-confirmed, 15 wire-acked-but-display-hidden (14
+  balance + enhancer.mix), 1 marginal (filter.freq drift).
+  No hardware-display mismatch surfaced this session — every
+  Round-4 enum and every re-test landed exactly on the AM4
+  display.
+- **Methodology validated**: Claude Desktop + MCP connector
+  flow worked end-to-end. Initial first-turn message reported
+  "MCP server isn't connected" before the connector was
+  enabled — relevant signal for HW-016's first-turn smoke
+  (founder reports the connector was disabled at conversation-
+  start; once enabled, Claude proceeded with tool calls
+  cleanly). Doesn't fully close HW-016 since the prompt was
+  not the HW-016 set, but reinforces that the connection-state
+  diagnostic copy works.
+- `params.ts` comments updated to reflect HW-024 verifications,
+  enhancer.mix phantom flag, filter.freq quantization note,
+  and per-block balance visibility table.
+
+### HW-027 — Extract delay tempo-division enum (79 entries) ✅
+
+- **Resolved 2026-04-25 (Session 30 cont 2)** — pure Claude-side
+  work, no founder hardware. Extended `scripts/gen-cache-enums.ts`
+  to extract a shared `TEMPO_DIVISIONS_VALUES` const from the
+  cache (using delay block id=19 as the source-of-truth); the
+  same 79-entry enum appears 14 times across the cache (delay × 6,
+  chorus × 2, reverb / flanger / rotary / phaser / tremolo /
+  filter × 1 each), all string-identical.
+- **5 new tempo params registered**:
+  - `delay.tempo` (pidHigh=0x0013) — wire-verified from
+    session-30-delay-basic-digital-mono (captured value=11 = "1/8").
+  - `chorus.tempo` (0x000d), `flanger.tempo` (0x000c),
+    `phaser.tempo` (0x000e), `tremolo.tempo` (0x000f) — structural-
+    by-symmetry. Every modulation block exposes a Tempo Sync knob
+    per Blocks Guide §Common LFO Parameters; the first/lowest-id
+    79-entry tempo enum on each block is canonically that knob.
+- **Deferred**: filter / reverb / rotary / drive tempo registers
+  (semantics uncertain — auto-wah env follower vs LFO sync;
+  reverb-modulation tempo is Vibrato-King-type-only). Drive's
+  cache has tempo-shape enums but they're at the per-tap delay
+  modeling layer of an unusual drive type; skipping.
+- **Goldens.** 1 new byte-exact entry in `verify-msg`
+  (`delay.tempo`); the 4 structural entries don't have captures
+  yet so no goldens. Total 75/75.
+- **Hand-authoring rationale**: tempo entries live directly in
+  `KNOWN_PARAMS` rather than via paramNames + generator, because
+  the generator's enum-handling defaults to the block's
+  TYPES_VALUES, which would mis-import for these non-Type enums.
+  Same pattern as `delay.stack_hold` and `compressor.auto_makeup`
+  (Session 30 cont).
+
+### HW-019 — Drive first-page completion ✅
+
+- **Captured 2026-04-25** — 2 pcapngs in `samples/captured/`:
+  `session-30-drive-basic-t808-od.pcapng` and
+  `session-30-drive-basic-blackglass-7k.pcapng`. Founder noted that
+  not all spec'd knobs were available across drive types — TS808 OD
+  is a 3-knob Tube Screamer emulation (Drive/Tone/Level only) so
+  its capture confirms the basic page but adds no new registers.
+  Blackglass 7K (high-gain bass amp emu) exposed 6 EQ-page knobs.
+- **Decoded Session 30 cont** — 5 new drive registers:
+  - `low_cut` (0x0010, hz 20..2000) — captured at 1000 Hz.
+  - `bass` (0x0014, knob_0_10) — captured at 1.0.
+  - `mid` (0x0015, knob_0_10) — captured at 4.0.
+  - `mid_freq` (0x0016, hz 200..2000) — captured at 800 Hz.
+  - `treble` (0x0017, knob_0_10) — captured at 2.0.
+  Mapping was by cache-id signature + sequence, not capture order
+  (the founder's wiggle order on Blackglass differed from the spec
+  order). 5 new byte-exact verify-msg goldens.
+- **Open follow-ups.**
+  - `pidLow=0x0076/pidHigh=0x002d` written once at internal 0.3
+    (knob_0_10 signature in cache id=45) but no clear Blocks Guide
+    name match. Queued as **HW-029** for a single-knob capture.
+  - The "exposed knobs differ per type" finding queued as **HW-030**
+    — a meta task to map type→knob-list across all blocks before
+    HW-022/023 are written.
+
+### HW-020 — Delay first-page completion ✅
+
+- **Captured 2026-04-25** —
+  `samples/captured/session-30-delay-basic-digital-mono.pcapng`.
+  Founder noted the spec's wiggle order (Tempo / Master Feedback /
+  Drive / Bit Reduction / Echo Pan / Spread / Right Post Delay)
+  didn't match what was exposed on Digital Mono — captured 7 unique
+  pidHighs, three already-known (mix / time / feedback) plus 4 new.
+- **Decoded Session 30 cont** — 3 new delay registers (1 deferred):
+  - `level` (0x0000, db -80..20) — captured at -10 dB. Universal
+    "Level" pattern (no cache record at id=0; out-of-band hand-
+    author, mirrors `amp.level`).
+  - `stack_hold` (0x001f, enum OFF/STACK/HOLD) — captured at
+    STACK. Same per-block-non-Type-enum shape as `reverb.stack_hold`.
+  - `ducking` (0x002e, db 0..80) — captured at 2 dB. Same signature
+    as `reverb.ducking`.
+  - **Deferred**: `delay.tempo` (0x0013, enum 79 entries [NONE /
+    1/64 TRIP / ... / 63/64]) — captured at index 11 (= "1/8")
+    but registering it requires extending `gen-cache-enums.ts` to
+    emit a `TEMPO_DIVISIONS_VALUES` shared enum. Queued as
+    **HW-027** (no hardware action; Claude-side generator
+    extension).
+  - **Note**: HW-020 was originally specced to resolve HW-017's
+    delay id=64 (pidHigh=0x0040, Taps vs Bit Reduction) ambiguity.
+    The Digital Mono capture didn't write to 0x0040 — that
+    register is type-specific (Multi-Tap delay or Mono Delay
+    type). HW-017 remains pending; the Digital Mono capture
+    didn't expose Bit Reduction either, suggesting Digital Mono
+    has no Bit Reduction knob at all.
+- **Goldens.** 3 new byte-exact entries in `verify-msg`.
+
+### HW-021 — Compressor first-page completion ✅
+
+- **Captured 2026-04-25** —
+  `samples/captured/session-30-comp-basic-jfet-studio.pcapng`.
+  Founder used JFET Studio (not the spec'd Studio FF) — different
+  type, different exposed knobs. The spec assumed Studio FF would
+  expose Threshold/Ratio/Attack/Release/Knee/Auto Makeup/Detector;
+  JFET Studio exposed 8 unique writes including 6 cleanly mapped
+  to those canonical compressor controls plus 2 unidentified.
+- **Decoded Session 30 cont** — 6 new compressor registers + 1 new
+  unit:
+  - `level` (0x0000, db -80..20) — captured at -8 dB. Universal
+    Level pattern (same as `delay.level` / `amp.level`).
+  - `threshold` (0x000a, db -60..20) — captured at -30 dB.
+  - `ratio` (0x000b, **NEW UNIT** `ratio` 1..20) — captured at
+    1.0 (= 1:1). The new `ratio` unit is semantic-only (display =
+    internal, scale 1) so Claude reads "ratio 4" as 4:1 not 4 dB.
+  - `attack` (0x000c, ms 0.1..100) — captured at 0.8 ms.
+  - `release` (0x000d, ms 2..2000) — captured at 100 ms.
+  - `auto_makeup` (0x000f, enum OFF/ON) — captured at OFF.
+- **Open follow-ups.**
+  - `pidHigh=0x0017` (cache id=23, float 0..1 c=20) and
+    `pidHigh=0x0029` (cache id=41, knob_0_10 but capture wrote
+    1.2 exceeding cache cap b=1) — both unidentified. Queued as
+    **HW-028** for a single-knob capture each.
+  - Knee Type (cache id=14, expected at 0x000e) and Detector Type
+    (cache id=16, expected at 0x0010) weren't reached in this
+    capture. Will be picked up under HW-028 if exposed on JFET
+    Studio, or queued separately if only exposed on other types.
+- **Goldens.** 6 new byte-exact entries in `verify-msg`.
+
 ### HW-018 — Reverb first-page completion ✅
 
 - **Captured 2026-04-25** —
@@ -898,6 +1250,166 @@ highest numbers.
   AM4-Edit, not the AM4 hardware display.
 - **Goldens.** 5 new byte-exact entries in `verify-msg` (1 BK-033 +
   4 BK-034 wire-match anchors).
+
+### HW-033 — Extend lineage extractor to capture per-type "Controls:" prose ✅
+
+- **Closed 2026-04-25 (Session 30 cont 4) — Claude-side, no founder
+  hardware.** `scripts/extract-lineage.ts` extended with
+  `extractControlsFromBody()` — 10 ordered regex patterns covering
+  the wiki's "Controls:" / "Original controls:" / "models the
+  original controls:" / "the (adj-)?pedal has X controls/knobs"
+  prose shapes. Per-token sanitizer handles paren stripping
+  (iterative balanced + orphan cleanup, since the wiki has typos
+  like Octave Distortion's `Drive))` and BB Pre's unclosed
+  `(read more...`), connective-word truncation ("Glass which sets"
+  → "Glass"), 3-word cap, count-prefix filtering, and uppercase-
+  first-char gating.
+- **Coverage:** 31 drive types + 1 phaser type now have
+  `controls: { values, raw, source: 'fractal-wiki' }` populated
+  in `src/knowledge/{block}-lineage.json`. Other blocks (reverb /
+  delay / compressor / amp / chorus / flanger / wah) extracted
+  zero — those wikis don't document per-type knob lists (they
+  describe algorithms / models, not original-pedal control sets).
+  Drive's high yield is because Drive types are virtual-pedal
+  models and the wiki consistently lists their original-pedal
+  knob set.
+- **Cross-validation against captures:**
+  - **T808 OD wiki** = "Drive | Tone | Level" → matches HW-019
+    capture exactly.
+  - **Klone Chiron wiki** = "Gain | Treble | Output" → matches
+    the HW-014 finding (Fractal exposes them as drive.drive /
+    drive.tone / drive.level under the universal Drive UI labels;
+    the wiki surfaces the original Klon Centaur knob names).
+  - **Blackglass 7K wiki** = "Blend | Level | Drive | Low | Low
+    Mids | Hi Mids | Treble" (7) → close to HW-019's 9 captured
+    knobs. Fractal adds universal drive.tone + drive.mid_freq vs.
+    the wiki's 4-band EQ, and renames Blend → drive.mix.
+- **New script `scripts/build-type-knobs.ts`** (`npm run
+  build-type-knobs`) emits `docs/TYPE-KNOBS-WIKI.md` — auto-
+  generated companion to manually-maintained `docs/TYPE-KNOBS.md`.
+  Each row carries: type name + modeled device + raw wiki labels
+  + mapped `params.ts` keys + unmapped wiki labels. Per-block
+  alias map handles fuzzy matches ("Volume" → level, "Blend" →
+  mix, "Gain" → drive in drive block / gain in amp block).
+- **15 unmapped wiki labels** surfaced — knobs the wiki names
+  but `params.ts` doesn't yet register. Worth review for future
+  param additions: Voice (Zendrive), Presence (Hot Cake),
+  Contour (Shredmaster), Boost (Full-Drive 2), Glass (Eternity),
+  EQ + Tube Drive (Tube Drive 3-Knob), 3-band EQ (M-Zone), Manual
+  Shift + Auto/Manual (Bad Stone phaser), Bump switch + 100HZ
+  cut/boost + High Cut switch + Gain switch (various). These are
+  wiki-named knobs we don't have params for; some may be real
+  registers, some may be type-rendered switches that map to
+  enums.
+- **Complement to HW-030 step 2.** HW-030 step 2 (lazy AM4-Edit
+  screenshot pass) remains the founder-owed lazy-population
+  track for AM4-Edit's exposed knobs per type. HW-033 covers
+  what the **modeled device** has; HW-030 covers what **AM4-Edit
+  shows**. They overlap heavily (per the wiki rule) but differ
+  where Fractal adds universal knobs (Tone / Mix / Balance) or
+  renames originals.
+
+### HW-035 — Slot-Gate first-page knobs ✅
+
+- **Captured 2026-04-26 (Session 34).** Founder loaded a Modern
+  Gate slot-Gate (Threshold=-22 dB / Attenuation=-33 dB /
+  Attack=1 ms / Hold=80 ms / Release=90 ms / Sidechain="INPUT 1"
+  / Level=12 dB). One pcapng + one screenshot.
+- **Files:** `samples/captured/session-34-slotgate-extended.pcapng`
+  + `session-34-slotgate-extended.png`.
+- **New params (7):** gate.level (db, 0x0000) / gate.threshold
+  (db, 0x000a) / gate.attack (ms, 0x000b) / gate.hold (ms,
+  0x000c) / gate.release (ms, 0x000d) / gate.sidechain (enum
+  4 values, 0x000f) / gate.attenuation (db, 0x0014). Five
+  cache-derived (cache ids 10/11/12/13/20); two hand-authored
+  (level — universal out-of-band pattern; sidechain — secondary
+  enum the gen-params script can't auto-attach).
+- **Sidechain enum:** `[BLOCK L+R, INPUT 1, BLOCK L, BLOCK R]`
+  sourced from cache id=15 strings.
+- **Wiring:** verify-msg goldens for all 7 params built from
+  captured wire bytes. Preflight green: KNOWN_PARAMS 123 →
+  130, verify-msg 100 → 107, verify-cache-params 85 → 90.
+
+### HW-036 — Input Noise Gate full decode (pidLow=0x0025) ✅
+
+- **Captured 2026-04-26 (Session 34).** Founder collapsed the
+  3-capture spec into one combined wiggle pass on the
+  Intelligent type (Threshold=-44 dB / Release=60 ms /
+  Type=Intelligent / Level=11 dB). One pcapng + one screenshot.
+- **Files:** `samples/captured/session-34-inputgate-extended.pcapng`
+  + `session-34-inputgate-extended.png`.
+- **New params (3):** ingate.threshold (db, 0x000a) /
+  ingate.release (ms, 0x000c) / ingate.type (enum 3 values,
+  0x000f). All hand-authored — pidLow=0x0025 has no cache
+  backing.
+- **Curves resolved:** HW-032 left two ambiguities. (1)
+  Threshold curve: hardware writes raw dB (-44 dB → wire
+  -44.0), NOT a normalized 0..1 → -100..0 dB mapping.
+  (2) Release curve: standard `display = wire × 1000` ms
+  encoding (60 ms → wire 0.06), same as every release-style
+  param. No new Unit needed.
+- **Type enum:** `[Classic Expander, Intelligent, Noise Reducer]`
+  per BLOCK-PARAMS.md; wire-confirmed at index 1 = Intelligent.
+- **Wiring:** verify-msg goldens for all 3 params from captured
+  wire bytes. Combined with HW-035: KNOWN_PARAMS final 133;
+  verify-msg final 110; verify-cache-params final 90.
+
+### HW-034 — Filter / Flanger residuals from HW-032 (single-knob isolation) ✅
+
+- **Captured 2026-04-26 (Session 33).** Founder loaded an All-Pass
+  Filter (Order=4 / Frequency=200 Hz / Feedback=13% / Low Cut=40 Hz
+  / High Cut=9999.9 Hz / Level=12 dB) and an 80's Rack Flanger
+  (Rate=10 Hz / Depth=66% / Feedback=33% / Tempo=1/64 Dot /
+  Manual=1.11 / Mod Phase=4.3° / Mix=33% / Level=-3 dB). pcapng +
+  screenshot for each block.
+- **Files:**
+  - `samples/captured/session-33-filter-extended.pcapng` +
+    `session-33-filter-extended.png`
+  - `samples/captured/session-33-flanger-extended.pcapng` +
+    `session-33-flanger-extended.png`
+- **New params (2):**
+  - `filter.feedback` — pidHigh=0x0015, bipolar_percent ±100
+    (cache id=21, signature a=-1 b=1 c=100). All-Pass feedback
+    can invert phase, so the unit is bipolar not plain percent.
+  - `filter.order` — pidHigh=0x001c, count 1..12 (cache id=28,
+    signature a=1 b=12 c=1). Integer pole count; AM4-Edit's
+    dropdown limits the exposed options per filter type
+    (All-Pass shows 2/4/6/8/10/12; Low-Pass uses the separate
+    cache id=14 enum 2nd/4th register), but the wire register
+    accepts any integer in the cache range.
+- **Hardware re-verifications (8 flanger params + 4 filter
+  params):** every existing flanger / filter pidHigh in the
+  capture — flanger.level, flanger.mix, flanger.rate,
+  flanger.depth, flanger.feedback, flanger.manual,
+  flanger.mod_phase, flanger.tempo, plus filter.level,
+  filter.freq, filter.low_cut, filter.high_cut — landed at
+  display-matched final values. The 80's Rack Flanger Manual
+  knob (cache c=10, knob_0_10) wire-displayed exactly as
+  `display = wire × 10` (1.11 = 0.111 × 10) on a different
+  flanger type than HW-022's Analog Stereo capture — confirms
+  the unit holds across types. Mod Phase 4.3° = 0.075 rad
+  matches the `degrees` Unit's c=180/π scale exactly.
+- **Methodology validation:** the type-agnostic capture spec
+  worked — founder loaded a different filter type than
+  HW-032 (All-Pass vs Low-Pass) and the capture surfaced two
+  knobs (Order, Feedback) that HW-032's Low-Pass didn't expose.
+  Pre-naming knobs in the spec would have miscued the founder
+  to wiggle Q (which All-Pass doesn't show); the new "wiggle
+  every visible knob" wording got the right result.
+- **Wiring:** verify-msg goldens added for filter.feedback
+  (13%) and filter.order (4) using the captured wire bytes.
+  Preflight green: KNOWN_PARAMS 121 → 123, verify-msg 98 →
+  100, verify-cache-params 83 → 85. Smoke-server unchanged
+  (no new tools — generic block-name lookup picks the new
+  params automatically).
+- **Residual — Filter Q + Mode-page knobs:** All-Pass doesn't
+  expose Q (cache id=12) or the modulation page-2 knobs
+  (cache ids 22/23/24). Future capture on Low-Pass /
+  Band-Pass with the Mode toggle ON would close those.
+  Re-queued as HW-038 if priority warrants — for now the
+  All-Pass residuals are limited to Mode Frequency / Rate /
+  Tempo on a type that uses them (cache c=1 freq, c=1 rate,
+  c=1 tempo enum).
 
 ### HW-012 — Round-trip `apply_preset` with the per-slot `channels` shape ✅
 

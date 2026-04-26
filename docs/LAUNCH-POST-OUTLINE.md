@@ -1,6 +1,6 @@
 # Launch Post Outline — Fractal Forum Announcement
 
-> Working draft of the forum post that announces AM4 Tone Agent on the
+> Working draft of the forum post that announces MCP MIDI Tools on the
 > Fractal Audio forum. Evolves alongside Phase 5 packaging work. **Do
 > not publish until the end-to-end install flow works on a clean VM**
 > (P5-002 acceptance gate) — a broken announcement damages credibility
@@ -72,7 +72,7 @@ Forum readers skim, so lead with evidence, then deliver details.
 
 Lead with the working demo. No preamble, no credentials. Example:
 
-> **AM4 Tone Agent** — a local MCP server that lets you describe a tone
+> **MCP MIDI Tools** — a local MCP server that lets you describe a tone
 > to Claude Desktop and have it land on your AM4.
 >
 > *[GIF: Claude Desktop conversation on one side, AM4 display updating on the other as the preset takes shape.]*
@@ -91,7 +91,7 @@ Lead with the working demo. No preamble, no credentials. Example:
 
 ### 3. Install (3 clicks)
 
-1. Download the signed `am4-tone-agent-setup.exe` from the [latest release](https://github.com/<user>/am4-tone-agent/releases/latest) on GitHub.
+1. Download the signed `mcp-midi-tools-setup.exe` from the [latest release](https://github.com/<user>/mcp-midi-tools/releases/latest) on GitHub.
 2. Run it. The installer registers the MCP server with Claude Desktop
    automatically — you never edit JSON.
 3. Restart Claude Desktop if it was running when you installed.

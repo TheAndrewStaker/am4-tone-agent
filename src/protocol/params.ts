@@ -26,6 +26,8 @@ import {
   ENHANCER_TYPES_VALUES,
   GATE_TYPES_VALUES,
   VOLPAN_MODES_VALUES,
+  TEMPO_DIVISIONS_VALUES,
+  LFO_WAVEFORMS_VALUES,
 } from './cacheEnums.js';
 
 /**
@@ -43,11 +45,16 @@ import {
  *                      display = internal (scale 1)
  *   semitones        — UI integer semitones (pitch shift);
  *                      display = internal (scale 1)
+ *   ratio            — UI compression ratio (e.g. 4 ⇒ 4:1); display =
+ *                      internal (scale 1). Fractional values valid
+ *                      (1.5:1 etc.) — semantic label so Claude reads
+ *                      "ratio 4" as 4:1 not 4 dB.
  *   ms               — UI milliseconds, internal seconds (÷1000)
+ *   degrees          — UI degrees 0–180, internal radians (÷57.2958 = ÷180/π)
  *   enum             — UI dropdown name, internal int-as-float (per-param table)
  *
- * Note: `db`, `hz`, `seconds`, `count`, and `semitones` all pass
- * display=internal (scale 1). They're distinct unit tags so tool
+ * Note: `db`, `hz`, `seconds`, `count`, `semitones`, and `ratio` all
+ * pass display=internal (scale 1). They're distinct unit tags so tool
  * descriptions can label values accurately — Claude interprets "set
  * rate to 3" as 3 Hz when it sees `unit: 'hz'`, not 3 dB, and "8
  * voices" as a count rather than 8 dB. Semantic labels matter for
@@ -62,7 +69,9 @@ export type Unit =
   | 'bipolar_percent'
   | 'count'
   | 'semitones'
+  | 'ratio'
   | 'ms'
+  | 'degrees'
   | 'enum';
 
 export interface Param extends ParamId {
@@ -84,7 +93,12 @@ const DISPLAY_TO_INTERNAL: Record<Exclude<Unit, 'enum'>, number> = {
   bipolar_percent: 100,
   count: 1,
   semitones: 1,
+  ratio: 1,
   ms: 1000,
+  // Cache c=57.295780... = 180/π. AM4-Edit displays Mod Phase / Phase
+  // knobs in degrees; firmware stores radians. e.g. 10 deg → 0.17453 rad
+  // / 90 deg → 1.5708 rad / 180 deg → 3.14159 rad.
+  degrees: 57.29577951308232,
 };
 
 /** Convert a UI/display value to the float the firmware expects. */
@@ -243,6 +257,9 @@ export const KNOWN_PARAMS = {
     unit: 'enum', displayMin: 0, displayMax: 2,
     enumValues: { 0: 'PRE-PI', 1: 'POST-PI', 2: 'PRE-TRIODE' },
   },
+  // HW-024 (Session 30 cont 3, 2026-04-25): hardware-verified at
+  // +8 dB on a 1959SLP Normal — first non-default positive-value
+  // datapoint for amp.level (HW-014 only tested at the default).
   'amp.level': {
     block: 'amp', name: 'level',
     pidLow: 0x003a, pidHigh: 0x0000,
@@ -293,6 +310,42 @@ export const KNOWN_PARAMS = {
     pidLow: 0x0076, pidHigh: 0x000e,
     unit: 'percent', displayMin: 0, displayMax: 100,
   },
+  // HW-019 (Session 30, 2026-04-25): Drive EQ-page knobs from
+  // session-30-drive-basic-blackglass-7k. T808 OD only exposed
+  // Drive/Tone/Level on its first page (session-30-drive-basic-t808-od
+  // capture confirmed) — the EQ controls below are absent on simpler
+  // pedal types and only surface on amp-emu drive types like
+  // Blackglass 7K. Cache signatures pin the unit + range; sequence in
+  // the cache (id 16/17 = Low/High Cut Hz, id 20/21/23 = Bass/Mid/
+  // Treble knobs flanking id 22 = Mid Frequency) matches the AM4-Edit
+  // EQ-1-page layout. Captured wiggle order on Blackglass differed
+  // from the spec order; mapping is by cache-id sequence + signature
+  // not capture order.
+  'drive.low_cut': {
+    block: 'drive', name: 'low_cut',
+    pidLow: 0x0076, pidHigh: 0x0010,
+    unit: 'hz', displayMin: 20, displayMax: 2000,
+  },
+  'drive.bass': {
+    block: 'drive', name: 'bass',
+    pidLow: 0x0076, pidHigh: 0x0014,
+    unit: 'knob_0_10', displayMin: 0, displayMax: 10,
+  },
+  'drive.mid': {
+    block: 'drive', name: 'mid',
+    pidLow: 0x0076, pidHigh: 0x0015,
+    unit: 'knob_0_10', displayMin: 0, displayMax: 10,
+  },
+  'drive.mid_freq': {
+    block: 'drive', name: 'mid_freq',
+    pidLow: 0x0076, pidHigh: 0x0016,
+    unit: 'hz', displayMin: 200, displayMax: 2000,
+  },
+  'drive.treble': {
+    block: 'drive', name: 'treble',
+    pidLow: 0x0076, pidHigh: 0x0017,
+    unit: 'knob_0_10', displayMin: 0, displayMax: 10,
+  },
   'drive.channel': {
     block: 'drive', name: 'channel',
     pidLow: 0x0076, pidHigh: 0x07d2,
@@ -341,7 +394,9 @@ export const KNOWN_PARAMS = {
   },
   // Session 29 (HW-015): spring-reverb-specific params. Registers are
   // writable on any reverb type; AM4-Edit exposes the UI only when
-  // a Spring reverb is active.
+  // a Spring reverb is active. HW-024 (Session 30 cont 3) wire-verified
+  // both on Spring, Large reverb (springs=5 displayed exactly; spring_tone
+  // 7.30 displayed exactly) — first-ever hardware test of these params.
   'reverb.springs': {
     block: 'reverb', name: 'springs',
     pidLow: 0x0042, pidHigh: 0x001b,
@@ -496,6 +551,82 @@ export const KNOWN_PARAMS = {
     pidLow: 0x0046, pidHigh: 0x000e,
     unit: 'bipolar_percent', displayMin: -100, displayMax: 100,
   },
+  // HW-020 (Session 30, 2026-04-25): Delay first-page registers from
+  // session-30-delay-basic-digital-mono. `level` follows the universal
+  // pidHigh=0x0000 "Level" pattern shared with amp.level (no cache
+  // record at id=0; out-of-band hand-author). `stack_hold` and
+  // `ducking` mirror the same registers found on Reverb (HW-018).
+  // `tempo` (pidHigh=0x0013) is captured but deferred — registering
+  // it requires extracting the 79-entry tempo-division enum from cache
+  // (queued as HW-027 follow-up).
+  'delay.level': {
+    block: 'delay', name: 'level',
+    pidLow: 0x0046, pidHigh: 0x0000,
+    unit: 'db', displayMin: -80, displayMax: 20,
+  },
+  'delay.stack_hold': {
+    block: 'delay', name: 'stack_hold',
+    pidLow: 0x0046, pidHigh: 0x001f,
+    // Cache id=31: enum [OFF|STACK|HOLD]. Hand-authored — generator
+    // can't emit per-block non-Type enums (it would mis-import the
+    // block's TYPES_VALUES instead of these three).
+    unit: 'enum', displayMin: 0, displayMax: 2,
+    enumValues: { 0: 'OFF', 1: 'STACK', 2: 'HOLD' },
+  },
+  'delay.ducking': {
+    block: 'delay', name: 'ducking',
+    pidLow: 0x0046, pidHigh: 0x002e,
+    // Cache id=46: float a=0 b=80 c=1 → raw dB 0..80 attenuation.
+    // Same signature as reverb.ducking (HW-018).
+    unit: 'db', displayMin: 0, displayMax: 80,
+  },
+  // HW-027 (Session 30 cont 2, 2026-04-25): tempo-sync registers across
+  // every modulation block. Cache contains 14 79-entry tempo enums (delay
+  // × 6, chorus × 2, reverb / flanger / rotary / phaser / tremolo /
+  // filter × 1 each) — all string-identical, sharing the
+  // TEMPO_DIVISIONS_VALUES dictionary emitted by gen-cache-enums.ts.
+  // The first/lowest-id tempo enum on each block is canonically the main
+  // "Tempo Sync" knob per Blocks Guide §Common LFO Parameters. We
+  // register the high-confidence ones below (delay = wire-verified;
+  // chorus/flanger/phaser/tremolo = structural-by-symmetry, every
+  // modulation block has a Tempo Sync knob). Filter / reverb / rotary
+  // tempo registers deferred — semantics uncertain (auto-wah env follower
+  // vs LFO sync; reverb-modulation tempo for Vibrato-King types only).
+  // Hand-authored in KNOWN_PARAMS rather than via paramNames+generator
+  // because the generator's enum-handling defaults to the block's
+  // TYPES_VALUES, which would mis-import for these non-Type enums.
+  'delay.tempo': {
+    block: 'delay', name: 'tempo',
+    pidLow: 0x0046, pidHigh: 0x0013,
+    // Wire-verified: session-30-delay-basic-digital-mono captured
+    // value=11 (= "1/8" tempo division).
+    unit: 'enum', displayMin: 0, displayMax: 78,
+    enumValues: TEMPO_DIVISIONS_VALUES,
+  },
+  'chorus.tempo': {
+    block: 'chorus', name: 'tempo',
+    pidLow: 0x004e, pidHigh: 0x000d,
+    unit: 'enum', displayMin: 0, displayMax: 78,
+    enumValues: TEMPO_DIVISIONS_VALUES,
+  },
+  'flanger.tempo': {
+    block: 'flanger', name: 'tempo',
+    pidLow: 0x0052, pidHigh: 0x000c,
+    unit: 'enum', displayMin: 0, displayMax: 78,
+    enumValues: TEMPO_DIVISIONS_VALUES,
+  },
+  'phaser.tempo': {
+    block: 'phaser', name: 'tempo',
+    pidLow: 0x005a, pidHigh: 0x000e,
+    unit: 'enum', displayMin: 0, displayMax: 78,
+    enumValues: TEMPO_DIVISIONS_VALUES,
+  },
+  'tremolo.tempo': {
+    block: 'tremolo', name: 'tempo',
+    pidLow: 0x006a, pidHigh: 0x000f,
+    unit: 'enum', displayMin: 0, displayMax: 78,
+    enumValues: TEMPO_DIVISIONS_VALUES,
+  },
   'delay.channel': {
     block: 'delay', name: 'channel',
     pidLow: 0x0046, pidHigh: 0x07d2,
@@ -557,6 +688,41 @@ export const KNOWN_PARAMS = {
     pidLow: 0x004e, pidHigh: 0x000e,
     unit: 'percent', displayMin: 0, displayMax: 100,
   },
+  // HW-022 (Session 31, 2026-04-26): wire-verified on Analog Stereo
+  // chorus — `session-30-chorus-basic.pcapng`. Chorus first-page
+  // additions: level / time / mod_phase / phase_reverse.
+  'chorus.level': {
+    block: 'chorus', name: 'level',
+    pidLow: 0x004e, pidHigh: 0x0000,
+    unit: 'db', displayMin: -80, displayMax: 20,
+  },
+  'chorus.time': {
+    block: 'chorus', name: 'time',
+    pidLow: 0x004e, pidHigh: 0x0010,
+    // Cache id=16: float a=0.0001 b=0.05 c=1000 → display 0.1..50 ms.
+    unit: 'ms', displayMin: 0.1, displayMax: 50,
+  },
+  'chorus.mod_phase': {
+    block: 'chorus', name: 'mod_phase',
+    pidLow: 0x004e, pidHigh: 0x0011,
+    // Cache id=17: float a=0 b=π c=180/π → display 0..180 deg.
+    unit: 'degrees', displayMin: 0, displayMax: 180,
+  },
+  'chorus.phase_reverse': {
+    block: 'chorus', name: 'phase_reverse',
+    pidLow: 0x004e, pidHigh: 0x0014,
+    // Cache id=20 enum: [NONE, RIGHT, LEFT, BOTH]. Default NONE.
+    unit: 'enum', displayMin: 0, displayMax: 3,
+    enumValues: { 0: 'NONE', 1: 'RIGHT', 2: 'LEFT', 3: 'BOTH' },
+  },
+  // HW-032 (Session 30 cont 8, 2026-04-25): wire-verified at +10 dB on
+  // an Analog Stereo flanger — `session-32-flanger-extended.pcapng`.
+  // Follows the universal pidHigh=0x0000 Level pattern.
+  'flanger.level': {
+    block: 'flanger', name: 'level',
+    pidLow: 0x0052, pidHigh: 0x0000,
+    unit: 'db', displayMin: -80, displayMax: 20,
+  },
   'flanger.mix': {
     // BK-034 resolved (HW-025 #3, Session 30): NOT an encoding bug.
     // AM4-Edit wire for Mix→54% wrote pidLow=0x0052/pidHigh=0x0001
@@ -573,6 +739,8 @@ export const KNOWN_PARAMS = {
     unit: 'enum', displayMin: 0, displayMax: 31,
     enumValues: FLANGER_TYPES_VALUES,
   },
+  // HW-024 (Session 30 cont 3): wire-verified at 1.7 Hz on an
+  // Analog Stereo flanger (HW-014 left this unconfirmed in Round 2).
   'flanger.rate': {
     block: 'flanger', name: 'rate',
     pidLow: 0x0052, pidHigh: 0x000b,
@@ -594,6 +762,22 @@ export const KNOWN_PARAMS = {
     // Cache caps internal range at ±0.995 — display scale 100 ⇒ ±99%.
     unit: 'bipolar_percent', displayMin: -99, displayMax: 99,
   },
+  // HW-022 (Session 31, 2026-04-26): wire-verified on Analog Stereo
+  // flanger — `session-30-flanger-basic.pcapng`. Manual is a 0–10 knob
+  // (no unit suffix shown in AM4-Edit); Mod Phase mirrors the chorus
+  // degrees encoding.
+  'flanger.manual': {
+    block: 'flanger', name: 'manual',
+    pidLow: 0x0052, pidHigh: 0x000f,
+    // Cache id=15: float a=0 b=1 c=10 → display 0..10.
+    unit: 'knob_0_10', displayMin: 0, displayMax: 10,
+  },
+  'flanger.mod_phase': {
+    block: 'flanger', name: 'mod_phase',
+    pidLow: 0x0052, pidHigh: 0x0011,
+    // Cache id=17: float a=0 b=π c=180/π → display 0..180 deg.
+    unit: 'degrees', displayMin: 0, displayMax: 180,
+  },
   'phaser.mix': {
     // BK-034 resolved (HW-025 #5, Session 30): NOT an encoding bug.
     // AM4-Edit wire for Mix→88% wrote pidLow=0x005a/pidHigh=0x0001
@@ -610,6 +794,8 @@ export const KNOWN_PARAMS = {
     unit: 'enum', displayMin: 0, displayMax: 16,
     enumValues: PHASER_TYPES_VALUES,
   },
+  // HW-024 (Session 30 cont 3): wire-verified at 2.3 Hz on a Digital
+  // Mono phaser (HW-014 left this unconfirmed in Round 2).
   'phaser.rate': {
     block: 'phaser', name: 'rate',
     pidLow: 0x005a, pidHigh: 0x000c,
@@ -626,6 +812,34 @@ export const KNOWN_PARAMS = {
     // natural-language UX impact is negligible.
     unit: 'bipolar_percent', displayMin: -90, displayMax: 90,
   },
+  // HW-022 (Session 31, 2026-04-26): wire-verified on Digital Stereo
+  // phaser — `session-30-phaser-basic.pcapng`. Phaser uses 0–10 knob
+  // semantics for Depth + Manual (unlike chorus/flanger which use
+  // percent for Depth). Mod Phase address differs from chorus/flanger
+  // (0x0013 here vs 0x0011 there) — cache lays it out at id=19 not id=17.
+  'phaser.level': {
+    block: 'phaser', name: 'level',
+    pidLow: 0x005a, pidHigh: 0x0000,
+    unit: 'db', displayMin: -80, displayMax: 20,
+  },
+  'phaser.depth': {
+    block: 'phaser', name: 'depth',
+    pidLow: 0x005a, pidHigh: 0x000f,
+    // Cache id=15: float a=0 b=1 c=10 → display 0..10.
+    unit: 'knob_0_10', displayMin: 0, displayMax: 10,
+  },
+  'phaser.mod_phase': {
+    block: 'phaser', name: 'mod_phase',
+    pidLow: 0x005a, pidHigh: 0x0013,
+    // Cache id=19: float a=0 b=π c=180/π → display 0..180 deg.
+    unit: 'degrees', displayMin: 0, displayMax: 180,
+  },
+  'phaser.manual': {
+    block: 'phaser', name: 'manual',
+    pidLow: 0x005a, pidHigh: 0x0022,
+    // Cache id=34: float a=0 b=1 c=10 → display 0..10.
+    unit: 'knob_0_10', displayMin: 0, displayMax: 10,
+  },
   'wah.type': {
     block: 'wah', name: 'type',
     pidLow: 0x005e, pidHigh: 0x000a,
@@ -636,6 +850,57 @@ export const KNOWN_PARAMS = {
     block: 'compressor', name: 'mix',
     pidLow: 0x002e, pidHigh: 0x0001,
     unit: 'percent', displayMin: 0, displayMax: 100,
+  },
+  // HW-021 (Session 30, 2026-04-25): Compressor first-page registers
+  // from session-30-comp-basic-jfet-studio. Cache ids 10..15 are the
+  // canonical comp-config knobs (Threshold, Ratio, Attack, Release,
+  // Knee Type enum, Auto Makeup OFF/ON). `level` follows the universal
+  // pidHigh=0x0000 "Level" pattern (out-of-band hand-author).
+  // Two more registers wiggled in the capture remain unidentified
+  // (pidHigh=0x0017 cache id=23 float; pidHigh=0x0029 cache id=41
+  // knob_0_10 with value 1.2 exceeding cache cap b=1) — queued as
+  // HW-028 follow-up. The Optical/JFET-specific Light Type knob
+  // wasn't reached in this capture.
+  'compressor.level': {
+    block: 'compressor', name: 'level',
+    pidLow: 0x002e, pidHigh: 0x0000,
+    unit: 'db', displayMin: -80, displayMax: 20,
+  },
+  'compressor.threshold': {
+    block: 'compressor', name: 'threshold',
+    pidLow: 0x002e, pidHigh: 0x000a,
+    // Cache id=10: float a=-60 b=20 c=1 → dB -60..+20 (capture wrote
+    // -30 dB).
+    unit: 'db', displayMin: -60, displayMax: 20,
+  },
+  'compressor.ratio': {
+    block: 'compressor', name: 'ratio',
+    pidLow: 0x002e, pidHigh: 0x000b,
+    // Cache id=11: float a=1 b=20 c=1 step=0.01 → 1.0..20.0 ratio
+    // (e.g. 4.0 ⇒ 4:1). Uses the `ratio` unit semantically; math is
+    // identical to db/hz/seconds (display = internal, scale 1) but
+    // the label tells Claude "4 means 4:1, not 4 dB".
+    unit: 'ratio', displayMin: 1, displayMax: 20,
+  },
+  'compressor.attack': {
+    block: 'compressor', name: 'attack',
+    pidLow: 0x002e, pidHigh: 0x000c,
+    // Cache id=12: float a=0.0001 b=0.1 c=1000 → 0.1..100 ms.
+    unit: 'ms', displayMin: 0.1, displayMax: 100,
+  },
+  'compressor.release': {
+    block: 'compressor', name: 'release',
+    pidLow: 0x002e, pidHigh: 0x000d,
+    // Cache id=13: float a=0.002 b=2 c=1000 → 2..2000 ms.
+    unit: 'ms', displayMin: 2, displayMax: 2000,
+  },
+  'compressor.auto_makeup': {
+    block: 'compressor', name: 'auto_makeup',
+    pidLow: 0x002e, pidHigh: 0x000f,
+    // Cache id=15: enum [OFF|ON]. Hand-authored — see delay.stack_hold
+    // for why per-block non-Type enums skip the generator.
+    unit: 'enum', displayMin: 0, displayMax: 1,
+    enumValues: { 0: 'OFF', 1: 'ON' },
   },
   'compressor.type': {
     block: 'compressor', name: 'type',
@@ -653,6 +918,14 @@ export const KNOWN_PARAMS = {
   // captures. PEQ (pidLow=0x36) and Rotary (pidLow=0x56) are also confirmed
   // block addresses but have no Type enum — their params will be added when
   // we start supporting specific knob names.
+  // HW-032 (Session 30 cont 8, 2026-04-25): wire-verified at +12 dB on
+  // a Low-Pass filter — `session-32-filter-extended.pcapng`. Follows
+  // the universal pidHigh=0x0000 Level pattern.
+  'filter.level': {
+    block: 'filter', name: 'level',
+    pidLow: 0x0072, pidHigh: 0x0000,
+    unit: 'db', displayMin: -80, displayMax: 20,
+  },
   'filter.mix': {
     block: 'filter', name: 'mix',
     pidLow: 0x0072, pidHigh: 0x0001,
@@ -666,10 +939,48 @@ export const KNOWN_PARAMS = {
   },
   'filter.freq': {
     // Blocks Guide §Filter: Frequency is the filter cutoff. 20..20000 Hz,
-    // c=1 raw (uses 'hz' unit).
+    // c=1 raw (uses 'hz' unit). HW-024 (Session 30 cont 3): wire-verified
+    // on Low-Pass at 1250 Hz; readback was 1249.9 Hz. The 0.1 Hz drift is
+    // float→fixed-point quantization noise in the firmware (8e-5 relative
+    // error), not a wire-layer encoding bug — drift scales with frequency.
+    // Functionally inaudible; do not assume exact equality on round-trip
+    // when comparing presets that differ only in filter.freq.
     block: 'filter', name: 'freq',
     pidLow: 0x0072, pidHigh: 0x000b,
     unit: 'hz', displayMin: 20, displayMax: 20000,
+  },
+  // HW-032 (Session 30 cont 8, 2026-04-25): filter Config-page cuts.
+  // Wire-verified at 100 Hz / 1800 Hz on a Low-Pass filter
+  // (`session-32-filter-extended.pcapng`). Cache c=1 raw Hz at ids
+  // 18 / 19. Mirrored from CACHE_PARAMS so the type-check picks them up.
+  'filter.low_cut': {
+    block: 'filter', name: 'low_cut',
+    pidLow: 0x0072, pidHigh: 0x0012,
+    unit: 'hz', displayMin: 20, displayMax: 2000,
+  },
+  'filter.high_cut': {
+    block: 'filter', name: 'high_cut',
+    pidLow: 0x0072, pidHigh: 0x0013,
+    unit: 'hz', displayMin: 200, displayMax: 20000,
+  },
+  // HW-034 (Session 33, 2026-04-26): All-Pass filter Config-page
+  // residuals — `session-33-filter-extended.pcapng`. Wire-verified
+  // at 13% Feedback / 4-pole Order. Feedback cache signature
+  // (a=-1, b=1, c=100) is bipolar_percent ±100 (All-Pass feedback
+  // can invert phase). Order is an integer pole count 1..12 — cache
+  // typecode=0x0010 with c=1 raw. AM4-Edit's UI dropdown limits the
+  // exposed options per filter type (All-Pass shows 2/4/6/8/10/12;
+  // Low-Pass shows 2/4 only at cache id=14), but the wire register
+  // accepts any integer in the cache range.
+  'filter.feedback': {
+    block: 'filter', name: 'feedback',
+    pidLow: 0x0072, pidHigh: 0x0015,
+    unit: 'bipolar_percent', displayMin: -100, displayMax: 100,
+  },
+  'filter.order': {
+    block: 'filter', name: 'order',
+    pidLow: 0x0072, pidHigh: 0x001c,
+    unit: 'count', displayMin: 1, displayMax: 12,
   },
   'tremolo.mix': {
     block: 'tremolo', name: 'mix',
@@ -692,30 +1003,208 @@ export const KNOWN_PARAMS = {
     pidLow: 0x006a, pidHigh: 0x000d,
     unit: 'percent', displayMin: 0, displayMax: 100,
   },
+  // HW-022 (Session 31, 2026-04-26): wire-verified on Panner-type
+  // tremolo — `session-30-tremolo-basic.pcapng`. Tremolo's first page
+  // is type-dependent: Panner exposes Width / Phase / Center / Ducking
+  // / Waveform (instead of VCA Trem's Depth which lives at pidHigh
+  // 0x000d). Level (pidHigh=0x0000) wasn't moved in this capture — to
+  // be added when a future capture wiggles it.
+  'tremolo.waveform': {
+    block: 'tremolo', name: 'waveform',
+    pidLow: 0x006a, pidHigh: 0x000b,
+    // Cache id=11 enum: 10-entry LFO_WAVEFORMS — SINE / TRIANGLE /
+    // SQUARE / SAW UP / SAW DOWN / RANDOM / LOG / EXP / TRAPEZOID /
+    // ASTABLE. Shared dictionary across modulation blocks (extracted
+    // from chorus/id=18; cross-checked against flanger/phaser/tremolo).
+    unit: 'enum', displayMin: 0, displayMax: 9,
+    enumValues: LFO_WAVEFORMS_VALUES,
+  },
+  'tremolo.phase': {
+    block: 'tremolo', name: 'phase',
+    pidLow: 0x006a, pidHigh: 0x0010,
+    // Cache id=16: float a=0 b=π c=180/π → display 0..180 deg.
+    unit: 'degrees', displayMin: 0, displayMax: 180,
+  },
+  'tremolo.width': {
+    block: 'tremolo', name: 'width',
+    pidLow: 0x006a, pidHigh: 0x0011,
+    // Cache id=17: float a=0 b=4 c=100 — internal range allows up to
+    // display 400, but AM4-Edit's Panner Width slider visually caps at
+    // 100. Stay at 0..100 here; widen if a future capture proves
+    // values >100 are user-reachable.
+    unit: 'percent', displayMin: 0, displayMax: 100,
+  },
+  'tremolo.center': {
+    block: 'tremolo', name: 'center',
+    pidLow: 0x006a, pidHigh: 0x0012,
+    // Cache id=18: float a=-1 b=1 c=100 → display -100..+100. Panner
+    // center-pan position; 0 = dead center, ±100 = full L/R.
+    unit: 'bipolar_percent', displayMin: -100, displayMax: 100,
+  },
+  'tremolo.ducking': {
+    block: 'tremolo', name: 'ducking',
+    pidLow: 0x006a, pidHigh: 0x0018,
+    // Cache id=24: float a=0 b=1 c=10 → display 0..10.
+    unit: 'knob_0_10', displayMin: 0, displayMax: 10,
+  },
+  // HW-024 (Session 30 cont 3) finding F1 — `enhancer.mix` is a phantom
+  // register on the AM4 hardware display. The Enhancer block exposes
+  // Width / Phase Invert / Pan Left / Pan Right / Balance / Level on
+  // its UI pages — no Mix knob anywhere. Wire writes still ack (the
+  // SET_PARAM goes through and the firmware accepts it), but the
+  // parameter likely has no audible effect. Cache id=1 has the same
+  // signature as every other block's `mix` (percent, c=100), which is
+  // why P1-010 Session B registered it via the universal Mix-Page rule.
+  // Keep registered for now but treat as "wire-acked, no observed
+  // hardware effect" — pending an audio-effect spot-check (queued
+  // under HW-032 follow-ups).
   'enhancer.mix': {
     block: 'enhancer', name: 'mix',
     pidLow: 0x007a, pidHigh: 0x0001,
     unit: 'percent', displayMin: 0, displayMax: 100,
   },
+  // HW-024 (Session 30 cont 3): wire-verified — type "Classic" displayed
+  // exactly. AM4-Edit labels this "Mode" on the dropdown but we keep
+  // `type` for consistency across blocks.
   'enhancer.type': {
-    // AM4-Edit labels this "Mode", but keep `type` for consistency across blocks.
     block: 'enhancer', name: 'type',
     pidLow: 0x007a, pidHigh: 0x000e,
     unit: 'enum', displayMin: 0, displayMax: 2,
     enumValues: ENHANCER_TYPES_VALUES,
   },
+  // HW-024 (Session 30 cont 3): wire-verified — Modern Gate displayed
+  // exactly. Round 4 first-time test for this block type.
   'gate.type': {
     block: 'gate', name: 'type',
     pidLow: 0x0092, pidHigh: 0x0013,
     unit: 'enum', displayMin: 0, displayMax: 3,
     enumValues: GATE_TYPES_VALUES,
   },
+  // HW-035 (Session 34, 2026-04-26): slot-Gate first-page knobs on a
+  // Modern Gate type — `session-34-slotgate-extended.pcapng`. Wire-
+  // verified at Threshold=-22 dB / Attack=1 ms / Hold=80 ms /
+  // Release=90 ms / Attenuation=-33 dB / Sidechain=INPUT 1 / Level=
+  // 12 dB. Threshold/Attack/Hold/Release/Attenuation are mirrored
+  // from CACHE_PARAMS. Level (pidHigh=0x0000) follows the universal
+  // out-of-band Level pattern. Sidechain (pidHigh=0x000f) is a
+  // 4-entry enum sourced directly from cache id=15 enum strings
+  // (BLOCK L+R / INPUT 1 / BLOCK L / BLOCK R) — hand-authored
+  // because the cache generator only attaches the block-wide
+  // GATE_TYPES_VALUES import.
+  'gate.level': {
+    block: 'gate', name: 'level',
+    pidLow: 0x0092, pidHigh: 0x0000,
+    unit: 'db', displayMin: -80, displayMax: 20,
+  },
+  'gate.threshold': {
+    block: 'gate', name: 'threshold',
+    pidLow: 0x0092, pidHigh: 0x000a,
+    unit: 'db', displayMin: -100, displayMax: 0,
+  },
+  'gate.attack': {
+    block: 'gate', name: 'attack',
+    pidLow: 0x0092, pidHigh: 0x000b,
+    unit: 'ms', displayMin: 0, displayMax: 1000,
+  },
+  'gate.hold': {
+    block: 'gate', name: 'hold',
+    pidLow: 0x0092, pidHigh: 0x000c,
+    unit: 'ms', displayMin: 0, displayMax: 1000,
+  },
+  'gate.release': {
+    block: 'gate', name: 'release',
+    pidLow: 0x0092, pidHigh: 0x000d,
+    unit: 'ms', displayMin: 0, displayMax: 1000,
+  },
+  'gate.sidechain': {
+    block: 'gate', name: 'sidechain',
+    pidLow: 0x0092, pidHigh: 0x000f,
+    unit: 'enum', displayMin: 0, displayMax: 3,
+    enumValues: { 0: 'BLOCK L+R', 1: 'INPUT 1', 2: 'BLOCK L', 3: 'BLOCK R' },
+  },
+  'gate.attenuation': {
+    block: 'gate', name: 'attenuation',
+    pidLow: 0x0092, pidHigh: 0x0014,
+    unit: 'db', displayMin: -80, displayMax: 0,
+  },
+  // HW-024 (Session 30 cont 3): wire-verified — Auto-Swell displayed
+  // exactly. Round 4 first-time test for this block type.
   'volpan.mode': {
     // Block is "Volume/Pan"; this is the Volume-vs-Auto-Swell selector.
     block: 'volpan', name: 'mode',
     pidLow: 0x0066, pidHigh: 0x000f,
     unit: 'enum', displayMin: 0, displayMax: 1,
     enumValues: VOLPAN_MODES_VALUES,
+  },
+  // HW-032 (Session 30 cont 8, 2026-04-25): Volume/Pan Auto-Swell
+  // envelope params. Wire-verified at -20 dB / 300 ms on the Auto-Swell
+  // type (`session-32-volpan-extended.pcapng`). Cache ids 16 / 17 with
+  // c=1 (raw dB) and c=1000 (display ms) respectively. Mirrored from
+  // CACHE_PARAMS so the type-check picks them up.
+  'volpan.threshold': {
+    block: 'volpan', name: 'threshold',
+    pidLow: 0x0066, pidHigh: 0x0010,
+    unit: 'db', displayMin: -100, displayMax: 0,
+  },
+  'volpan.attack': {
+    block: 'volpan', name: 'attack',
+    pidLow: 0x0066, pidHigh: 0x0011,
+    unit: 'ms', displayMin: 1, displayMax: 5000,
+  },
+  // HW-032 (Session 30 cont 8, 2026-04-25): wire-verified at +12 dB on
+  // an Auto-Swell Volume/Pan — `session-32-volpan-extended.pcapng`.
+  // Follows the universal pidHigh=0x0000 Level pattern.
+  'volpan.level': {
+    block: 'volpan', name: 'level',
+    pidLow: 0x0066, pidHigh: 0x0000,
+    unit: 'db', displayMin: -80, displayMax: 20,
+  },
+
+  // Input Noise Gate (HW-032, Session 30 cont 8). Always-on input stage
+  // (per docs/BLOCK-PARAMS.md "Input Noise Gate (global, not a block
+  // slot)"); not placeable in any of the 4 effect slots. Distinct from
+  // the slot-placeable Gate effect block (pidLow=0x0092).
+  // Wire-verified on `session-32-gate-extended.pcapng` against the
+  // AM4-Edit "In-Gate" tab on Z04. Captured 4 distinct registers
+  // (0x00 / 0x0a / 0x0c / 0x0f); `level` is the only one with a
+  // unit-clean encoding so far. Threshold (0x0a, internal 0..1 →
+  // display -100..0 dB), Release (0x0c, curve TBD) and Type (0x0f,
+  // enum: Classic / Intelligent / Noise Reducer per the manual) need
+  // a Unit-extension pass plus a type-walk capture and are queued as
+  // HW-034. Pidlow 0x0025 has no cache backing — input gate isn't in
+  // any of the 17 cache sub-blocks (none of the section 2 candidates
+  // match its 4-register footprint).
+  'ingate.level': {
+    block: 'ingate', name: 'level',
+    pidLow: 0x0025, pidHigh: 0x0000,
+    unit: 'db', displayMin: -80, displayMax: 20,
+  },
+  // HW-036 (Session 34, 2026-04-26): In-Gate Config-page residuals
+  // from `session-34-inputgate-extended.pcapng`. Wire-verified at
+  // Threshold=-44 dB / Release=60 ms / Type=Intelligent on the
+  // In-Gate tab. All three were the HW-032 residuals queued for
+  // unit + type-walk. Threshold curve is dB-direct (not the 0..1
+  // normalized hypothesis from HW-032 — hardware writes raw dB).
+  // Release uses the same display=internal × 1000 ms scaling as
+  // every other release-style param. Type enum order matches
+  // BLOCK-PARAMS.md (Classic Expander / Intelligent / Noise
+  // Reducer); wire confirmed index 1 = Intelligent. No cache
+  // backing — all hand-authored.
+  'ingate.threshold': {
+    block: 'ingate', name: 'threshold',
+    pidLow: 0x0025, pidHigh: 0x000a,
+    unit: 'db', displayMin: -100, displayMax: 0,
+  },
+  'ingate.release': {
+    block: 'ingate', name: 'release',
+    pidLow: 0x0025, pidHigh: 0x000c,
+    unit: 'ms', displayMin: 0, displayMax: 1000,
+  },
+  'ingate.type': {
+    block: 'ingate', name: 'type',
+    pidLow: 0x0025, pidHigh: 0x000f,
+    unit: 'enum', displayMin: 0, displayMax: 2,
+    enumValues: { 0: 'Classic Expander', 1: 'Intelligent', 2: 'Noise Reducer' },
   },
 
   // Universal per-block output Balance (Session 28 cont — P1-010
@@ -726,12 +1215,21 @@ export const KNOWN_PARAMS = {
   // lines 899 (Amp), 1233 (Chorus), 1430 (Flanger), 1733 (Delay),
   // 1883 (Phaser). Cache signature is identical across all 15
   // confirmed blocks: id=2, a=-1, b=1, c=100 (display = internal ×
-  // 100, so -100..+100%). HW-014 verified on `geq.balance` = -67
-  // (the only Balance param AM4's hardware display exposes); other
-  // block Balances wrote and wire-acked but are hidden from the
-  // hardware screen. AM4-Edit verification owed for the 14 hidden
-  // ones; structural evidence across all 15 blocks is extremely
-  // strong.
+  // 100, so -100..+100%).
+  //
+  // Hardware-display visibility per block (HW-014 + HW-024 finding F2):
+  //   visible: enhancer.balance (HW-024 at -33%), geq.balance (HW-014
+  //     at -67), volpan.balance is type-specific to the Pan range —
+  //     classified as an effect-block balance below.
+  //   hidden (wire-acked, no display readout): amp / compressor /
+  //     reverb / delay / chorus / flanger / phaser / wah / tremolo /
+  //     filter / drive / gate / volpan.
+  // Visibility is block-type-dependent — the enhancer is a stereo
+  // utility block where balance/pan controls are core, while effect
+  // blocks treat balance as a hidden output mixer. Hidden writes still
+  // affect the stereo image at the audio path (per Blocks Guide line
+  // 347 — universal at the firmware level); audio-effect spot-check
+  // queued under HW-032.
   'amp.balance':       { block: 'amp',        name: 'balance', pidLow: 0x003a, pidHigh: 0x0002, unit: 'bipolar_percent', displayMin: -100, displayMax: 100 },
   'compressor.balance':{ block: 'compressor', name: 'balance', pidLow: 0x002e, pidHigh: 0x0002, unit: 'bipolar_percent', displayMin: -100, displayMax: 100 },
   'geq.balance':       { block: 'geq',        name: 'balance', pidLow: 0x0032, pidHigh: 0x0002, unit: 'bipolar_percent', displayMin: -100, displayMax: 100 },

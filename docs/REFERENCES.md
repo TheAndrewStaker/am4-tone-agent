@@ -1,4 +1,4 @@
-# External References — AM4 Tone Agent
+# External References — MCP MIDI Tools
 
 Primary sources available locally or online, what they cover, and when to consult each.
 Update this file whenever a new reference is added to the project.

@@ -351,6 +351,288 @@ const cases: { label: string; built: number[]; expected: string }[] = [
     built: buildSetParam('phaser.feedback', 50.15915632247925),
     expected: 'f000017415015a001000010000000400271a00037818f7',
   },
+  // HW-019 / HW-020 / HW-021 (Session 30, 2026-04-25): drive + delay +
+  // compressor first-page goldens. Each anchor uses the AM4-Edit-
+  // captured wire bytes; the displayValue passed to buildSetParam is
+  // what `decode(param, internal)` produces from the captured float,
+  // so the round-trip is wire→display→wire = identity.
+  {
+    label: 'buildSetParam("drive.low_cut", 1000 Hz) — session-30 HW-019 blackglass-7k',
+    built: buildSetParam('drive.low_cut', 1000),
+    expected: 'f000017415017600100001000000040000000f242079f7',
+  },
+  {
+    label: 'buildSetParam("drive.bass", 1.0) — session-30 HW-019 blackglass-7k',
+    built: buildSetParam('drive.bass', 1.0000000149011612),
+    expected: 'f0000174150176001400010000000400667319436851f7',
+  },
+  {
+    label: 'buildSetParam("drive.mid", 4.0) — session-30 HW-019 blackglass-7k',
+    built: buildSetParam('drive.mid', 4.000000059604645),
+    expected: 'f0000174150176001500010000000400667319437048f7',
+  },
+  {
+    label: 'buildSetParam("drive.mid_freq", 800 Hz) — session-30 HW-019 blackglass-7k',
+    built: buildSetParam('drive.mid_freq', 800),
+    expected: 'f0000174150176001600010000000400000009042059f7',
+  },
+  {
+    label: 'buildSetParam("drive.treble", 2.0) — session-30 HW-019 blackglass-7k',
+    built: buildSetParam('drive.treble', 2.0000000298023224),
+    expected: 'f000017415017600170001000000040066730943705af7',
+  },
+  {
+    label: 'buildSetParam("delay.level", -10 dB) — session-30 HW-020 digital-mono',
+    built: buildSetParam('delay.level', -10),
+    expected: 'f00001741501460000000100000004000000040c0852f7',
+  },
+  {
+    label: 'buildSetParam("delay.stack_hold", 1 = STACK) — session-30 HW-020 digital-mono',
+    built: buildSetParam('delay.stack_hold', 1),
+    expected: 'f0000174150146001f00010000000400000010037826f7',
+  },
+  {
+    label: 'buildSetParam("delay.ducking", 2 dB) — session-30 HW-020 digital-mono',
+    built: buildSetParam('delay.ducking', 2),
+    expected: 'f0000174150146002e00010000000400000000040078f7',
+  },
+  {
+    label: 'buildSetParam("compressor.level", -8 dB) — session-30 HW-021 jfet-studio',
+    built: buildSetParam('compressor.level', -8),
+    expected: 'f000017415012e0000000100000004000000000c083ef7',
+  },
+  // HW-032 (Session 30 cont 8) — first-page Level + low/high cut +
+  // volpan threshold/attack + ingate level. Each `expected` is the
+  // exact wire frame from the matching session-32 pcapng final-write.
+  {
+    label: 'buildSetParam("filter.level", 12 dB) — session-32 HW-032 filter-config',
+    built: buildSetParam('filter.level', 12),
+    expected: 'f0000174150172000000010000000400000008040862f7',
+  },
+  {
+    label: 'buildSetParam("filter.low_cut", 100 Hz) — session-32 HW-032 filter-config',
+    built: buildSetParam('filter.low_cut', 100),
+    expected: 'f0000174150172001200010000000400000019041079f7',
+  },
+  {
+    label: 'buildSetParam("filter.high_cut", 1800 Hz) — session-32 HW-032 filter-config',
+    built: buildSetParam('filter.high_cut', 1800),
+    expected: 'f000017415017200130001000000040000001c14205df7',
+  },
+  // HW-034 (Session 33) — All-Pass filter Config-page residuals from
+  // `session-33-filter-extended.pcapng`. Feedback 13% (bipolar_percent
+  // wire 0.13); Order 4 (count, raw integer).
+  {
+    label: 'buildSetParam("filter.feedback", 13 %) — session-33 HW-034 filter-allpass',
+    built: buildSetParam('filter.feedback', 13),
+    expected: 'f00001741501720015000100000004005c074053704bf7',
+  },
+  {
+    label: 'buildSetParam("filter.order", 4) — session-33 HW-034 filter-allpass',
+    built: buildSetParam('filter.order', 4),
+    expected: 'f0000174150172001c0001000000040000001004006ef7',
+  },
+  // HW-035 (Session 34) — slot-Gate Config-page knobs on Modern Gate
+  // type from `session-34-slotgate-extended.pcapng`.
+  {
+    label: 'buildSetParam("gate.level", 12 dB) — session-34 HW-035 slotgate-modern',
+    built: buildSetParam('gate.level', 12),
+    expected: 'f0000174150112010000010000000400000008040803f7',
+  },
+  {
+    label: 'buildSetParam("gate.threshold", -22 dB) — session-34 HW-035 slotgate-modern',
+    built: buildSetParam('gate.threshold', -22),
+    expected: 'f0000174150112010a000100000004000000160c081ff7',
+  },
+  {
+    label: 'buildSetParam("gate.attack", 1 ms) — session-34 HW-035 slotgate-modern',
+    built: buildSetParam('gate.attack', 1),
+    expected: 'f0000174150112010b0001000000040037445033504cf7',
+  },
+  {
+    label: 'buildSetParam("gate.hold", 80 ms) — session-34 HW-035 slotgate-modern',
+    built: buildSetParam('gate.hold', 80),
+    expected: 'f0000174150112010c00010000000400053574336814f7',
+  },
+  {
+    label: 'buildSetParam("gate.release", 90 ms) — session-34 HW-035 slotgate-modern',
+    built: buildSetParam('gate.release', 90),
+    expected: 'f0000174150112010d00010000000400761437036834f7',
+  },
+  {
+    label: 'buildSetParam("gate.sidechain", 1) — session-34 HW-035 slotgate-modern',
+    built: buildSetParam('gate.sidechain', 1),
+    expected: 'f0000174150112010f00010000000400000010037863f7',
+  },
+  {
+    label: 'buildSetParam("gate.attenuation", -33 dB) — session-34 HW-035 slotgate-modern',
+    built: buildSetParam('gate.attenuation', -33),
+    expected: 'f00001741501120114000100000004000000004c104ff7',
+  },
+  // HW-036 (Session 34) — In-Gate Config-page residuals from
+  // `session-34-inputgate-extended.pcapng`.
+  {
+    label: 'buildSetParam("ingate.threshold", -44 dB) — session-34 HW-036 inputgate-intelligent',
+    built: buildSetParam('ingate.threshold', -44),
+    expected: 'f0000174150125000a000100000004000000060c1021f7',
+  },
+  {
+    label: 'buildSetParam("ingate.release", 60 ms) — session-34 HW-036 inputgate-intelligent',
+    built: buildSetParam('ingate.release', 60),
+    expected: 'f0000174150125000c0001000000040047704e53687ff7',
+  },
+  {
+    label: 'buildSetParam("ingate.type", 1) — session-34 HW-036 inputgate-intelligent',
+    built: buildSetParam('ingate.type', 1),
+    expected: 'f0000174150125000f00010000000400000010037855f7',
+  },
+  {
+    label: 'buildSetParam("flanger.level", 10 dB) — session-32 HW-032 flanger',
+    built: buildSetParam('flanger.level', 10),
+    expected: 'f000017415015200000001000000040000000404084ef7',
+  },
+  {
+    label: 'buildSetParam("volpan.level", 12 dB) — session-32 HW-032 volpan',
+    built: buildSetParam('volpan.level', 12),
+    expected: 'f0000174150166000000010000000400000008040876f7',
+  },
+  {
+    label: 'buildSetParam("volpan.threshold", -20 dB) — session-32 HW-032 volpan',
+    built: buildSetParam('volpan.threshold', -20),
+    expected: 'f00001741501660010000100000004000000140c0872f7',
+  },
+  {
+    label: 'buildSetParam("volpan.attack", 300 ms) — session-32 HW-032 volpan',
+    built: buildSetParam('volpan.attack', 300),
+    expected: 'f00001741501660011000100000004004d2633137058f7',
+  },
+  {
+    label: 'buildSetParam("ingate.level", -10 dB) — session-32 HW-032 input-noise-gate',
+    built: buildSetParam('ingate.level', -10),
+    expected: 'f00001741501250000000100000004000000040c0831f7',
+  },
+  {
+    label: 'buildSetParam("compressor.threshold", -30 dB) — session-30 HW-021 jfet-studio',
+    built: buildSetParam('compressor.threshold', -30),
+    expected: 'f000017415012e000a0001000000040000001e0c082af7',
+  },
+  {
+    label: 'buildSetParam("compressor.ratio", 1.0) — session-30 HW-021 jfet-studio',
+    built: buildSetParam('compressor.ratio', 1),
+    expected: 'f000017415012e000b0001000000040000001003785af7',
+  },
+  {
+    label: 'buildSetParam("compressor.attack", 0.8 ms) — session-30 HW-021 jfet-studio',
+    built: buildSetParam('compressor.attack', 0.800000037997961),
+    expected: 'f000017415012e000c000100000004000c2d6a13503ef7',
+  },
+  {
+    label: 'buildSetParam("compressor.release", 100 ms) — session-30 HW-021 jfet-studio',
+    built: buildSetParam('compressor.release', 100.00000149011612),
+    expected: 'f000017415012e000d00010000000400667319436810f7',
+  },
+  {
+    label: 'buildSetParam("compressor.auto_makeup", 0 = OFF) — session-30 HW-021 jfet-studio',
+    built: buildSetParam('compressor.auto_makeup', 0),
+    expected: 'f000017415012e000f00010000000400000000000035f7',
+  },
+  // HW-027 (Session 30 cont 2, 2026-04-25): delay.tempo wire-verified
+  // anchor. Captured value=11 = "1/8" tempo division. The other 4
+  // tempo entries (chorus/flanger/phaser/tremolo) are structural —
+  // no captures yet — so no goldens emitted for them. When a future
+  // session captures any of those, add an anchor here.
+  {
+    label: 'buildSetParam("delay.tempo", 11 = "1/8") — session-30-delay-basic-digital-mono',
+    built: buildSetParam('delay.tempo', 11),
+    expected: 'f000017415014600130001000000040000000604084bf7',
+  },
+  // HW-022 (Session 31, 2026-04-26): chorus / flanger / phaser / tremolo
+  // first-page additions. 15 new wire anchors from session-30-{block}-
+  // basic.pcapng captures. Introduces the `degrees` unit (cache c=180/π)
+  // and the shared LFO_WAVEFORMS_VALUES dictionary.
+  {
+    label: 'buildSetParam("chorus.level", -2 dB) — session-30-chorus-basic',
+    built: buildSetParam('chorus.level', -2),
+    expected: 'f000017415014e0000000100000004000000000c0056f7',
+  },
+  {
+    label: 'buildSetParam("chorus.time", 12 ms) — session-30-chorus-basic',
+    built: buildSetParam('chorus.time', 12),
+    expected: 'f000017415014e001000010000000400532668436074f7',
+  },
+  {
+    label: 'buildSetParam("chorus.mod_phase", 10 deg) — session-30-chorus-basic',
+    built: buildSetParam('chorus.mod_phase', 10),
+    expected: 'f000017415014e001100010000000400612e06237051f7',
+  },
+  {
+    label: 'buildSetParam("chorus.phase_reverse", 1 = "RIGHT") — session-30-chorus-basic',
+    built: buildSetParam('chorus.phase_reverse', 1),
+    expected: 'f000017415014e001400010000000400000010037825f7',
+  },
+  {
+    label: 'buildSetParam("flanger.manual", 10) — session-30-flanger-basic',
+    built: buildSetParam('flanger.manual', 10),
+    expected: 'f0000174150152000f00010000000400000010037822f7',
+  },
+  {
+    label: 'buildSetParam("flanger.mod_phase", 11 deg) — session-30-flanger-basic',
+    built: buildSetParam('flanger.mod_phase', 11),
+    expected: 'f000017415015200110001000000040004660843700ef7',
+  },
+  {
+    label: 'buildSetParam("phaser.level", -4.3 dB) — session-30-phaser-basic',
+    built: buildSetParam('phaser.level', -4.300000190734863),
+    expected: 'f000017415015a0000000100000004004d26311c0008f7',
+  },
+  {
+    label: 'buildSetParam("phaser.depth", 6.7 via float32) — session-30-phaser-basic',
+    // AM4-Edit's pipeline does float32 math throughout (slider value is
+    // float32, divided by float32(10), packed to wire). JavaScript stores
+    // 6.7 as float64 0.67000000000000003553… which rounds to a different
+    // float32 ULP than AM4-Edit's float32(6.7) / float32(10) =
+    // 0.6699999570846558. Pre-rounding 6.7 → float32(6.7) →
+    // 6.6999998092651367 makes the JavaScript division round to the same
+    // float32 AM4-Edit ships (1-ULP within standard float32 precision —
+    // functionally identical).
+    built: buildSetParam('phaser.depth', 6.6999998092651367),
+    expected: 'f000017415015a000f000100000004000f2125337801f7',
+  },
+  {
+    label: 'buildSetParam("phaser.mod_phase", 11 deg) — session-30-phaser-basic',
+    built: buildSetParam('phaser.mod_phase', 11),
+    expected: 'f000017415015a001300010000000400046608437004f7',
+  },
+  {
+    label: 'buildSetParam("phaser.manual", 1.0) — session-30-phaser-basic',
+    built: buildSetParam('phaser.manual', 1),
+    expected: 'f000017415015a00220001000000040066731943684bf7',
+  },
+  {
+    label: 'buildSetParam("tremolo.waveform", 1 = "TRIANGLE") — session-30-tremolo-basic',
+    built: buildSetParam('tremolo.waveform', 1),
+    expected: 'f000017415016a000b0001000000040000001003781ef7',
+  },
+  {
+    label: 'buildSetParam("tremolo.phase", 20 deg) — session-30-tremolo-basic',
+    built: buildSetParam('tremolo.phase', 20),
+    expected: 'f000017415016a001000010000000400612e16237064f7',
+  },
+  {
+    label: 'buildSetParam("tremolo.width", 20%) — session-30-tremolo-basic',
+    built: buildSetParam('tremolo.width', 20),
+    expected: 'f000017415016a001100010000000400667309437040f7',
+  },
+  {
+    label: 'buildSetParam("tremolo.center", 2) — session-30-tremolo-basic',
+    built: buildSetParam('tremolo.center', 2),
+    expected: 'f000017415016a00120001000000040005357433607bf7',
+  },
+  {
+    label: 'buildSetParam("tremolo.ducking", 10) — session-30-tremolo-basic',
+    built: buildSetParam('tremolo.ducking', 10),
+    expected: 'f000017415016a00180001000000040000001003780df7',
+  },
 ];
 
 let pass = 0;
