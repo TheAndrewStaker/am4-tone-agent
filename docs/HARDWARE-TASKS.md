@@ -256,30 +256,9 @@ Claude picks up from there and moves the item to ⏳ or ✅.
   knobs landed at 0x17 and 0x29.
 - **Priority:** low — bounded scope.
 
-### HW-027 — Extract delay tempo-division enum (79 entries) 🔜
+<!-- HW-027 completed 2026-04-25 (Session 30 cont 2) — see Archive
+     below for the decode summary. -->
 
-- **For:** registers `delay.tempo` (pidHigh=0x0013) which captured
-  cleanly in session-30-delay-basic-digital-mono but couldn't be
-  named yet. Cache id=19 is a 79-entry enum [NONE / 1/64 TRIP /
-  1/64 / ... / 63/64] used as Tempo division on delay, drive,
-  reverb, chorus, flanger, phaser, tremolo. Shared structure
-  across blocks.
-- **Why:** the type-enum auto-generator (`scripts/gen-cache-enums.ts`)
-  only emits the block's *Type* enum (id=10), not other enums in
-  the block. To register tempo cleanly, either (a) extend the
-  generator to also emit a `TEMPO_DIVISIONS_VALUES` const, or (b)
-  hand-author the 79-entry list inline in `params.ts`. Option (a)
-  is cleaner — multiple blocks share this list — but it's a
-  generator-extension change, not a hardware action.
-- **Status:** **No founder action required.** Tracked here so
-  the residual is visible alongside HW-026/028/029. Claude can
-  resolve this in any session by extending `gen-cache-enums.ts`
-  to emit the tempo enum, then registering `delay.tempo` (and
-  potentially `chorus.tempo` / `flanger.tempo` / etc.) from
-  paramNames.
-- **Priority:** low — bounded scope; tempo division is a niche
-  knob (most users sync tempo via tap or external clock, not a
-  dropdown).
 
 ### HW-026 — Resolve unidentified `pidHigh=0x0000` on Reverb (likely Level) 🔜
 
@@ -900,6 +879,38 @@ highest numbers.
   common reason in practice (the founder almost certainly had
   AM4-Edit open). P5-009 #2 (graceful "AM4 not found" error)
   is doing what it was designed to do.
+
+### HW-027 — Extract delay tempo-division enum (79 entries) ✅
+
+- **Resolved 2026-04-25 (Session 30 cont 2)** — pure Claude-side
+  work, no founder hardware. Extended `scripts/gen-cache-enums.ts`
+  to extract a shared `TEMPO_DIVISIONS_VALUES` const from the
+  cache (using delay block id=19 as the source-of-truth); the
+  same 79-entry enum appears 14 times across the cache (delay × 6,
+  chorus × 2, reverb / flanger / rotary / phaser / tremolo /
+  filter × 1 each), all string-identical.
+- **5 new tempo params registered**:
+  - `delay.tempo` (pidHigh=0x0013) — wire-verified from
+    session-30-delay-basic-digital-mono (captured value=11 = "1/8").
+  - `chorus.tempo` (0x000d), `flanger.tempo` (0x000c),
+    `phaser.tempo` (0x000e), `tremolo.tempo` (0x000f) — structural-
+    by-symmetry. Every modulation block exposes a Tempo Sync knob
+    per Blocks Guide §Common LFO Parameters; the first/lowest-id
+    79-entry tempo enum on each block is canonically that knob.
+- **Deferred**: filter / reverb / rotary / drive tempo registers
+  (semantics uncertain — auto-wah env follower vs LFO sync;
+  reverb-modulation tempo is Vibrato-King-type-only). Drive's
+  cache has tempo-shape enums but they're at the per-tap delay
+  modeling layer of an unusual drive type; skipping.
+- **Goldens.** 1 new byte-exact entry in `verify-msg`
+  (`delay.tempo`); the 4 structural entries don't have captures
+  yet so no goldens. Total 75/75.
+- **Hand-authoring rationale**: tempo entries live directly in
+  `KNOWN_PARAMS` rather than via paramNames + generator, because
+  the generator's enum-handling defaults to the block's
+  TYPES_VALUES, which would mis-import for these non-Type enums.
+  Same pattern as `delay.stack_hold` and `compressor.auto_makeup`
+  (Session 30 cont).
 
 ### HW-019 — Drive first-page completion ✅
 

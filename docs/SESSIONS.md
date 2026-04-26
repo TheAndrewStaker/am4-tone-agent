@@ -6,6 +6,46 @@ file is the chronological trail that reference is built from.
 
 ---
 
+## 2026-04-25 — Session 30 cont 2 — HW-027 closed (5 tempo params via shared TEMPO_DIVISIONS_VALUES extraction)
+
+Pure Claude-side coverage win, no captures needed. Extended
+`scripts/gen-cache-enums.ts` to emit a shared
+`TEMPO_DIVISIONS_VALUES` const (79-entry tempo-division dictionary
+[NONE / 1/64 TRIP / ... / 63/64]); source-of-truth is the cache's
+delay block id=19 record (which was wire-captured in
+session-30-delay-basic-digital-mono).
+
+The same 79-entry tempo enum appears 14 times across the cache
+(delay × 6, chorus × 2, reverb / flanger / rotary / phaser /
+tremolo / filter × 1 each), all string-identical.
+
+**5 new tempo params registered**:
+- `delay.tempo` (pidHigh=0x0013) — wire-verified.
+- `chorus.tempo` (0x000d) / `flanger.tempo` (0x000c) /
+  `phaser.tempo` (0x000e) / `tremolo.tempo` (0x000f) — structural-
+  by-symmetry. The first 79-entry tempo enum on each modulation
+  block is canonically the main Tempo Sync knob per Blocks Guide
+  §Common LFO Parameters; all four blocks have it at this offset.
+
+**Deferred**: filter / reverb / rotary tempo registers (semantics
+uncertain — auto-wah env follower vs LFO sync; reverb-modulation
+tempo is Vibrato-King-type-only). The 5 secondary delay tempo
+enums (per-tap tempos for Multi-Tap delay) also deferred —
+naming requires per-tap structural understanding.
+
+Hand-authored in `KNOWN_PARAMS` rather than via
+paramNames+generator because `gen-params-from-cache.ts`'s enum-
+handling defaults to the block's TYPES_VALUES, which would
+mis-import for these per-block non-Type enums. Same pattern as
+`delay.stack_hold` and `compressor.auto_makeup`.
+
+KNOWN_PARAMS 93→98, verify-msg goldens 74→75 (1 new wire anchor
+for delay.tempo; the 4 structural entries lack captures so no
+goldens for them yet — when a future capture lands, add an anchor
+and the structural entry promotes to wire-verified).
+
+---
+
 ## 2026-04-25 — Session 30 cont — HW-019 + HW-020 + HW-021 decode (14 new params; type-dependent UI surprise; `ratio` unit added)
 
 Founder captured 4 pcapngs covering the next BK-032 priorities:

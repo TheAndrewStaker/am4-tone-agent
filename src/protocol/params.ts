@@ -26,6 +26,7 @@ import {
   ENHANCER_TYPES_VALUES,
   GATE_TYPES_VALUES,
   VOLPAN_MODES_VALUES,
+  TEMPO_DIVISIONS_VALUES,
 } from './cacheEnums.js';
 
 /**
@@ -566,6 +567,53 @@ export const KNOWN_PARAMS = {
     // Cache id=46: float a=0 b=80 c=1 → raw dB 0..80 attenuation.
     // Same signature as reverb.ducking (HW-018).
     unit: 'db', displayMin: 0, displayMax: 80,
+  },
+  // HW-027 (Session 30 cont 2, 2026-04-25): tempo-sync registers across
+  // every modulation block. Cache contains 14 79-entry tempo enums (delay
+  // × 6, chorus × 2, reverb / flanger / rotary / phaser / tremolo /
+  // filter × 1 each) — all string-identical, sharing the
+  // TEMPO_DIVISIONS_VALUES dictionary emitted by gen-cache-enums.ts.
+  // The first/lowest-id tempo enum on each block is canonically the main
+  // "Tempo Sync" knob per Blocks Guide §Common LFO Parameters. We
+  // register the high-confidence ones below (delay = wire-verified;
+  // chorus/flanger/phaser/tremolo = structural-by-symmetry, every
+  // modulation block has a Tempo Sync knob). Filter / reverb / rotary
+  // tempo registers deferred — semantics uncertain (auto-wah env follower
+  // vs LFO sync; reverb-modulation tempo for Vibrato-King types only).
+  // Hand-authored in KNOWN_PARAMS rather than via paramNames+generator
+  // because the generator's enum-handling defaults to the block's
+  // TYPES_VALUES, which would mis-import for these non-Type enums.
+  'delay.tempo': {
+    block: 'delay', name: 'tempo',
+    pidLow: 0x0046, pidHigh: 0x0013,
+    // Wire-verified: session-30-delay-basic-digital-mono captured
+    // value=11 (= "1/8" tempo division).
+    unit: 'enum', displayMin: 0, displayMax: 78,
+    enumValues: TEMPO_DIVISIONS_VALUES,
+  },
+  'chorus.tempo': {
+    block: 'chorus', name: 'tempo',
+    pidLow: 0x004e, pidHigh: 0x000d,
+    unit: 'enum', displayMin: 0, displayMax: 78,
+    enumValues: TEMPO_DIVISIONS_VALUES,
+  },
+  'flanger.tempo': {
+    block: 'flanger', name: 'tempo',
+    pidLow: 0x0052, pidHigh: 0x000c,
+    unit: 'enum', displayMin: 0, displayMax: 78,
+    enumValues: TEMPO_DIVISIONS_VALUES,
+  },
+  'phaser.tempo': {
+    block: 'phaser', name: 'tempo',
+    pidLow: 0x005a, pidHigh: 0x000e,
+    unit: 'enum', displayMin: 0, displayMax: 78,
+    enumValues: TEMPO_DIVISIONS_VALUES,
+  },
+  'tremolo.tempo': {
+    block: 'tremolo', name: 'tempo',
+    pidLow: 0x006a, pidHigh: 0x000f,
+    unit: 'enum', displayMin: 0, displayMax: 78,
+    enumValues: TEMPO_DIVISIONS_VALUES,
   },
   'delay.channel': {
     block: 'delay', name: 'channel',

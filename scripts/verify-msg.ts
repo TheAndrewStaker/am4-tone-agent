@@ -426,6 +426,16 @@ const cases: { label: string; built: number[]; expected: string }[] = [
     built: buildSetParam('compressor.auto_makeup', 0),
     expected: 'f000017415012e000f00010000000400000000000035f7',
   },
+  // HW-027 (Session 30 cont 2, 2026-04-25): delay.tempo wire-verified
+  // anchor. Captured value=11 = "1/8" tempo division. The other 4
+  // tempo entries (chorus/flanger/phaser/tremolo) are structural —
+  // no captures yet — so no goldens emitted for them. When a future
+  // session captures any of those, add an anchor here.
+  {
+    label: 'buildSetParam("delay.tempo", 11 = "1/8") — session-30-delay-basic-digital-mono',
+    built: buildSetParam('delay.tempo', 11),
+    expected: 'f000017415014600130001000000040000000604084bf7',
+  },
 ];
 
 let pass = 0;

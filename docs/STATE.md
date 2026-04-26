@@ -5,7 +5,17 @@
 > hardware tasks (USB captures, round-trip tests, reference dumps) live
 > in **`docs/HARDWARE-TASKS.md`** — check that file alongside this one at
 > session start.
-> Last updated: **2026-04-25** (Session 30 cont — HW-019 +
+> Last updated: **2026-04-25** (Session 30 cont 2 — HW-027 closed
+> Claude-side. Extended `gen-cache-enums.ts` to emit shared
+> `TEMPO_DIVISIONS_VALUES` (79-entry enum, source-of-truth at
+> delay/id=19). **5 new tempo params**: `delay.tempo` (wire-
+> verified from session-30 capture), `chorus.tempo` /
+> `flanger.tempo` / `phaser.tempo` / `tremolo.tempo` (structural-
+> by-symmetry — every modulation block has a Tempo Sync knob per
+> Blocks Guide §Common LFO Parameters). KNOWN_PARAMS 93 → 98;
+> verify-msg goldens 74 → 75 (1 new wire anchor for delay.tempo;
+> the 4 structural entries lack captures). Pre-existing context —
+> Session 30 cont — HW-019 +
 > HW-020 + HW-021 decoded and archived. **14 new params**: 5
 > drive (low_cut / bass / mid / mid_freq / treble), 3 delay
 > (level / stack_hold / ducking), 6 compressor (level /
@@ -380,10 +390,6 @@ that, HW-022/023 can run any time and grow TYPE-KNOBS.md.
 - **HW-026** — single-knob capture to disambiguate the Reverb
   `pidHigh=0x0000` register left over from HW-018 (likely
   `reverb.level`). Low priority; doesn't block release.
-- **HW-027** — extend `gen-cache-enums.ts` to emit a shared
-  `TEMPO_DIVISIONS_VALUES` const so `delay.tempo` (and
-  potentially chorus/flanger/phaser/tremolo/drive tempos)
-  can be registered. No hardware action; Claude-side only.
 - **HW-028** — single-knob capture to disambiguate
   `compressor.0x0017` and `compressor.0x0029` (Knee/Detector
   Type or JFET-specific knobs).
@@ -520,7 +526,9 @@ sub-block 1 = Delay (89 recs, id=10 enum × 29), sub-block 9 = Drive
 ## Decoded parameters and unit conventions
 
 Live source of truth: `src/protocol/params.ts` (`KNOWN_PARAMS` + `Unit`
-union). **93 hand-authored params** (Session 30 cont added 14:
+union). **98 hand-authored params** (Session 30 cont 2 added 5:
+delay/chorus/flanger/phaser/tremolo `.tempo` enums sharing the new
+`TEMPO_DIVISIONS_VALUES` 79-entry dictionary). Session 30 cont added 14:
 5 drive EQ-page knobs (low_cut, bass, mid, mid_freq, treble) +
 3 delay registers (level, stack_hold, ducking) + 6 compressor
 registers (level, threshold, ratio, attack, release, auto_makeup);
@@ -862,7 +870,7 @@ Session 08 highlights (still load-bearing):
 - Preset dump format (`0x77/0x78/0x79`) + slot addressing — **🟢 confirmed**.
 - `0x01` SET_PARAM message format + value encoding — **🟢 fully decoded**.
 - Parameter ID structure — **🟢 (Session 06, preset-independent)**.
-- 93 hand-authored params / 15 confirmed blocks / 11 units — **🟢 in `params.ts`** (Session 30 cont: HW-019/020/021 — drive EQ + delay/comp universal + comp config; new `ratio` unit).
+- 98 hand-authored params / 15 confirmed blocks / 11 units — **🟢 in `params.ts`** (Session 30 cont 2: HW-027 added 5 tempo enums sharing TEMPO_DIVISIONS_VALUES; Session 30 cont: HW-019/020/021 — drive EQ + delay/comp universal + comp config; new `ratio` unit).
 - Channel A/B/C/D addressing — **🟢 (Session 08: Amp `pidHigh=0x07D2`,
   float32 index 0..3; other blocks' channel pidHigh unverified)**.
 - Drive Type enum table — **🟡 only `8 → TS808` known**.
