@@ -1,7 +1,7 @@
 {
-  "name": "am4-tone-agent",
+  "name": "mcp-midi-tools",
   "version": "0.1.0",
-  "description": "Talk to Claude, get AM4 tones. Local MCP server for Fractal AM4.",
+  "description": "Talk to Claude, control your MIDI gear. Local MCP server with first-class Fractal AM4 support.",
   "private": true,
   "license": "Apache-2.0",
   "author": "Stephen Staker <stephenstaker@gmail.com>",

@@ -5,7 +5,42 @@
 > hardware tasks (USB captures, round-trip tests, reference dumps) live
 > in **`docs/HARDWARE-TASKS.md`** — check that file alongside this one at
 > session start.
-> Last updated: **2026-04-25** (Session 30 cont 8 — HW-032
+> Last updated: **2026-04-26** (Session 31 — BK-029 project
+> rename to **MCP MIDI Tools** landed. Mechanical pass across
+> code + docs: `package.json` / `package-lock.json` `name` →
+> `mcp-midi-tools`; `NOTICE` title; `README.md` title + lede +
+> all install snippets + git clone URL; `src/server/index.ts`
+> McpServer name + header doc + list_params live-confirmation
+> string + stderr boot banner; `scripts/smoke-server.ts`
+> assertion text; `CLAUDE.md` title + Project System Prompt
+> connector references + Claude Desktop config example;
+> `docs/01-PROJECT-VISION.md` / `03-ARCHITECTURE.md` (incl.
+> repo-tree dir name) / `DECISIONS.md` / `REFERENCES.md` /
+> `MCP-SETUP.md` / `LAUNCH-POST-OUTLINE.md` / `04-BACKLOG.md`
+> titles + their few install/path snippets; 10 script header
+> banners (`probe`, `sniff`, `parse-capture`, `verify-pack`,
+> `write-test`, `extract-lineage`, `scrape-wiki`, `diff-syx`,
+> `decode-float-pack`, `build-type-knobs`); `scripts/ghidra/*`
+> hardcoded paths `C:\dev\am4-tone-agent\` →
+> `C:\dev\mcp-midi-tools\`. Historical session-log entries
+> (SESSIONS.md, HARDWARE-TASKS.md HW-024/HW-012, BK-029
+> narrative quoting the old name) deliberately preserved as
+> accurate records of past state. Preflight green:
+> `mcp-midi-tools@0.1.0` in npm output, tsc clean, 83/83
+> verify-msg, 16/16 verify-pack, 16/16 verify-enum-lookup,
+> 8/8 verify-echo, 83/83 verify-cache-params, smoke-server
+> 22 tools + live-confirmation line + all 14 validation
+> assertions + send_* primitives. Founder still owes: (a)
+> rename local working dir `C:\dev\am4-tone-agent` →
+> `C:\dev\mcp-midi-tools` (safe to do once any open shells /
+> editors / Claude Desktop / Claude Code instances pointing
+> at the old path are restarted); (b) update Claude Desktop
+> config at `%APPDATA%\Claude\claude_desktop_config.json`
+> (server key + path); (c) update any `claude mcp add` Code
+> registrations; (d) GitHub repo rename (lower friction than
+> a fresh-repo push — auto-redirects existing clones);
+> (e) `git remote set-url origin` after the GitHub rename.
+> Pre-existing context — Session 30 cont 8 — HW-032
 > partial-decode landed. Founder captured 5 of 5 expected pcapngs
 > (gate / filter / flanger / enhancer / volpan) plus screenshots
 > for gate / filter / flanger / volpan (enhancer screenshot

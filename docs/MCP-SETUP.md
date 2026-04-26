@@ -1,4 +1,4 @@
-# Connecting the AM4 Tone Agent to Claude Desktop
+# Connecting MCP MIDI Tools to Claude Desktop
 
 This is the one-time setup to wire the local MCP server into Claude
 Desktop so you can control the AM4 from chat.
@@ -51,9 +51,9 @@ Add an entry under `mcpServers`:
 ```json
 {
   "mcpServers": {
-    "am4-tone-agent": {
+    "mcp-midi-tools": {
       "command": "npx",
-      "args": ["tsx", "C:\\dev\\am4-tone-agent\\src\\server\\index.ts"],
+      "args": ["tsx", "C:\\dev\\mcp-midi-tools\\src\\server\\index.ts"],
       "env": {}
     }
   }
@@ -61,14 +61,14 @@ Add an entry under `mcpServers`:
 ```
 
 Adjust the path to wherever the repo lives. If you have other MCP
-servers already, just add the `am4-tone-agent` key alongside them
+servers already, just add the `mcp-midi-tools` key alongside them
 inside `mcpServers`.
 
 Fully quit Claude Desktop (system tray → Quit, not just the window's X
 — especially on the Store build) and relaunch.
 
 **Where the tools show up:** in a new chat, click the **`+` button at
-the bottom of the chat input → "Connectors"**. `am4-tone-agent` should
+the bottom of the chat input → "Connectors"**. `mcp-midi-tools` should
 be listed with its 22 tools (17 AM4-specific plus 5 generic-MIDI
 primitives). `Settings → Developer` also shows per-server
 connection status and log tails. (Older docs mention a "hammer icon" —
@@ -76,7 +76,7 @@ that's the old UI; it's now under the `+` menu.)
 
 **How to invoke:** just ask in plain English. Claude decides to call the
 tool on its own. On the first message of a session it helps to name the
-server explicitly — e.g. *"Using am4-tone-agent, set the amp gain to 7"*
+server explicitly — e.g. *"Using mcp-midi-tools, set the amp gain to 7"*
 — after that you can drop the preamble.
 
 If Connectors is empty or the tools don't fire:
@@ -85,7 +85,7 @@ If Connectors is empty or the tools don't fire:
   stderr and Claude Desktop tees that to disk.
 - Confirm the JSON is valid (trailing commas will kill the parser).
 - Try `npm run server` at a terminal and confirm it prints
-  `AM4 Tone Agent MCP server running on stdio.` before exiting (it
+  `MCP MIDI Tools MCP server running on stdio.` before exiting (it
   will exit immediately because there's no stdin reader — that's
   expected; it proves the module loads).
 - Run `npm run smoke-server` to do a full client-handshake simulation

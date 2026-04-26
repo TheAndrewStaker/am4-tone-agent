@@ -158,7 +158,7 @@ async function main(): Promise<void> {
   // reachable and its tools are callable. Don't let this line regress —
   // if it disappears, Claude Desktop's HW-012 failure mode becomes
   // silently harder to diagnose.
-  if (!text.includes('am4-tone-agent MCP server is live')) {
+  if (!text.includes('mcp-midi-tools MCP server is live')) {
     throw new Error(`list_params missing live-confirmation line (P5-011 item 4):\n${text}`);
   }
   console.log(`✓ list_params call returned catalog (${text.split('\n').length} lines) with live-confirmation line`);

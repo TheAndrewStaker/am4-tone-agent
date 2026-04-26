@@ -1,12 +1,14 @@
-# AM4 Tone Agent
+# MCP MIDI Tools
 
-Talk to Claude. Get Fractal AM4 tones.
+Talk to Claude. Control your MIDI gear.
 
-AM4 Tone Agent is a local [Model Context Protocol](https://modelcontextprotocol.io)
-(MCP) server that lets Claude control a Fractal Audio **AM4** guitar amp
-modeler over USB/MIDI. Ask Claude for a tone in plain English and the AM4
-updates in real time — block layout, amp type, drive, delay, reverb,
-scenes, and preset naming.
+MCP MIDI Tools is a local [Model Context Protocol](https://modelcontextprotocol.io)
+(MCP) server that lets Claude drive USB MIDI hardware in plain English.
+First-class support today for the **Fractal Audio AM4** guitar amp
+modeler — block layout, amp type, drive, delay, reverb, scenes, and
+preset naming all updateable in real time. Five generic-MIDI primitives
+work against any CC/NRPN/SysEx-addressable device, so synths, looper
+pedals, and other gear are reachable from day one.
 
 > **Unaffiliated community tool.** "Fractal Audio", "AM4", and related
 > product names are trademarks of Fractal Audio Systems, Inc. This project
@@ -85,8 +87,8 @@ Clone the repo, install dependencies, and run the hardware smoke test
 once before wiring anything into Claude:
 
 ```bash
-git clone https://github.com/TheAndrewStaker/am4-tone-agent.git
-cd am4-tone-agent
+git clone https://github.com/TheAndrewStaker/mcp-midi-tools.git
+cd mcp-midi-tools
 npm install
 npm run preflight    # typecheck + protocol goldens + MCP smoke test
 npm run write-test   # changes amp gain on the device — confirms MIDI path
@@ -107,9 +109,9 @@ doesn't exist) and add:
 ```json
 {
   "mcpServers": {
-    "am4-tone-agent": {
+    "mcp-midi-tools": {
       "command": "npx",
-      "args": ["tsx", "C:\\path\\to\\am4-tone-agent\\src\\server\\index.ts"],
+      "args": ["tsx", "C:\\path\\to\\mcp-midi-tools\\src\\server\\index.ts"],
       "env": {}
     }
   }
@@ -134,7 +136,7 @@ Full walkthrough with screenshots-worth of detail:
 From your project directory:
 
 ```bash
-claude mcp add am4-tone-agent -- npx tsx C:\path\to\am4-tone-agent\src\server\index.ts
+claude mcp add mcp-midi-tools -- npx tsx C:\path\to\mcp-midi-tools\src\server\index.ts
 ```
 
 Then start `claude` and the tools are available in your session.
@@ -148,7 +150,7 @@ npm run server
 ```
 
 The server speaks MCP over stdio. Point your client at the command
-`npx tsx C:\path\to\am4-tone-agent\src\server\index.ts`.
+`npx tsx C:\path\to\mcp-midi-tools\src\server\index.ts`.
 
 ---
 
@@ -156,7 +158,7 @@ The server speaks MCP over stdio. Point your client at the command
 
 1. Open a new chat in your Claude client. Make sure the AM4 is powered
    on and connected by USB.
-2. Ask: **"Using am4-tone-agent, list the MIDI ports you can see."**
+2. Ask: **"Using mcp-midi-tools, list the MIDI ports you can see."**
    Claude calls `list_midi_ports` and reports a verdict like *"AM4
    detected (in: AM4, out: AM4)"*. If it says the AM4 isn't visible,
    close AM4-Edit and replug the USB cable.

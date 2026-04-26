@@ -14,11 +14,11 @@
 //      is likely the table-iteration / dropdown-populate code.
 //   5. Hex-dump ±128 bytes around each clustered hit.
 //
-// Output: C:\dev\am4-tone-agent\samples\captured\decoded\ghidra-paramtable.txt
+// Output: C:\dev\mcp-midi-tools\samples\captured\decoded\ghidra-paramtable.txt
 //
 // How to run:
 //   1. Ghidra → Window → Script Manager → Manage Script Directories →
-//      add C:\dev\am4-tone-agent\scripts\ghidra if not already present.
+//      add C:\dev\mcp-midi-tools\scripts\ghidra if not already present.
 //   2. Find FindParamTable in the list → Run. (Double-click or green arrow.)
 //   3. When it finishes, send me the output file path.
 //
@@ -50,7 +50,7 @@ import java.util.*;
 public class FindParamTable extends GhidraScript {
 
     private static final String OUTPUT_PATH =
-        "C:\\dev\\am4-tone-agent\\samples\\captured\\decoded\\ghidra-paramtable.txt";
+        "C:\\dev\\mcp-midi-tools\\samples\\captured\\decoded\\ghidra-paramtable.txt";
 
     // Curated needles. Expanded 2026-04-21 for BK-032 — every BG-documented
     // knob label we want to deduce without a hardware capture. Each must

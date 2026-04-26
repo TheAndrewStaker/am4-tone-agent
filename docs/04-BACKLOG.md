@@ -1,4 +1,4 @@
-# Product Backlog — AM4 Tone Agent
+# Product Backlog — MCP MIDI Tools
 
 Priority: P0 = must have for phase, P1 = should have, P2 = nice to have
 
@@ -754,7 +754,7 @@ without installing Node, a C++ toolchain, or editing JSON by hand. See
 - Deliverable: short writeup in `docs/DECISIONS.md` with the chosen tool
 
 ### P5-002 Build the Windows `.exe`
-- Produce a single `am4-tone-agent.exe` that embeds the MCP server + bundled
+- Produce a single `mcp-midi-tools.exe` that embeds the MCP server + bundled
   `node-midi` prebuild
 - Verify it runs on a clean Windows machine with no Node and no Visual Studio
 - ACCEPTANCE: on a fresh VM, downloading + double-clicking the `.exe` starts

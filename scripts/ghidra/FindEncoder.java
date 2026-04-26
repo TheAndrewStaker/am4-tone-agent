@@ -4,7 +4,7 @@
 // and decompile it (plus near-callees) so we can transcribe the float-packing
 // logic to TypeScript.
 //
-// Output: C:\dev\am4-tone-agent\samples\captured\decoded\ghidra-encoder.txt
+// Output: C:\dev\mcp-midi-tools\samples\captured\decoded\ghidra-encoder.txt
 //
 // Strategy (v2):
 //   1. Walk the FULL symbol table (not just named functions) — C++ class
@@ -47,7 +47,7 @@ import java.util.*;
 public class FindEncoder extends GhidraScript {
 
     private static final String OUTPUT_PATH =
-        "C:\\dev\\am4-tone-agent\\samples\\captured\\decoded\\ghidra-encoder.txt";
+        "C:\\dev\\mcp-midi-tools\\samples\\captured\\decoded\\ghidra-encoder.txt";
 
     // C++ mangled-name substrings (case-insensitive) that hint at the encoder.
     private static final String[] SYMBOL_PATTERNS = {

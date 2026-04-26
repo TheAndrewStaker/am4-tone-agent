@@ -4,12 +4,12 @@
 # decompiles it (plus near-callees) so we can transcribe the float-packing
 # logic to TypeScript without an interactive Ghidra session.
 #
-# Output: C:\dev\am4-tone-agent\samples\captured\decoded\ghidra-encoder.txt
+# Output: C:\dev\mcp-midi-tools\samples\captured\decoded\ghidra-encoder.txt
 #
 # Run from inside Ghidra:
 #   1. Window -> Script Manager (or click the green play icon).
 #   2. Click the "Manage Script Directories" toolbar button (looks like a
-#      bullet list with a green plus). Add C:\dev\am4-tone-agent\scripts\ghidra.
+#      bullet list with a green plus). Add C:\dev\mcp-midi-tools\scripts\ghidra.
 #      Close the dialog.
 #   3. Refresh script list (the circular-arrow button).
 #   4. Filter for "find_encoder" -> select it -> click the green Run arrow.
@@ -24,7 +24,7 @@ from ghidra.app.decompiler import DecompInterface
 from ghidra.util.task import ConsoleTaskMonitor
 from ghidra.program.model.symbol import RefType
 
-OUTPUT_PATH = r"C:\dev\am4-tone-agent\samples\captured\decoded\ghidra-encoder.txt"
+OUTPUT_PATH = r"C:\dev\mcp-midi-tools\samples\captured\decoded\ghidra-encoder.txt"
 
 # Strings that should anchor us into the SET_PARAM code path.
 ANCHOR_STRINGS = [

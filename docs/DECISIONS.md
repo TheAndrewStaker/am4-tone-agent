@@ -1,4 +1,4 @@
-# Architectural Decisions — AM4 Tone Agent
+# Architectural Decisions — MCP MIDI Tools
 
 Append-only log of non-obvious choices. Each entry explains what was chosen,
 why, and what was rejected. Future Claude Code sessions should read this

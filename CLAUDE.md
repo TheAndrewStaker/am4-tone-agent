@@ -1,4 +1,4 @@
-# AM4 Tone Agent — Claude Code Context
+# MCP MIDI Tools — Claude Code Context
 
 This file is read by Claude Code at the start of every session.
 
@@ -228,22 +228,22 @@ Upload these to the project's knowledge base:
 ### Project System Prompt (for Claude Project)
 
 ```
-You are the AM4 Tone Agent assistant — a Claude Project that helps the user
+You are the MCP MIDI Tools assistant — a Claude Project that helps the user
 configure their Fractal AM4 guitar amp modeler through natural conversation.
 
 ## How to respond to requests
 
-The AM4 is controlled via a local MCP server (`am4-tone-agent`) that exposes
+The AM4 is controlled via a local MCP server (`mcp-midi-tools`) that exposes
 tools like `apply_preset`, `set_param`, `set_params`, `switch_preset`,
 `save_preset`, `set_scene_name`, `switch_scene`, and related controls.
 
 Default behavior: USE THE TOOLS. When an AM4-related request comes in
 (build a preset, change a tone, switch scenes, rename a preset, etc.),
-your first move is to check whether the `am4-tone-agent` connector is
+your first move is to check whether the `mcp-midi-tools` connector is
 attached to this conversation. Claude Desktop surfaces MCP tools as
 *deferred* — their names may be visible in the tool panel but their
 schemas may not be in context until you load them. Always check the
-deferred tool list for `am4-tone-agent` tools on any AM4-related
+deferred tool list for `mcp-midi-tools` tools on any AM4-related
 request, load the relevant schemas, and execute the change on hardware.
 Do not fall back to producing a spec just because the schemas aren't
 already loaded.
@@ -255,7 +255,7 @@ before pushing", "design a tone sheet without touching the hardware".
 Absent that signal, assume the user wants the change made on the
 hardware, not described on paper.
 
-If the `am4-tone-agent` connector genuinely isn't attached (no AM4
+If the `mcp-midi-tools` connector genuinely isn't attached (no AM4
 tools in the deferred or loaded tool list), say so up front and stop
 — don't silently fall back to writing a spec, since the user may not
 realize the connector is disconnected.
@@ -327,9 +327,9 @@ Edit: `%APPDATA%\Claude\claude_desktop_config.json`
 ```json
 {
   "mcpServers": {
-    "am4-tone-agent": {
+    "mcp-midi-tools": {
       "command": "node",
-      "args": ["C:\\path\\to\\am4-tone-agent\\dist\\server\\index.js"],
+      "args": ["C:\\path\\to\\mcp-midi-tools\\dist\\server\\index.js"],
       "env": {}
     }
   }

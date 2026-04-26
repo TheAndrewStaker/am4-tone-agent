@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 /**
- * AM4 Tone Agent — MCP server (stdio).
+ * MCP MIDI Tools — MCP server (stdio).
  *
  * Exposes Claude Desktop tools that talk to a local Fractal AM4 over
- * USB/MIDI. MVP tools:
+ * USB/MIDI plus generic-MIDI primitives that work against any USB MIDI
+ * device. MVP tools:
  *
  *   - set_param          write one parameter (numeric or enum-by-name),
  *                        verified by waiting for the device's write echo
@@ -20,9 +21,9 @@
  *
  * Claude Desktop wiring — add to `%APPDATA%\Claude\claude_desktop_config.json`:
  *
- *   "am4": {
+ *   "mcp-midi-tools": {
  *     "command": "npx",
- *     "args": ["tsx", "C:\\\\dev\\\\am4-tone-agent\\\\src\\\\server\\\\index.ts"],
+ *     "args": ["tsx", "C:\\\\dev\\\\mcp-midi-tools\\\\src\\\\server\\\\index.ts"],
  *     "env": {}
  *   }
  */
@@ -478,7 +479,7 @@ function formatLineageRecord(rec: LineageRecord, includeQuotes: boolean, maxQuot
 // -- Server setup -----------------------------------------------------------
 
 const server = new McpServer({
-  name: 'am4-tone-agent',
+  name: 'mcp-midi-tools',
   version: '0.1.0',
 });
 
@@ -573,7 +574,7 @@ server.registerTool('set_param', {
 server.registerTool('list_params', {
   description: [
     'List every parameter the server can write. Use this to discover',
-    'capabilities — or as a quick sanity check that the am4-tone-agent MCP',
+    'capabilities — or as a quick sanity check that the mcp-midi-tools MCP',
     'connector is live and its tools are callable (the response opens with',
     'a confirmation line). If you were about to tell the user "I don\'t',
     'have the connector in this session" without having actually tried a',
@@ -594,7 +595,7 @@ server.registerTool('list_params', {
   // schemas hadn't been loaded yet. Getting this response proves the
   // connector is live.
   const liveConfirmation =
-    'am4-tone-agent MCP server is live and reachable. All AM4 tools ' +
+    'mcp-midi-tools MCP server is live and reachable. All AM4 tools ' +
     '(apply_preset, set_param, set_params, set_block_type, set_block_bypass, ' +
     'switch_preset, switch_scene, save_preset, save_to_location, ' +
     'set_preset_name, set_scene_name, reconnect_midi) are available to ' +
@@ -2345,7 +2346,7 @@ async function main(): Promise<void> {
   // The port enumeration mirrors what list_midi_ports would return at
   // this moment; if the user reports "AM4 not connected" later, the
   // startup banner captures whatever state the server started with.
-  console.error('AM4 Tone Agent MCP server running on stdio.');
+  console.error('MCP MIDI Tools MCP server running on stdio.');
   try {
     const { inputs, outputs } = listMidiPorts();
     const am4In = inputs.find((p) => p.looksLikeAM4);
