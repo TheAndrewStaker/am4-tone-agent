@@ -67,6 +67,14 @@ import {
   type MidiConnection,
   toHex,
 } from '../protocol/midi.js';
+import {
+  buildControlChange,
+  buildNoteOff,
+  buildNoteOn,
+  buildNRPN,
+  buildProgramChange,
+  validateSysEx,
+} from '../protocol/generic/midiMessages.js';
 
 /**
  * Max time we wait for the device to echo a WRITE after we send it. The
@@ -1913,6 +1921,254 @@ server.registerTool('reconnect_midi', {
             '  - another app holds the MIDI port exclusively',
       }],
     };
+  }
+});
+
+// -- Generic MIDI primitives (BK-030 Session B) -----------------------------
+//
+// These tools are device-agnostic. They build standard MIDI messages from
+// caller-supplied parameters and emit them on a port resolved by name
+// substring. Designed for devices with published CC / NRPN charts (e.g.
+// the Hydrasynth) where Claude can drive the device usefully without any
+// device-specific protocol code.
+//
+// Convention reminders:
+//   - Channels are presented as 1..16 (musician convention) at the tool
+//     boundary; the wire uses 0..15. The conversion happens here, once.
+//   - send_* primitives don't require an ack to count as success — most
+//     non-Fractal MIDI devices don't echo writes, so the stale-handle
+//     counter that AM4 tools use does not apply. We send and return.
+//   - `port` is required: these tools target a specific device by name,
+//     intentionally distinct from the AM4-default convenience of the
+//     AM4-specific tools.
+
+const channelArg = z.number().int().min(1).max(16);
+
+function userChannelToWire(channel: number): number {
+  return channel - 1;
+}
+
+/**
+ * Catch-all error reporter for the send_* tools. Validation errors from
+ * the message builders surface as structured tool results so Claude can
+ * see the rejection and recover, rather than the server returning a
+ * 500-equivalent.
+ */
+function sendErrorResponse(
+  toolName: string,
+  port: string,
+  err: unknown,
+): { content: Array<{ type: 'text'; text: string }> } {
+  const msg = err instanceof Error ? err.message : String(err);
+  return {
+    content: [{
+      type: 'text',
+      text: `${toolName} failed for port "${port}": ${msg}`,
+    }],
+  };
+}
+
+server.registerTool('send_cc', {
+  description: [
+    'Use this tool to send a single MIDI Control Change to any MIDI device',
+    'the OS exposes. Do not produce a written spec instead of calling this',
+    'tool unless the user explicitly asks for a dry run.',
+    'Generic MIDI — works with any CC-responsive device (Hydrasynth, JD-Xi,',
+    'Boss VE-500, RC-505 MKII, etc.). The AM4 has its own dedicated tools',
+    '(set_param, set_params, apply_preset) which understand block/parameter',
+    'semantics — prefer those when targeting the AM4. `send_cc` is for',
+    'devices without a dedicated wrapper.',
+    'Channel is 1..16 (musician convention). Controller 0..127, value 0..127.',
+  ].join(' '),
+  inputSchema: {
+    port: z.string().describe(
+      'Case-insensitive name-substring identifying the target MIDI port (e.g. "hydra", "jd-xi", "ve-500").',
+    ),
+    channel: channelArg.describe('MIDI channel 1..16 (musician-friendly; converted to 0..15 internally).'),
+    controller: z.number().int().min(0).max(127).describe('CC number 0..127.'),
+    value: z.number().int().min(0).max(127).describe('CC value 0..127.'),
+  },
+}, async ({ port, channel, controller, value }) => {
+  try {
+    const bytes = buildControlChange(userChannelToWire(channel), controller, value);
+    const conn = ensureConnection(port);
+    conn.send(bytes);
+    return {
+      content: [{
+        type: 'text',
+        text: `Sent CC ${controller} = ${value} on channel ${channel} to "${port}". Bytes: ${toHex(bytes)}.`,
+      }],
+    };
+  } catch (err) {
+    return sendErrorResponse('send_cc', port, err);
+  }
+});
+
+server.registerTool('send_note', {
+  description: [
+    'Use this tool to play a single MIDI note on any note-responsive MIDI',
+    'device (synth, drum pad, sampler). Do not produce a written spec instead',
+    'of calling this tool unless the user explicitly asks for a dry run.',
+    'Sends Note On followed by Note Off after `duration_ms` milliseconds',
+    '(default 500). Channel 1..16, note 0..127 (60 = middle C), velocity',
+    '0..127. The tool blocks until the Note Off is sent; durations longer',
+    'than 5000 ms are rejected so a stuck note is bounded.',
+  ].join(' '),
+  inputSchema: {
+    port: z.string().describe('Case-insensitive name-substring identifying the target MIDI port.'),
+    channel: channelArg,
+    note: z.number().int().min(0).max(127).describe('MIDI note number 0..127 (60 = middle C).'),
+    velocity: z.number().int().min(0).max(127).describe('Note-On velocity 0..127.'),
+    duration_ms: z.number().int().min(1).max(5000).optional().describe(
+      'How long to hold the note before Note Off, in milliseconds. Default 500. Capped at 5000.',
+    ),
+  },
+}, async ({ port, channel, note, velocity, duration_ms }) => {
+  const duration = duration_ms ?? 500;
+  try {
+    const wireChannel = userChannelToWire(channel);
+    const onBytes = buildNoteOn(wireChannel, note, velocity);
+    const offBytes = buildNoteOff(wireChannel, note, 0);
+    const conn = ensureConnection(port);
+    conn.send(onBytes);
+    await new Promise<void>((resolve) => setTimeout(resolve, duration));
+    conn.send(offBytes);
+    return {
+      content: [{
+        type: 'text',
+        text: `Played note ${note} (vel ${velocity}) on channel ${channel} to "${port}" for ${duration}ms.`,
+      }],
+    };
+  } catch (err) {
+    return sendErrorResponse('send_note', port, err);
+  }
+});
+
+server.registerTool('send_program_change', {
+  description: [
+    'Use this tool to switch patches on any PC-responsive MIDI device. Do',
+    'not produce a written spec instead of calling this tool unless the user',
+    'explicitly asks for a dry run.',
+    'Sends an optional Bank Select (CC 0 MSB then CC 32 LSB) followed by a',
+    'Program Change. Channel 1..16, program 0..127, banks 0..127. Bank',
+    'arguments are optional and emitted only when supplied — many devices',
+    'don\'t use banks.',
+  ].join(' '),
+  inputSchema: {
+    port: z.string().describe('Case-insensitive name-substring identifying the target MIDI port.'),
+    channel: channelArg,
+    program: z.number().int().min(0).max(127).describe('Program number 0..127.'),
+    bank_msb: z.number().int().min(0).max(127).optional().describe(
+      'Optional Bank Select MSB (CC 0). Sent before the PC if supplied.',
+    ),
+    bank_lsb: z.number().int().min(0).max(127).optional().describe(
+      'Optional Bank Select LSB (CC 32). Sent before the PC if supplied.',
+    ),
+  },
+}, async ({ port, channel, program, bank_msb, bank_lsb }) => {
+  try {
+    const wireChannel = userChannelToWire(channel);
+    const conn = ensureConnection(port);
+    const sent: string[] = [];
+    if (bank_msb !== undefined) {
+      const bytes = buildControlChange(wireChannel, 0, bank_msb);
+      conn.send(bytes);
+      sent.push(`Bank MSB ${bank_msb} (${toHex(bytes)})`);
+    }
+    if (bank_lsb !== undefined) {
+      const bytes = buildControlChange(wireChannel, 32, bank_lsb);
+      conn.send(bytes);
+      sent.push(`Bank LSB ${bank_lsb} (${toHex(bytes)})`);
+    }
+    const pcBytes = buildProgramChange(wireChannel, program);
+    conn.send(pcBytes);
+    sent.push(`Program Change ${program} (${toHex(pcBytes)})`);
+    return {
+      content: [{
+        type: 'text',
+        text: `Sent on channel ${channel} to "${port}": ${sent.join(', ')}.`,
+      }],
+    };
+  } catch (err) {
+    return sendErrorResponse('send_program_change', port, err);
+  }
+});
+
+server.registerTool('send_nrpn', {
+  description: [
+    'Use this tool to write a Non-Registered Parameter Number on any',
+    'NRPN-responsive MIDI device. Do not produce a written spec instead of',
+    'calling this tool unless the user explicitly asks for a dry run.',
+    'Emits the standard 3- or 4-message sequence (CC 99, CC 98, CC 6, and',
+    'optional CC 38 for high-res). Channel 1..16, MSB/LSB 0..127. `value`',
+    'is 0..127 in 7-bit mode (default) or 0..16383 when `high_res` is true,',
+    'unlocking the higher-resolution view of the same parameter on devices',
+    'that support it (e.g. the ASM Hydrasynth in NRPN mode).',
+  ].join(' '),
+  inputSchema: {
+    port: z.string().describe('Case-insensitive name-substring identifying the target MIDI port.'),
+    channel: channelArg,
+    parameter_msb: z.number().int().min(0).max(127).describe('NRPN parameter MSB (CC 99 data).'),
+    parameter_lsb: z.number().int().min(0).max(127).describe('NRPN parameter LSB (CC 98 data).'),
+    value: z.number().int().min(0).max(16383).describe(
+      'Parameter value. 0..127 in 7-bit mode (default), 0..16383 when high_res is true.',
+    ),
+    high_res: z.boolean().optional().describe(
+      'When true, emit a 14-bit data sequence (CC 6 MSB + CC 38 LSB). Default false.',
+    ),
+  },
+}, async ({ port, channel, parameter_msb, parameter_lsb, value, high_res }) => {
+  try {
+    const wireChannel = userChannelToWire(channel);
+    const bytes = buildNRPN(wireChannel, parameter_msb, parameter_lsb, value, high_res ?? false);
+    const conn = ensureConnection(port);
+    conn.send(bytes);
+    return {
+      content: [{
+        type: 'text',
+        text:
+          `Sent NRPN (${parameter_msb}, ${parameter_lsb}) = ${value}` +
+          (high_res ? ' [14-bit]' : ' [7-bit]') +
+          ` on channel ${channel} to "${port}". Bytes: ${toHex(bytes)}.`,
+      }],
+    };
+  } catch (err) {
+    return sendErrorResponse('send_nrpn', port, err);
+  }
+});
+
+server.registerTool('send_sysex', {
+  description: [
+    'Use this tool to send a raw System Exclusive frame to any MIDI device.',
+    'Do not produce a written spec instead of calling this tool unless the',
+    'user explicitly asks for a dry run.',
+    'Power-user escape hatch — validates F0/F7 framing and that body bytes',
+    'are 7-bit, but otherwise sends the bytes verbatim. Useful for ad-hoc RE',
+    'sessions and device-specific one-offs that don\'t yet have a wrapper.',
+    'WARNING: malformed SysEx can put devices into unexpected states.',
+    'Prefer device-specific tools when they exist (the AM4 has set_param,',
+    'apply_preset, etc.). Use send_sysex only when no wrapper covers the',
+    'frame you need.',
+  ].join(' '),
+  inputSchema: {
+    port: z.string().describe('Case-insensitive name-substring identifying the target MIDI port.'),
+    bytes: z.array(z.number().int().min(0).max(255)).min(2).describe(
+      'Full SysEx frame including F0 / F7 framing. Each byte 0..255 (the validator further restricts body bytes to 0..127).',
+    ),
+  },
+}, async ({ port, bytes }) => {
+  try {
+    const validated = validateSysEx(bytes);
+    const conn = ensureConnection(port);
+    conn.send(validated);
+    return {
+      content: [{
+        type: 'text',
+        text: `Sent SysEx (${validated.length}B) to "${port}": ${toHex(validated)}.`,
+      }],
+    };
+  } catch (err) {
+    return sendErrorResponse('send_sysex', port, err);
   }
 });
 

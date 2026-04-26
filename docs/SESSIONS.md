@@ -6,6 +6,79 @@ file is the chronological trail that reference is built from.
 
 ---
 
+## 2026-04-25 — Session 30 cont 6 — BK-030 Session B shipped (5 generic-MIDI primitive tools)
+
+No hardware. Claude-side delivery on top of Session A's connection
+registry. Tool count 17 → 22.
+
+**Five new MCP tools** registered in `src/server/index.ts`:
+
+- `send_cc(port, channel, controller, value)` — Control Change.
+  Channels presented as 1..16 (musician convention) and converted to
+  0..15 internally; controller and value are 7-bit.
+- `send_note(port, channel, note, velocity, duration_ms?)` — Note On
+  followed by Note Off after `duration_ms` (default 500, capped 5000).
+  Tool blocks until the Note Off is sent.
+- `send_program_change(port, channel, program, bank_msb?, bank_lsb?)`
+  — Program Change with optional bank-select prefix (CC 0 / CC 32).
+  Bank arguments are emitted only when supplied.
+- `send_nrpn(port, channel, parameter_msb, parameter_lsb, value,
+  high_res?)` — Standard 3- or 4-message NRPN sequence (CC 99, 98, 6,
+  optional CC 38 for 14-bit). `value` accepts 0..127 in 7-bit mode and
+  0..16383 in high-res. Doesn't emit the optional NRPN-Null reset to
+  keep back-to-back writes fast.
+- `send_sysex(port, bytes[])` — Raw SysEx escape hatch. Validates F0/F7
+  framing and that body bytes are 7-bit; otherwise sends verbatim.
+
+**Pure builders** in `src/protocol/generic/midiMessages.ts`:
+`buildControlChange`, `buildNoteOn`, `buildNoteOff`, `buildProgramChange`,
+`buildBankSelectMSB`, `buildBankSelectLSB`, `buildNRPN`, `validateSysEx`.
+This file is the seed of the future `midi-core` package (BK-012 split),
+deliberately AM4-free.
+
+**Convention notes:**
+
+- The `port` argument is **required** on every send_* tool — these are
+  for non-AM4 devices and the AM4 has its own dedicated wrappers.
+  Defaulting to AM4 would be misleading.
+- send_* primitives don't participate in the AM4 stale-handle counter —
+  most non-Fractal MIDI devices don't echo writes, so "missing ack →
+  warn user" doesn't apply. Tools send and return.
+- All builder functions throw on invalid 7-bit / 14-bit / channel
+  values; the tool-handler catches and returns a structured error
+  rather than letting the SDK report a generic 500.
+
+**8 new smoke-server assertions** (`scripts/smoke-server.ts`):
+
+- send_cc / send_program_change / send_nrpn happy paths against a
+  bogus port name — proves message-builder validation passes and the
+  connection layer surfaces the right port-not-found error.
+- send_cc with channel 17 — proves Zod rejects above 1..16.
+- send_sysex with missing F0 / missing F7 / body byte > 127 — proves
+  validateSysEx catches each.
+- send_note with duration_ms > 5000 — proves the schema cap.
+
+**Test discipline:**
+
+- `tsc --noEmit` clean.
+- 75/75 verify-msg, 16/16 verify-pack, 16/16 verify-transpile, 8/8
+  verify-echo, 79/79 verify-cache-params (all unchanged).
+- smoke-server: 22/22 tools registered, every assertion green.
+
+**Files updated:** `src/protocol/generic/midiMessages.ts` (new),
+`src/server/index.ts`, `scripts/smoke-server.ts`, `docs/STATE.md`,
+`docs/04-BACKLOG.md`, `docs/SESSIONS.md`.
+
+**What's not in this session.** Session C (docs + README example pass)
+still pending. No hardware impact — these tools are validation-tested
+without a connected device, and any device-specific verification (e.g.
+"send_cc CC 74 lands on Hydrasynth filter cutoff") would happen during
+BK-031 once the founder has the Hydrasynth at hand. HW-033 / HW-030 /
+HW-032 / HW-016 / HW-029 / HW-028 / HW-026 / HW-022 / HW-023 / HW-017 /
+HW-014 / HW-024 statuses unchanged.
+
+---
+
 ## 2026-04-25 — Session 30 cont 5 — BK-030 Session A shipped (connection registry refactor)
 
 No hardware. Claude-side refactor only — preserves AM4 behaviour bit-for-bit

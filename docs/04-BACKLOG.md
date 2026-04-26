@@ -2291,9 +2291,9 @@ Skip until explicit user demand materializes.
     `save_to_location`, etc.) — tool names are device-neutral
     already.
 
-### BK-030 General-MIDI primitive tools (earns the "MCP MIDI Tools" name) — 🟡 Session A shipped (Session 30 cont 5)
+### BK-030 General-MIDI primitive tools (earns the "MCP MIDI Tools" name) — 🟡 Sessions A + B shipped (Session 30 cont 5–6)
 
-**Status:** Session A (connection registry + generalized list_midi_ports / reconnect_midi) shipped Session 30 cont 5. Sessions B (send primitives) and C (docs) still pending.
+**Status:** Sessions A (connection registry) and B (five send_* primitives) shipped Session 30 cont 5–6. Session C (docs + README quick-start) still pending. Tool count 17 → 22 (`send_cc`, `send_note`, `send_program_change`, `send_nrpn`, `send_sysex`). Pure builder functions live in `src/protocol/generic/midiMessages.ts` — the future `midi-core` package boundary.
 
 - **Context.** The current 16 tools are almost all AM4-specific
   wrappers. `list_midi_ports` enumeration is already generic (it
@@ -2377,10 +2377,17 @@ Skip until explicit user demand materializes.
      Tool count unchanged (17). Preflight green; smoke covers the
      new pattern arg.
   2. **Session B — Send primitives (cc, note, program_change,
-     nrpn, sysex).** Five new MCP tools. Zod-validate every
-     input. Smoke-server coverage for each (happy path +
-     out-of-range rejection). No hardware needed — validation-
-     layer assertions only. Tool count: 16 → 21.
+     nrpn, sysex). ✅ Shipped Session 30 cont 6.** Five new MCP
+     tools registered in `src/server/index.ts`; pure message
+     builders live in `src/protocol/generic/midiMessages.ts`.
+     Tool count 17 → 22 (one above the original spec target
+     because the AM4 server also has `lookup_lineage` from a
+     later session). Channel convention: 1..16 at the tool
+     boundary, 0..15 internally. send_* primitives bypass the
+     AM4 stale-handle counter — most non-Fractal devices don't
+     echo writes. 8 new smoke assertions covering happy paths
+     against a bogus port (proves wiring) plus Zod / framing /
+     range rejections.
   3. **Session C — Docs + examples.** Tool descriptions
      explicit about MIDI semantics (channel is 0-indexed
      internally but the tool takes 1-indexed to match musician

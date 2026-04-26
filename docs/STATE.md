@@ -5,7 +5,29 @@
 > hardware tasks (USB captures, round-trip tests, reference dumps) live
 > in **`docs/HARDWARE-TASKS.md`** — check that file alongside this one at
 > session start.
-> Last updated: **2026-04-25** (Session 30 cont 5 — BK-030
+> Last updated: **2026-04-25** (Session 30 cont 6 — BK-030
+> Session B shipped Claude-side. **Five new generic-MIDI
+> primitive tools** registered in `src/server/index.ts`:
+> `send_cc`, `send_note` (Note On + delayed Note Off, default
+> 500 ms, capped 5000 ms), `send_program_change` (with optional
+> Bank Select MSB/LSB prefix), `send_nrpn` (3- or 4-message
+> sequence; 7-bit or 14-bit values), `send_sysex` (raw frame
+> with F0/F7 framing validation). Tool count 17 → 22. Pure
+> message builders live in `src/protocol/generic/midiMessages.ts`
+> — deliberately AM4-free, designed as the seed of the future
+> `midi-core` package per BK-012. Channel convention: 1..16 at
+> the tool boundary (musician), 0..15 internally; conversion
+> happens once at the tool layer. send_* primitives bypass
+> the AM4 stale-handle counter (most non-Fractal devices don't
+> echo writes). 8 new smoke assertions covering happy paths
+> against a bogus port name (proves Zod + builder validation
+> pass and the connection registry surfaces port-not-found
+> correctly), Zod channel/duration rejection, and three
+> validateSysEx framing/body-byte rejections. Preflight green:
+> tsc clean, all goldens, smoke-server 22/22 tools + 8 new
+> assertions. Only BK-030 Session C (docs + README quick-start
+> + tool-description audit) remains. Pre-existing context —
+> Session 30 cont 5 — BK-030
 > Session A shipped Claude-side. Connection layer in
 > `src/protocol/midi.ts` + `src/server/index.ts` refactored from
 > single-handle to a port-keyed registry (`connections: Map<string,
@@ -409,15 +431,19 @@ float32. One open question remains before the IR can cover full presets:
 
 ## The single next action
 
-**Most-likely next session: BK-030 Session B (send_* primitive
-tools, no hardware) OR HW-032 + HW-016 at the device.**
-BK-030 Session A landed Session 30 cont 5 — the connection
-registry is in place and the AM4 path is unchanged. Session B
-adds five generic-MIDI tools (`send_cc` / `send_note` /
-`send_program_change` / `send_nrpn` / `send_sysex`) on top of
-the registry; tool count grows 17 → 22. No hardware needed for
-Session B (validation-layer assertions only). Alternatively,
-the founder can run HW-032 + HW-016 at the device — see below.
+**Most-likely next session: BK-030 Session C (docs + README
+quick-start + tool-description audit, no hardware) OR HW-032 +
+HW-016 at the device.**
+BK-030 Sessions A + B landed Session 30 cont 5–6 — the
+connection registry and five generic-MIDI tools are live (tool
+count 22). Session C wraps BK-030 by writing a README quick-start
+section with one example per send_* primitive against a non-AM4
+device (so readers see the generality immediately) and by
+auditing the new tools' descriptions for the same call-to-action
+language P5-011 audit applied to the AM4 tools. Once Session C
+ships, BK-030 closes and BK-029 (project rename to **MCP MIDI
+Tools**) can move forward. Alternatively, the founder can run
+HW-032 + HW-016 at the device — see below.
 
 **HW-033 ✅ closed Session 30 cont 4 (Claude-side, no hardware).**
 `scripts/extract-lineage.ts` now extracts wiki "Controls:" prose

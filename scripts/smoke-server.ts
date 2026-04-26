@@ -96,6 +96,11 @@ async function main(): Promise<void> {
     'reconnect_midi',
     'save_preset',
     'save_to_location',
+    'send_cc',
+    'send_note',
+    'send_nrpn',
+    'send_program_change',
+    'send_sysex',
     'set_block_bypass',
     'set_block_type',
     'set_param',
@@ -362,6 +367,105 @@ async function main(): Promise<void> {
     'no bypass state',
   );
   console.log(`✓ apply_preset rejects "none" in scenes[].bypass`);
+
+  // BK-030 Session B — generic-MIDI primitives. These tools fail in two
+  // discrete places: zod input-schema validation (channel out of range,
+  // missing required arg) which surfaces as a JSON-RPC error; and the
+  // tool body's port-resolution / message-builder validation, which
+  // surfaces as a structured tool-result with isError-equivalent text.
+  // The bogus port name below is long enough that it can't accidentally
+  // match a real MIDI device on the test machine.
+  const BOGUS_PORT = 'definitely-not-a-real-midi-port-xyz';
+
+  const assertSendError = async (
+    label: string,
+    toolName: string,
+    args: unknown,
+    expectedFragment: string,
+  ): Promise<void> => {
+    const resp = await request('tools/call', { name: toolName, arguments: args });
+    const result = resp.result as
+      | { isError?: boolean; content: { type: string; text: string }[] }
+      | undefined;
+    const errMessage = resp.error?.message ?? result?.content?.[0]?.text ?? '';
+    if (!errMessage.includes(expectedFragment)) {
+      throw new Error(
+        `${toolName} ${label}: expected error to include "${expectedFragment}", got:\n${errMessage}`,
+      );
+    }
+  };
+
+  // Happy paths — port doesn't exist, so the message builder validates
+  // (proving wiring is correct) and the connection layer surfaces a
+  // port-not-found error (proving the connection registry took the call).
+  await assertSendError(
+    'happy path against missing port',
+    'send_cc',
+    { port: BOGUS_PORT, channel: 1, controller: 7, value: 100 },
+    'No MIDI port matching',
+  );
+  console.log(`✓ send_cc happy path validates input + surfaces port-not-found`);
+
+  await assertSendError(
+    'happy path against missing port',
+    'send_program_change',
+    { port: BOGUS_PORT, channel: 1, program: 5 },
+    'No MIDI port matching',
+  );
+  console.log(`✓ send_program_change happy path validates input + surfaces port-not-found`);
+
+  await assertSendError(
+    'happy path (high-res) against missing port',
+    'send_nrpn',
+    { port: BOGUS_PORT, channel: 1, parameter_msb: 0, parameter_lsb: 74, value: 8192, high_res: true },
+    'No MIDI port matching',
+  );
+  console.log(`✓ send_nrpn happy path validates 14-bit value + surfaces port-not-found`);
+
+  // Schema rejection (zod-level) — channel above 16 fails before the body
+  // runs, so the wire-channel conversion never happens.
+  await assertSendError(
+    'channel out of range',
+    'send_cc',
+    { port: BOGUS_PORT, channel: 17, controller: 7, value: 100 },
+    'channel',
+  );
+  console.log(`✓ send_cc rejects channel 17 (above 1..16)`);
+
+  // Body-level rejection — F0/F7 framing is checked by validateSysEx,
+  // which throws a clear message. The zod schema doesn't enforce framing.
+  await assertSendError(
+    'sysex missing F0',
+    'send_sysex',
+    { port: BOGUS_PORT, bytes: [0x12, 0x34, 0xF7] },
+    'must start with F0',
+  );
+  console.log(`✓ send_sysex rejects missing F0 framing`);
+
+  await assertSendError(
+    'sysex missing F7',
+    'send_sysex',
+    { port: BOGUS_PORT, bytes: [0xF0, 0x12, 0x34] },
+    'must end with F7',
+  );
+  console.log(`✓ send_sysex rejects missing F7 framing`);
+
+  await assertSendError(
+    'sysex body byte > 127',
+    'send_sysex',
+    { port: BOGUS_PORT, bytes: [0xF0, 0x80, 0xF7] },
+    'must be 0..127',
+  );
+  console.log(`✓ send_sysex rejects body byte > 127`);
+
+  // Note duration cap — schema rejects > 5000.
+  await assertSendError(
+    'note duration too long',
+    'send_note',
+    { port: BOGUS_PORT, channel: 1, note: 60, velocity: 100, duration_ms: 6000 },
+    'duration_ms',
+  );
+  console.log(`✓ send_note rejects duration_ms > 5000`);
 
   child.stdin.end();
   await once(child, 'exit');
