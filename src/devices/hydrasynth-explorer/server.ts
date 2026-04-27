@@ -185,56 +185,52 @@ const server = new McpServer({
 
 server.registerTool('hydra_set_param', {
   description: [
-    'Use this tool to set any synthesis parameter on the user\'s ASM Hydrasynth Explorer.',
+    'Use this tool to set a SYSTEM CC on the user\'s ASM Hydrasynth Explorer — these are',
+    'the always-on MIDI controls that work regardless of the device\'s Param TX/RX setting:',
+    'Master Volume (system.master_volume), Modulation Wheel (system.modulation_wheel),',
+    'Sustain Pedal (system.sustain_pedal), Expression Pedal (system.expression_pedal),',
+    'Bank Select MSB/LSB (system.bank_select_msb / .bank_select_lsb), All Notes Off',
+    '(system.all_notes_off). 7 parameters total.',
+    '',
+    'For ANY OTHER engine parameter (oscillators, filters, envelopes, mixer, FX, etc.)',
+    'use hydra_set_engine_param (single) or hydra_set_engine_params (batch) — those use',
+    'NRPN, which is the device\'s standard mode for engine control and covers 1175',
+    'parameters including the wave/filter/FX type selectors that aren\'t on CCs at all.',
+    '',
     'Do not produce a written spec instead of calling this tool unless the user explicitly',
-    'asks for a dry run (e.g. "without touching the hardware", "what would the values look like").',
+    'asks for a dry run.',
     '',
-    'The Hydrasynth\'s 117 charted parameters are addressed by canonical id —',
-    'e.g. "filter1.cutoff", "env1.attack", "reverb.dry_wet", "system.master_volume".',
-    'Call hydra_list_params first if unsure which ids exist.',
-    '',
-    'Values are 0..127 (raw MIDI CC range). For most parameters this maps linearly to',
-    'the on-device 0..128 display range (the manual states many engine params display',
-    '0.0..128.0). The mapping is parameter-specific — consult the Hydrasynth Explorer',
-    'Owner\'s Manual for exact per-param scaling once it matters.',
-    '',
-    'IMPORTANT — DEVICE MODE PRECONDITION: parameters in the "engine" category',
-    '(everything except System Bank/Mod/Volume/Expression/Sustain/All-Notes-Off) only',
-    'respond when the device\'s "Param TX/RX" setting is set to "CC" on MIDI: Page 10',
-    '(System Setup). If a write produces no audible change, the most likely cause is',
-    'Param TX/RX set to NRPN or Off. The system-category params always respond.',
-    '',
-    'No wire-ack is expected — consumer MIDI synths don\'t echo CCs. Confirmation is',
-    'audible / observable on the device only.',
+    'Values are 0..127 (raw MIDI CC range). No wire-ack is expected.',
   ].join('\n'),
   inputSchema: {
     id: z.string().describe(
-      'Canonical parameter id, e.g. "filter1.cutoff", "env1.attack", "reverb.dry_wet". Call hydra_list_params for the full catalog.',
+      'System parameter id — one of: system.master_volume, system.modulation_wheel, system.sustain_pedal, system.expression_pedal, system.bank_select_msb, system.bank_select_lsb, system.all_notes_off.',
     ),
     value: z.number().int().min(0).max(127).describe(
-      'Raw MIDI CC value 0..127. The on-device display range is parameter-specific (most engine params show 0.0..128.0).',
+      'Raw MIDI CC value 0..127.',
     ),
   },
 }, async ({ id, value }) => {
   const param = HYDRASYNTH_PARAMS_BY_ID.get(id);
   if (!param) {
     const suggestions = HYDRASYNTH_PARAMS
-      .map((p) => p.id)
-      .filter((pid) => pid.includes(id) || id.includes(pid.split('.')[0] ?? ''))
-      .slice(0, 8);
+      .filter((p) => p.category === 'system')
+      .map((p) => p.id);
     throw new Error(
-      `Unknown parameter id "${id}". ${suggestions.length > 0 ? `Closest matches: ${suggestions.join(', ')}.` : 'Call hydra_list_params for the full catalog.'}`,
+      `Unknown parameter id "${id}". hydra_set_param only handles System CCs. Available ids: ${suggestions.join(', ')}. For engine parameters use hydra_set_engine_param.`,
+    );
+  }
+  if (param.category !== 'system') {
+    throw new Error(
+      `"${id}" is an engine parameter, not a System CC. Use hydra_set_engine_param("${id.replace('.', '')}", value) instead — it sends NRPN, which is what the device listens on for engine control. (Call hydra_list_params with category="nrpn" for the NRPN parameter catalog.)`,
     );
   }
   const conn = ensureMidi();
   conn.send(ccBytes(DEFAULT_CHANNEL, param.cc, value));
-  const categoryNote = param.category === 'engine'
-    ? ' Reminder: requires Param TX/RX = CC on the device.'
-    : ' (System CC — always responds, regardless of Param TX/RX setting.)';
   return {
     content: [{
       type: 'text',
-      text: `Sent CC ${param.cc} = ${value} (${param.module} → ${param.parameter}).${categoryNote}`,
+      text: `Sent CC ${param.cc} = ${value} (${param.module} → ${param.parameter}). System CC — always responds.`,
     }],
   };
 });
