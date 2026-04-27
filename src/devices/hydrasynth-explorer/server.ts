@@ -80,21 +80,26 @@ function ccBytes(channel: number, cc: number, value: number): number[] {
 }
 
 /**
- * Build the 4-CC NRPN write sequence the Hydrasynth listens for.
+ * Send the 4-CC NRPN write sequence the Hydrasynth listens for.
  * Order is mandatory: address-MSB → address-LSB → data-MSB → data-LSB.
  * `value` is the 14-bit data: MSB = (value >> 7) & 0x7F, LSB = value & 0x7F.
  * Most Hydrasynth params use only the LSB byte (data fits in 0..127); a few
  * (osc cents, wavescan, mod-matrix amounts) use the full 14 bits.
+ *
+ * Each CC must be sent as its own `sendMessage()` call — node-midi's
+ * `sendMessage` expects a single MIDI message per invocation. Bundling
+ * all 12 bytes into one call (initial implementation) made the device
+ * receive the first 3 bytes as a CC and treat the rest as a runt /
+ * malformed message; only the NRPN address-MSB landed and the device
+ * did nothing.
  */
-function nrpnBytes(channel: number, msb: number, lsb: number, value: number): number[] {
+function sendNrpn(conn: HydrasynthConnection, channel: number, msb: number, lsb: number, value: number): void {
   const dataMsb = (value >> 7) & 0x7F;
   const dataLsb = value & 0x7F;
-  return [
-    ...ccBytes(channel, 99, msb),    // CC 99 — NRPN address MSB
-    ...ccBytes(channel, 98, lsb),    // CC 98 — NRPN address LSB
-    ...ccBytes(channel, 6, dataMsb), // CC  6 — Data Entry MSB
-    ...ccBytes(channel, 38, dataLsb),// CC 38 — Data Entry LSB
-  ];
+  conn.send(ccBytes(channel, 99, msb));    // CC 99 — NRPN address MSB
+  conn.send(ccBytes(channel, 98, lsb));    // CC 98 — NRPN address LSB
+  conn.send(ccBytes(channel, 6, dataMsb)); // CC  6 — Data Entry MSB
+  conn.send(ccBytes(channel, 38, dataLsb));// CC 38 — Data Entry LSB
 }
 
 function noteOnBytes(channel: number, note: number, velocity: number): number[] {
@@ -392,7 +397,7 @@ server.registerTool('hydra_set_engine_param', {
     );
   }
   const conn = ensureMidi();
-  conn.send(nrpnBytes(DEFAULT_CHANNEL, entry.msb, entry.lsb, value));
+  sendNrpn(conn, DEFAULT_CHANNEL, entry.msb, entry.lsb, value);
   const ccLine = entry.cc !== undefined
     ? ` (also on CC ${entry.cc} for 7-bit access.)`
     : '';
