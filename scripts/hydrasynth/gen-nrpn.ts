@@ -92,6 +92,17 @@ interface NrpnRow {
   msb: number;
   lsb: number;
   /**
+   * Slot index encoded into the NRPN data-MSB byte for multi-slot
+   * params. Several Hydrasynth registers share an NRPN address but
+   * use the data-MSB to disambiguate which slot of a numbered family
+   * the write targets — e.g. osc1semi / osc2semi / osc3semi all live
+   * at NRPN 0x3F 0x11; the data-MSB byte selects oscillator 0/1/2.
+   * When defined, the runtime sends `dataMsb` as the data-MSB and
+   * the user-supplied value as the data-LSB; when undefined, the
+   * user value is split across MSB+LSB as a 14-bit number.
+   */
+  dataMsb?: number;
+  /**
    * Range / display notes from the CSV. Often blank for "follow-on"
    * params (osc2type defers to osc1type for its description); we
    * resolve those at generation time so the emitted file is
@@ -227,6 +238,46 @@ function main(): void {
   entries.length = 0;
   entries.push(...renamed);
 
+  // Detect multi-slot NRPN families: groups of entries that SHARE an
+  // NRPN address but whose names differ only by a numeric index. The
+  // device's data-MSB byte selects which slot the write targets.
+  // Examples: osc1semi/osc2semi/osc3semi all share 0x3F 0x11; the
+  // data-MSB is 0/1/2 respectively. mutator1mode/mutator2mode/etc.
+  // share 0x3F 0x21 with the same indexing convention.
+  //
+  // Edisyn's CSV documents this in plain text ("MSB = Osc [0,2]")
+  // for one canonical entry per family. We auto-detect it from the
+  // address-shared structure rather than parsing the prose, which is
+  // both simpler and catches families the prose forgot to annotate.
+  //
+  // Naming convention: the numeric index in the name is 1-based on the
+  // device UI (osc1, osc2, osc3); the data-MSB is 0-based. We map
+  // name-N → dataMsb=N-1.
+  const slotPattern = /^([a-z][a-z_]*?)(\d+)([a-z_]*)$/;
+  const byNrpn = new Map<string, NrpnRow[]>();
+  for (const e of entries) {
+    const key = `${e.msb.toString(16)}/${e.lsb.toString(16)}`;
+    const list = byNrpn.get(key);
+    if (list) list.push(e);
+    else byNrpn.set(key, [e]);
+  }
+  let slotFamilyCount = 0;
+  for (const group of byNrpn.values()) {
+    if (group.length <= 1) continue;
+    // Every entry in the group must match the slot pattern AND share
+    // the same prefix + suffix (only the numeric part differs).
+    const matches = group.map((e) => e.name.match(slotPattern));
+    if (matches.some((m) => !m)) continue;
+    const fingerprints = new Set(matches.map((m) => `${m![1]}|${m![3]}`));
+    if (fingerprints.size !== 1) continue;
+    // Confirmed multi-slot family. Assign data-MSB by name index.
+    for (let i = 0; i < group.length; i++) {
+      const idx = Number.parseInt(matches[i]![2], 10);
+      group[i].dataMsb = idx - 1;
+    }
+    slotFamilyCount++;
+  }
+
   // Emit TypeScript.
   const out: string[] = [];
   out.push('// AUTO-GENERATED FILE — do not edit by hand.');
@@ -247,10 +298,18 @@ function main(): void {
   out.push('export interface HydrasynthNrpn {');
   out.push('  /** Canonical parameter name (e.g. "osc1type"). Stable across versions. */');
   out.push('  readonly name: string;');
-  out.push('  /** NRPN MSB byte (0..127). */');
+  out.push('  /** NRPN address MSB byte (0..127). */');
   out.push('  readonly msb: number;');
-  out.push('  /** NRPN LSB byte (0..127). */');
+  out.push('  /** NRPN address LSB byte (0..127). */');
   out.push('  readonly lsb: number;');
+  out.push('  /**');
+  out.push('   * For multi-slot families (osc1/2/3, mutator1..4, mod1..32, etc.),');
+  out.push('   * the slot index encoded as the NRPN data-MSB byte. Auto-detected');
+  out.push('   * from shared-NRPN-address sibling entries at gen time. When defined,');
+  out.push('   * the user-supplied value is sent as data-LSB only; when undefined,');
+  out.push('   * the value is split across data-MSB+LSB as a 14-bit number.');
+  out.push('   */');
+  out.push('  readonly dataMsb?: number;');
   out.push('  /** 7-bit CC alias if the param is also on the manual chart. */');
   out.push('  readonly cc?: number;');
   out.push('  /** Range + display instructions from edisyn\'s CSV. */');
@@ -259,10 +318,11 @@ function main(): void {
   out.push('');
   out.push('export const HYDRASYNTH_NRPNS: readonly HydrasynthNrpn[] = [');
   for (const e of entries) {
+    const dataMsbPart = e.dataMsb !== undefined ? `, dataMsb: ${e.dataMsb}` : '';
     const ccPart = e.cc !== undefined ? `, cc: 0x${e.cc.toString(16).padStart(2, '0')}` : '';
     const notes = JSON.stringify(e.notes);
     out.push(
-      `  { name: ${JSON.stringify(e.name).padEnd(36)}, msb: 0x${e.msb.toString(16).padStart(2, '0')}, lsb: 0x${e.lsb.toString(16).padStart(2, '0')}${ccPart}, notes: ${notes} },`,
+      `  { name: ${JSON.stringify(e.name).padEnd(36)}, msb: 0x${e.msb.toString(16).padStart(2, '0')}, lsb: 0x${e.lsb.toString(16).padStart(2, '0')}${dataMsbPart}${ccPart}, notes: ${notes} },`,
     );
   }
   out.push('];');
@@ -279,6 +339,8 @@ function main(): void {
   console.log(`wrote ${OUTPUT_PATH}`);
   console.log(`  entries: ${entries.length}`);
   console.log(`  with CC alias: ${entries.filter((e) => e.cc !== undefined).length}`);
+  console.log(`  with dataMsb (multi-slot families): ${entries.filter((e) => e.dataMsb !== undefined).length}`);
+  console.log(`  multi-slot families detected: ${slotFamilyCount}`);
   console.log(`  notes inherited: ${entries.filter((e) => e.notes && !rawNotesPresent(dataRows, e.name)).length}`);
   if (skipped.length > 0) {
     console.log(`  skipped (no NRPN): ${skipped.length}`);

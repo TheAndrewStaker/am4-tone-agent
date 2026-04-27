@@ -46,7 +46,7 @@ import {
   HYDRASYNTH_PARAMS_BY_CC,
   HYDRASYNTH_PARAMS_BY_ID,
 } from './params.js';
-import { HYDRASYNTH_NRPNS, findHydraNrpn } from './nrpn.js';
+import { HYDRASYNTH_NRPNS, findHydraNrpn, type HydrasynthNrpn } from './nrpn.js';
 import {
   connectHydrasynth,
   listHydrasynthOutputs,
@@ -82,24 +82,34 @@ function ccBytes(channel: number, cc: number, value: number): number[] {
 /**
  * Send the 4-CC NRPN write sequence the Hydrasynth listens for.
  * Order is mandatory: address-MSB → address-LSB → data-MSB → data-LSB.
- * `value` is the 14-bit data: MSB = (value >> 7) & 0x7F, LSB = value & 0x7F.
- * Most Hydrasynth params use only the LSB byte (data fits in 0..127); a few
- * (osc cents, wavescan, mod-matrix amounts) use the full 14 bits.
+ *
+ * Two value-encoding modes:
+ *   1. Plain 14-bit (most NRPN params): user value 0..16383 splits into
+ *      data-MSB = (value >> 7) and data-LSB = value & 0x7F. Used for
+ *      cent fine-tunes, wavescan position, mod-matrix amounts, etc.
+ *   2. Multi-slot (osc1/2/3, mutator1..4, ringmod1/2 etc.): the slot
+ *      index lives in the data-MSB byte, the value lives in data-LSB.
+ *      Without this, every osc2/osc3 write secretly hits osc1 because
+ *      the family shares one NRPN address. The slot index is baked
+ *      into the registry's `dataMsb` field at gen time.
  *
  * Each CC must be sent as its own `sendMessage()` call — node-midi's
  * `sendMessage` expects a single MIDI message per invocation. Bundling
- * all 12 bytes into one call (initial implementation) made the device
- * receive the first 3 bytes as a CC and treat the rest as a runt /
- * malformed message; only the NRPN address-MSB landed and the device
- * did nothing.
+ * all 12 bytes into one call made the device receive the first 3 bytes
+ * as a CC and ignore the rest as a runt message — only the NRPN
+ * address-MSB landed.
  */
-function sendNrpn(conn: HydrasynthConnection, channel: number, msb: number, lsb: number, value: number): void {
-  const dataMsb = (value >> 7) & 0x7F;
-  const dataLsb = value & 0x7F;
-  conn.send(ccBytes(channel, 99, msb));    // CC 99 — NRPN address MSB
-  conn.send(ccBytes(channel, 98, lsb));    // CC 98 — NRPN address LSB
-  conn.send(ccBytes(channel, 6, dataMsb)); // CC  6 — Data Entry MSB
-  conn.send(ccBytes(channel, 38, dataLsb));// CC 38 — Data Entry LSB
+function sendNrpn(conn: HydrasynthConnection, channel: number, entry: HydrasynthNrpn, value: number): void {
+  const dataMsb = entry.dataMsb !== undefined
+    ? entry.dataMsb & 0x7F
+    : (value >> 7) & 0x7F;
+  const dataLsb = entry.dataMsb !== undefined
+    ? value & 0x7F
+    : value & 0x7F;
+  conn.send(ccBytes(channel, 99, entry.msb));  // CC 99 — NRPN address MSB
+  conn.send(ccBytes(channel, 98, entry.lsb));  // CC 98 — NRPN address LSB
+  conn.send(ccBytes(channel, 6, dataMsb));     // CC  6 — Data Entry MSB
+  conn.send(ccBytes(channel, 38, dataLsb));    // CC 38 — Data Entry LSB
 }
 
 function noteOnBytes(channel: number, note: number, velocity: number): number[] {
@@ -393,7 +403,7 @@ server.registerTool('hydra_set_engine_param', {
     );
   }
   const conn = ensureMidi();
-  sendNrpn(conn, DEFAULT_CHANNEL, entry.msb, entry.lsb, value);
+  sendNrpn(conn, DEFAULT_CHANNEL, entry, value);
   const ccLine = entry.cc !== undefined
     ? ` (also on CC ${entry.cc} for 7-bit access.)`
     : '';

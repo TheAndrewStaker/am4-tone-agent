@@ -16,10 +16,18 @@
 export interface HydrasynthNrpn {
   /** Canonical parameter name (e.g. "osc1type"). Stable across versions. */
   readonly name: string;
-  /** NRPN MSB byte (0..127). */
+  /** NRPN address MSB byte (0..127). */
   readonly msb: number;
-  /** NRPN LSB byte (0..127). */
+  /** NRPN address LSB byte (0..127). */
   readonly lsb: number;
+  /**
+   * For multi-slot families (osc1/2/3, mutator1..4, mod1..32, etc.),
+   * the slot index encoded as the NRPN data-MSB byte. Auto-detected
+   * from shared-NRPN-address sibling entries at gen time. When defined,
+   * the user-supplied value is sent as data-LSB only; when undefined,
+   * the value is split across data-MSB+LSB as a 14-bit number.
+   */
+  readonly dataMsb?: number;
   /** 7-bit CC alias if the param is also on the manual chart. */
   readonly cc?: number;
   /** Range + display instructions from edisyn's CSV. */
@@ -27,12 +35,12 @@ export interface HydrasynthNrpn {
 }
 
 export const HYDRASYNTH_NRPNS: readonly HydrasynthNrpn[] = [
-  { name: "osc1mode"                          , msb: 0x3f, lsb: 0x18, notes: "MSB = Osc [0,2]   LSB = [0,1]" },
-  { name: "osc2mode"                          , msb: 0x3f, lsb: 0x18, notes: "MSB = Osc [0,2]   LSB = [0,1]" },
-  { name: "osc3mode"                          , msb: 0x3f, lsb: 0x18, notes: "MSB = Osc [0,2]   LSB = [0,1]" },
-  { name: "osc1semi"                          , msb: 0x3f, lsb: 0x11, notes: "MSB = Osc [0,2]  LSB = [-36,+36] 1-byte 2's Complement.  Thus the LSB goes 0=0, 1=1, 2=2, ..., 36=36,  then 92=-36, 93=-35, ..., 127=-1" },
-  { name: "osc2semi"                          , msb: 0x3f, lsb: 0x11, notes: "MSB = Osc [0,2]  LSB = [-36,+36] 1-byte 2's Complement.  Thus the LSB goes 0=0, 1=1, 2=2, ..., 36=36,  then 92=-36, 93=-35, ..., 127=-1" },
-  { name: "osc3semi"                          , msb: 0x3f, lsb: 0x11, notes: "MSB = Osc [0,2]  LSB = [-36,+36] 1-byte 2's Complement.  Thus the LSB goes 0=0, 1=1, 2=2, ..., 36=36,  then 92=-36, 93=-35, ..., 127=-1" },
+  { name: "osc1mode"                          , msb: 0x3f, lsb: 0x18, dataMsb: 0, notes: "MSB = Osc [0,2]   LSB = [0,1]" },
+  { name: "osc2mode"                          , msb: 0x3f, lsb: 0x18, dataMsb: 1, notes: "MSB = Osc [0,2]   LSB = [0,1]" },
+  { name: "osc3mode"                          , msb: 0x3f, lsb: 0x18, dataMsb: 2, notes: "MSB = Osc [0,2]   LSB = [0,1]" },
+  { name: "osc1semi"                          , msb: 0x3f, lsb: 0x11, dataMsb: 0, notes: "MSB = Osc [0,2]  LSB = [-36,+36] 1-byte 2's Complement.  Thus the LSB goes 0=0, 1=1, 2=2, ..., 36=36,  then 92=-36, 93=-35, ..., 127=-1" },
+  { name: "osc2semi"                          , msb: 0x3f, lsb: 0x11, dataMsb: 1, notes: "MSB = Osc [0,2]  LSB = [-36,+36] 1-byte 2's Complement.  Thus the LSB goes 0=0, 1=1, 2=2, ..., 36=36,  then 92=-36, 93=-35, ..., 127=-1" },
+  { name: "osc3semi"                          , msb: 0x3f, lsb: 0x11, dataMsb: 2, notes: "MSB = Osc [0,2]  LSB = [-36,+36] 1-byte 2's Complement.  Thus the LSB goes 0=0, 1=1, 2=2, ..., 36=36,  then 92=-36, 93=-35, ..., 127=-1" },
   { name: "osc1type"                          , msb: 0x3f, lsb: 0x19, notes: "[0-218] OSC_WAVES" },
   { name: "osc1cent"                          , msb: 0x41, lsb: 0x01, cc: 0x6f, notes: "[-50,+50] 2-byte 2's Complement.  Thus it goes \n0=0, 1=1, 2=2, ..., 50=50, then 8141 = -50, 8142 =-49, ..., 8191 = -1" },
   { name: "osc1keytrack"                      , msb: 0x3f, lsb: 0x54, notes: "[0,200] Display as \"x%\"" },
@@ -60,18 +68,18 @@ export const HYDRASYNTH_NRPNS: readonly HydrasynthNrpn[] = [
   { name: "osc3type"                          , msb: 0x3f, lsb: 0x0d, notes: "[0-218] OSC_WAVES" },
   { name: "osc3cent"                          , msb: 0x41, lsb: 0x03, cc: 0x71, notes: "[-50,+50] 2-byte 2's Complement.  Thus it goes \n0=0, 1=1, 2=2, ..., 50=50, then 8141 = -50, 8142 =-49, ..., 8191 = -1" },
   { name: "osc3keytrack"                      , msb: 0x3f, lsb: 0x56, notes: "[0,200] Display as \"x%\"" },
-  { name: "mutator1mode"                      , msb: 0x3f, lsb: 0x21, notes: "MSB = 0x0  LSB = [0, 7] \"FM-Linear\", \"WavStack\", \"Osc Sync\", \"PW-Orig\", \"PW-Sqeez\", \"PW-ASM\", \"Harmonic\", \"PhazDiff\"" },
-  { name: "mutator2mode"                      , msb: 0x3f, lsb: 0x21, notes: "MSB = 0x0  LSB = [0, 7] \"FM-Linear\", \"WavStack\", \"Osc Sync\", \"PW-Orig\", \"PW-Sqeez\", \"PW-ASM\", \"Harmonic\", \"PhazDiff\"" },
-  { name: "mutator3mode"                      , msb: 0x3f, lsb: 0x21, notes: "MSB = 0x0  LSB = [0, 7] \"FM-Linear\", \"WavStack\", \"Osc Sync\", \"PW-Orig\", \"PW-Sqeez\", \"PW-ASM\", \"Harmonic\", \"PhazDiff\"" },
-  { name: "mutator4mode"                      , msb: 0x3f, lsb: 0x21, notes: "MSB = 0x0  LSB = [0, 7] \"FM-Linear\", \"WavStack\", \"Osc Sync\", \"PW-Orig\", \"PW-Sqeez\", \"PW-ASM\", \"Harmonic\", \"PhazDiff\"" },
-  { name: "mutator1sourcefmlin"               , msb: 0x3f, lsb: 0x24, notes: "MSB = 0x0  LSB = [0, 12] Sine Triangle Osc1 Osc2 Osc3 RingMod Noise Mutant1 Mutant2 Mutant2 Mutant4 ModIn1 ModIn2" },
-  { name: "mutator2sourcefmlin"               , msb: 0x3f, lsb: 0x24, notes: "MSB = 0x0  LSB = [0, 12] Sine Triangle Osc1 Osc2 Osc3 RingMod Noise Mutant1 Mutant2 Mutant2 Mutant4 ModIn1 ModIn2" },
-  { name: "mutator3sourcefmlin"               , msb: 0x3f, lsb: 0x24, notes: "MSB = 0x0  LSB = [0, 12] Sine Triangle Osc1 Osc2 Osc3 RingMod Noise Mutant1 Mutant2 Mutant2 Mutant4 ModIn1 ModIn2" },
-  { name: "mutator4sourcefmlin"               , msb: 0x3f, lsb: 0x24, notes: "MSB = 0x0  LSB = [0, 12] Sine Triangle Osc1 Osc2 Osc3 RingMod Noise Mutant1 Mutant2 Mutant2 Mutant4 ModIn1 ModIn2" },
-  { name: "mutator1sourceoscsync"             , msb: 0x3f, lsb: 0x22, notes: "MSB = 0x0 LSB = [0,2] Osc1 Osc2 Osc3" },
-  { name: "mutator2sourceoscsync"             , msb: 0x3f, lsb: 0x22, notes: "MSB = 0x0 LSB = [0,2] Osc1 Osc2 Osc3" },
-  { name: "mutator3sourceoscsync"             , msb: 0x3f, lsb: 0x22, notes: "MSB = 0x0 LSB = [0,2] Osc1 Osc2 Osc3" },
-  { name: "mutator4sourceoscsync"             , msb: 0x3f, lsb: 0x22, notes: "MSB = 0x0 LSB = [0,2] Osc1 Osc2 Osc3" },
+  { name: "mutator1mode"                      , msb: 0x3f, lsb: 0x21, dataMsb: 0, notes: "MSB = 0x0  LSB = [0, 7] \"FM-Linear\", \"WavStack\", \"Osc Sync\", \"PW-Orig\", \"PW-Sqeez\", \"PW-ASM\", \"Harmonic\", \"PhazDiff\"" },
+  { name: "mutator2mode"                      , msb: 0x3f, lsb: 0x21, dataMsb: 1, notes: "MSB = 0x0  LSB = [0, 7] \"FM-Linear\", \"WavStack\", \"Osc Sync\", \"PW-Orig\", \"PW-Sqeez\", \"PW-ASM\", \"Harmonic\", \"PhazDiff\"" },
+  { name: "mutator3mode"                      , msb: 0x3f, lsb: 0x21, dataMsb: 2, notes: "MSB = 0x0  LSB = [0, 7] \"FM-Linear\", \"WavStack\", \"Osc Sync\", \"PW-Orig\", \"PW-Sqeez\", \"PW-ASM\", \"Harmonic\", \"PhazDiff\"" },
+  { name: "mutator4mode"                      , msb: 0x3f, lsb: 0x21, dataMsb: 3, notes: "MSB = 0x0  LSB = [0, 7] \"FM-Linear\", \"WavStack\", \"Osc Sync\", \"PW-Orig\", \"PW-Sqeez\", \"PW-ASM\", \"Harmonic\", \"PhazDiff\"" },
+  { name: "mutator1sourcefmlin"               , msb: 0x3f, lsb: 0x24, dataMsb: 0, notes: "MSB = 0x0  LSB = [0, 12] Sine Triangle Osc1 Osc2 Osc3 RingMod Noise Mutant1 Mutant2 Mutant2 Mutant4 ModIn1 ModIn2" },
+  { name: "mutator2sourcefmlin"               , msb: 0x3f, lsb: 0x24, dataMsb: 1, notes: "MSB = 0x0  LSB = [0, 12] Sine Triangle Osc1 Osc2 Osc3 RingMod Noise Mutant1 Mutant2 Mutant2 Mutant4 ModIn1 ModIn2" },
+  { name: "mutator3sourcefmlin"               , msb: 0x3f, lsb: 0x24, dataMsb: 2, notes: "MSB = 0x0  LSB = [0, 12] Sine Triangle Osc1 Osc2 Osc3 RingMod Noise Mutant1 Mutant2 Mutant2 Mutant4 ModIn1 ModIn2" },
+  { name: "mutator4sourcefmlin"               , msb: 0x3f, lsb: 0x24, dataMsb: 3, notes: "MSB = 0x0  LSB = [0, 12] Sine Triangle Osc1 Osc2 Osc3 RingMod Noise Mutant1 Mutant2 Mutant2 Mutant4 ModIn1 ModIn2" },
+  { name: "mutator1sourceoscsync"             , msb: 0x3f, lsb: 0x22, dataMsb: 0, notes: "MSB = 0x0 LSB = [0,2] Osc1 Osc2 Osc3" },
+  { name: "mutator2sourceoscsync"             , msb: 0x3f, lsb: 0x22, dataMsb: 1, notes: "MSB = 0x0 LSB = [0,2] Osc1 Osc2 Osc3" },
+  { name: "mutator3sourceoscsync"             , msb: 0x3f, lsb: 0x22, dataMsb: 2, notes: "MSB = 0x0 LSB = [0,2] Osc1 Osc2 Osc3" },
+  { name: "mutator4sourceoscsync"             , msb: 0x3f, lsb: 0x22, dataMsb: 3, notes: "MSB = 0x0 LSB = [0,2] Osc1 Osc2 Osc3" },
   { name: "mutator1ratio"                     , msb: 0x41, lsb: 0x2c, cc: 0x1d, notes: "[0,8192] seemingly only output in increments of 8, for a total of 1025 vals (0...1025).  Displayed as: \n65\t32-64\tby 0.5\n64\t16-32\tby 0.25\n64\t8-16 by 0.125\n128\t4-8\tby 0.03125\n192\t1-4\tby 0.015625\n64\t0.8-1.0\tby 0.00625\n64\t0.75-0.8 by 0.0007812500 \n64\t0.666-0.75 by 0.0013020843 \n64\t0.6-0.666 by 0.0010416656  (0.066666 / 64)\n128\t0.6-0.75 by 0.0011718750  (0.15 / 128)\n128\t0.4-0.6 by 0.0015625000  (0.2 / 128)\n64\t0.333-0.4 by 0.0010421875  (0.06666 / 64)\n64\t0.250-0.333 by 0.0013015625 (.0833333 / 64)\nTOTAL: 1025 VALS\n\nShow as xx.xxxx   I think the values are ROUNDED, and the Hydrasynth rounds 0.5 towards even.  Even so some values are very slightly off.  It's not entirely clear what the Hydrasynth is doing.  But this is close." },
   { name: "mutator1depth"                     , msb: 0x40, lsb: 0x1f, cc: 0x1e, notes: "[0,8192] seemingly only output in increments of 8, and displayed as [0.0,128.0] in increments of 0.1. To display: if 8192, display 128.0.  Else divide by 6.4 (cutting into 1280 even pieces).  Then ROUND to nearest integer 0...1280.  Then divide by 10.  The Hydrasynth seems to round 0.5 towards even." },
   { name: "mutator1wet"                       , msb: 0x40, lsb: 0x22, cc: 0x1f, notes: "[0,8192] seemingly only output in increments of 8, and displayed as [0%,100%] in increments of 1. To display: if 8192, display 100.  Else divide by 81.92 (cutting into 100 even pieces). Then FLOOR to nearest integer 0...100." },
@@ -126,8 +134,8 @@ export const HYDRASYNTH_NRPNS: readonly HydrasynthNrpn[] = [
   { name: "mutator4warp8"                     , msb: 0x40, lsb: 0x7f, notes: "[0,8192] seemingly only output in increments of 8, and displayed as [0.0,128.0] in increments of 0.1. To display: if 8192, display 128.0.  Else divide by 6.4 (cutting into 1280 even pieces).  Then ROUND to nearest integer 0...1280.  Then divide by 10.  The Hydrasynth seems to round 0.5 towards even." },
   { name: "noisetype"                         , msb: 0x3f, lsb: 0x27, notes: "[0,6] White Pink Brown Red Blue Violet Grey" },
   { name: "ringmoddepth"                      , msb: 0x40, lsb: 0x03, cc: 0x2b, notes: "[0,8192] seemingly only output in increments of 8, and displayed as [0.0,128.0] in increments of 0.1. To display: if 8192, display 128.0.  Else divide by 6.4 (cutting into 1280 even pieces).  Then ROUND to nearest integer 0...1280.  Then divide by 10.  The Hydrasynth seems to round 0.5 towards even." },
-  { name: "ringmodsource1"                    , msb: 0x3f, lsb: 0x26, notes: "MSB = Source Num [0, 1]    LSB = [0,9] RING_MOD_SOURCES" },
-  { name: "ringmodsource2"                    , msb: 0x3f, lsb: 0x26, notes: "MSB = Source Num [0, 1]    LSB = [0,9] RING_MOD_SOURCES" },
+  { name: "ringmodsource1"                    , msb: 0x3f, lsb: 0x26, dataMsb: 0, notes: "MSB = Source Num [0, 1]    LSB = [0,9] RING_MOD_SOURCES" },
+  { name: "ringmodsource2"                    , msb: 0x3f, lsb: 0x26, dataMsb: 1, notes: "MSB = Source Num [0, 1]    LSB = [0,9] RING_MOD_SOURCES" },
   { name: "mixerosc1vol"                      , msb: 0x40, lsb: 0x07, cc: 0x2c, notes: "[0,8192] seemingly only output in increments of 8, and displayed as [0.0,128.0] in increments of 0.1. To display: if 8192, display 128.0.  Else divide by 6.4 (cutting into 1280 even pieces).  Then ROUND to nearest integer 0...1280.  Then divide by 10.  The Hydrasynth seems to round 0.5 towards even." },
   { name: "mixerosc1pan"                      , msb: 0x40, lsb: 0x08, cc: 0x2d, notes: "[0,8192] seemingly only output in increments of 8, and displayed as [-64.0,64.0] in increments of 0.1. To display: if 8192, display 64.0.  Else divide by 6.4 (cutting into 1280 even pieces). Then subtract 640.  Then ROUND to nearest integer -640...640.  Then divide by 10. The Hydrasynth seems to round 0.5 towards even." },
   { name: "mixerosc1filterratio"              , msb: 0x40, lsb: 0x31, cc: 0x76, notes: "[0,8192] seemingly only output in increments of 8, and displayed as [0:100, 100:0] in increments of 1. To display: if 8192, display 128.0.  Else divide by 81.92 (cutting into 100 even pieces).  Then FLOOR to nearest integer 0. Only the very highest value will be 100:0." },
@@ -1158,9 +1166,9 @@ export const HYDRASYNTH_NRPNS: readonly HydrasynthNrpn[] = [
   { name: "fx9param4"                         , msb: 0x3b, lsb: 0x40, notes: "[0,128] in steps of 8 (0, 8, 16, 24, ...)" },
   { name: "fx9param5 (Output)"                , msb: 0x3b, lsb: 0x50, notes: "[-36.0,24.0] dB in increments of 0.1 output as in multiples of 8 as 0, 8, 16, ..., 4800" },
   { name: "voicesustain"                      , msb: 0x71, lsb: 0x00, notes: "[0, 2] emitted as [0, 8, 16] representing Sustain, Sostenuto, and Mod Only\n\nBUG: The Hydrasynth emits in multiples of 8, but expects inputs in multiples of 1" },
-  { name: "osc1bitreduction"                  , msb: 0x3f, lsb: 0x40, notes: "[0,11] emitted as MSB=0 LSB=val, representing OFF, 16, 12, 10, 9, 8, 7, 6, 5, 4, 3, 2" },
-  { name: "osc2bitreduction"                  , msb: 0x3f, lsb: 0x40, notes: "[0,11] emitted as MSB=1 LSB=val, representing OFF, 16, 12, 10, 9, 8, 7, 6, 5, 4, 3, 2" },
-  { name: "osc3bitreduction"                  , msb: 0x3f, lsb: 0x40, notes: "[0,11] emitted as MSB=2 LSB=val, representing OFF, 16, 12, 10, 9, 8, 7, 6, 5, 4, 3, 2" },
+  { name: "osc1bitreduction"                  , msb: 0x3f, lsb: 0x40, dataMsb: 0, notes: "[0,11] emitted as MSB=0 LSB=val, representing OFF, 16, 12, 10, 9, 8, 7, 6, 5, 4, 3, 2" },
+  { name: "osc2bitreduction"                  , msb: 0x3f, lsb: 0x40, dataMsb: 1, notes: "[0,11] emitted as MSB=1 LSB=val, representing OFF, 16, 12, 10, 9, 8, 7, 6, 5, 4, 3, 2" },
+  { name: "osc3bitreduction"                  , msb: 0x3f, lsb: 0x40, dataMsb: 2, notes: "[0,11] emitted as MSB=2 LSB=val, representing OFF, 16, 12, 10, 9, 8, 7, 6, 5, 4, 3, 2" },
   { name: "voicemodulation1"                  , msb: 0x71, lsb: 0x01, notes: "[0,256] emitted in multiples of 8 as 0, 8, 16, ..., 2048, representing -128 ... + 128\n\nBUG: The Hydrasynth emits in multiples of 8, but expects inputs in multiples of 1" },
   { name: "voicemodulation2"                  , msb: 0x71, lsb: 0x02, notes: "[0,256] emitted in multiples of 8 as 0, 8, 16, ..., 2048, representing -128 ... + 128" },
   { name: "voicemodulation3"                  , msb: 0x71, lsb: 0x03, notes: "[0,256] emitted in multiples of 8 as 0, 8, 16, ..., 2048, representing -128 ... + 128" },
