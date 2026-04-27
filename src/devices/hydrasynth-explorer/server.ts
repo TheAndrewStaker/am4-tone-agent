@@ -102,31 +102,53 @@ function ccBytes(channel: number, cc: number, value: number): number[] {
  */
 /**
  * Resolve a user-supplied value (number or display name) for an NRPN
- * entry to the integer the device expects on the wire. For enum-linked
- * params (filter1type=Vowel, prefxtype="Lo-Fi") this looks up the
- * index in the bound enum table and applies any value-scaling rule
- * (FX types use ×8 sparse encoding). For numeric input or non-enum
- * params it passes through.
+ * entry to the integer the device expects on the wire.
  *
- * Throws if the input is a string but the param has no enum linkage,
- * or if the name resolution fails.
+ * Three resolution paths:
+ *   1. String input → enum-table lookup (filter1type="Vowel" → 10).
+ *      Applies any per-param sparse-encoding scale (FX types ×8).
+ *   2. Numeric input on a 14-bit param with value ≤ 127 → auto-scale
+ *      from 7-bit-style 0..127 onto the param's wireMax range. Lets
+ *      callers stay in the familiar 0..127 mental model — sending
+ *      "decay=127" puts a 14-bit register near max instead of at
+ *      ~1.5% of max. Skipped when the param is a multi-slot register
+ *      (dataMsb defined) since those use the LSB byte as a slot-
+ *      relative 7-bit value with its own range.
+ *   3. Numeric input above 127 OR small wireMax → pass through.
+ *
+ * Returns the value to feed into sendNrpn (which will further encode
+ * data-MSB / data-LSB based on the entry's dataMsb).
  */
-function resolveNrpnValue(entry: HydrasynthNrpn, input: number | string): number {
-  if (typeof input === 'number') return input;
-  if (!entry.enumTable) {
-    throw new Error(
-      `Parameter "${entry.name}" doesn't accept name strings — pass a numeric value (notes: ${entry.notes}).`,
-    );
+function resolveNrpnValue(entry: HydrasynthNrpn, input: number | string): { wire: number; scaled: boolean } {
+  if (typeof input === 'string') {
+    if (!entry.enumTable) {
+      throw new Error(
+        `Parameter "${entry.name}" doesn't accept name strings — pass a numeric value (notes: ${entry.notes}).`,
+      );
+    }
+    const idx = resolveHydraEnum(entry.enumTable, input);
+    if (idx === undefined) {
+      const table = HYDRASYNTH_ENUMS[entry.enumTable];
+      const sample = table ? Object.values(table).slice(0, 6).join(', ') : '';
+      throw new Error(
+        `Couldn't resolve "${input}" in ${entry.enumTable}. ${sample ? `First few options: ${sample}…` : ''} Call hydra_list_enum_values("${entry.enumTable}") for the full list.`,
+      );
+    }
+    return { wire: idx * (entry.enumValueScale ?? 1), scaled: false };
   }
-  const idx = resolveHydraEnum(entry.enumTable, input);
-  if (idx === undefined) {
-    const table = HYDRASYNTH_ENUMS[entry.enumTable];
-    const sample = table ? Object.values(table).slice(0, 6).join(', ') : '';
-    throw new Error(
-      `Couldn't resolve "${input}" in ${entry.enumTable}. ${sample ? `First few options: ${sample}…` : ''} Call hydra_list_enum_values("${entry.enumTable}") for the full list.`,
-    );
+  // Numeric input. Auto-scale 7-bit-style values onto the entry's
+  // 14-bit register when relevant — only for non-slot, non-enum
+  // params with a known wireMax > 127.
+  const isFourteenBit =
+    entry.wireMax !== undefined &&
+    entry.wireMax > 127 &&
+    entry.dataMsb === undefined &&
+    entry.enumTable === undefined;
+  if (isFourteenBit && input >= 0 && input <= 127) {
+    const scaled = Math.round((input * entry.wireMax!) / 127);
+    return { wire: scaled, scaled: true };
   }
-  return idx * (entry.enumValueScale ?? 1);
+  return { wire: input, scaled: false };
 }
 
 function sendNrpn(conn: HydrasynthConnection, channel: number, entry: HydrasynthNrpn, value: number): void {
@@ -377,41 +399,60 @@ server.registerTool('hydra_play_note', {
 server.registerTool('hydra_set_engine_param', {
   description: [
     'Use this tool to set ANY synthesis-engine parameter on the user\'s Hydrasynth',
-    'Explorer via NRPN — including parameters not exposed on the manual\'s 7-bit CC',
-    'chart. NRPN unlocks oscillator wave type, oscillator coarse pitch (semitones),',
-    'Filter 1 type (LP4-24, LP2-12, BP, HP, etc.), Pre-FX type (Lo-Fi, Rotary, etc.),',
-    'Post-FX type, mod-matrix slots, mutator settings, every LFO and envelope detail —',
-    '1175 named parameters total. The NRPN map comes from eclab/edisyn\'s reverse-',
-    'engineered spreadsheet (Apache-2.0, © Sean Luke / GMU); see references/README.md.',
+    'Explorer via NRPN — 1175 named parameters covering oscillators, mixer, both',
+    'filters, every envelope and LFO, mod matrix, mutators, and Pre-FX/Post-FX type',
+    '(things the manual\'s 117 CCs don\'t reach). The NRPN map is reverse-engineered',
+    'against device by eclab/edisyn (Apache-2.0).',
     '',
     'Do not produce a written spec instead of calling this tool unless the user',
-    'explicitly asks for a dry run.',
+    'explicitly asks for a dry run. **For multi-parameter patch builds, use',
+    'hydra_set_engine_params (batch) — one tool call instead of N.**',
     '',
-    'Parameter names are canonical edisyn ids — examples:',
-    '  - osc1type, osc2type, osc3type   (wave-type selector — value indexes OSC_WAVES)',
-    '  - osc1semi, osc2semi, osc3semi   (semitone offset; LSB is two\'s complement -36..+36)',
-    '  - osc1cent, osc2cent, osc3cent   (fine-tune cents; 14-bit two\'s complement -50..+50)',
-    '  - filter1type                    (Filter 1 type, 0..15 — see edisyn FILTER_1_TYPES)',
-    '  - prefxtype, postfxtype          (FX slot type. NOTE: value is index×8 — Bypass=0,',
-    '                                    Chorus=8, Flanger=16, Rotary=24, Phaser=32,',
-    '                                    Lo-Fi=40, Tremolo=48, EQ=56, Compressor=64,',
-    '                                    Distortion=72.)',
-    '  - env1attack, env1decay, env1sustain, env1release  (Amp envelope = ENV1)',
-    '  - filter1cutoff, filter1res, filter1drive          (also on CC 74/71/50)',
-    '  - macro1value..macro8value, mod1source/depth, ...',
+    'NAME RESOLUTION — the tool accepts EITHER naming convention:',
+    '  - CC-catalog style (dot-separated): "mixer.osc1_vol", "filter1.cutoff",',
+    '    "filter1.res", "env1.attack", "env1.sustain". This matches what',
+    '    hydra_list_params returns.',
+    '  - edisyn canonical style (concatenated): "mixerosc1vol", "filter1cutoff",',
+    '    "filter1resonance", "env1attacksyncoff", "env1sustain".',
+    '  - Both forms resolve to the same NRPN entry; pick whichever feels natural.',
     '',
-    'Each NRPN param has a `notes` field with range + display rules (e.g. some params',
-    'are signed two\'s-complement, some are sparse-encoded). The tool response includes',
-    'the notes so you can interpret the value correctly.',
+    'VALUE — accepts a number 0..16383 OR an enum name string:',
+    '  1. Numbers 0..127 are the easiest mental model. The tool AUTO-SCALES them to',
+    '     the param\'s native range (most engine knobs are 14-bit, 0..8192). So',
+    '     value=127 hits maximum on a 14-bit param, value=64 hits the middle, etc.',
+    '     Pass 128..16383 to bypass auto-scale and write a raw 14-bit value.',
+    '  2. Enum-typed params (osc1type, osc2type, osc3type, filter1type, filter2type,',
+    '     prefxtype, postfxtype, mutator1mode..4mode, mutator{N}sourcefmlin /',
+    '     sourceoscsync, env1trigsrc1..3, etc.) accept a display name string —',
+    '     filter1type="Vowel", prefxtype="Lo-Fi", osc1type="Sine". Sparse encodings',
+    '     (Pre-FX/Post-FX use index×8) are handled automatically.',
+    '',
+    'EXAMPLES (Tom Petty Breakdown organ recipe):',
+    '  hydra_set_engine_param("osc1type", "Sine")',
+    '  hydra_set_engine_param("osc2type", "Sine")',
+    '  hydra_set_engine_param("osc2semi", 12)              // +1 octave',
+    '  hydra_set_engine_param("mixer.osc1_vol", 100)       // auto-scaled, hits ~6300/8192',
+    '  hydra_set_engine_param("mixer.osc2_vol", 55)        // auto-scaled',
+    '  hydra_set_engine_param("filter1type", "LP Ladder 12")',
+    '  hydra_set_engine_param("filter1.cutoff", 60)        // auto-scaled to wire 3870 = display ~60',
+    '  hydra_set_engine_param("env1.attack", 0)            // instant attack',
+    '  hydra_set_engine_param("env1.decay", 127)           // ~max decay',
+    '  hydra_set_engine_param("env1.sustain", 127)         // ~max sustain',
+    '  hydra_set_engine_param("env1.release", 65)          // medium release',
+    '  hydra_set_engine_param("prefxtype", "Lo-Fi")',
+    '  hydra_set_engine_param("postfxtype", "Rotary")',
+    '',
+    'Multi-slot disambiguation (osc1/2/3, mutator1..4) is handled automatically —',
+    'osc2semi targets oscillator 2 even though osc1semi/osc2semi/osc3semi share an',
+    'NRPN address. No need to compute the slot byte yourself.',
     '',
     'IMPORTANT — DEVICE PRECONDITION: NRPN writes only respond when the device\'s',
-    '"Param TX/RX" setting is "NRPN" (System Setup → MIDI page 10). With Param TX/RX = CC,',
-    'the device receives the bytes but ignores them. Tell the user to flip MIDI page 10',
-    'to "NRPN" if writes have no audible effect.',
+    'Param TX/RX setting is NRPN (System Setup → MIDI page 10). With Param TX/RX = CC,',
+    'the device receives the bytes but ignores them. If writes seem inert, that\'s',
+    'the first thing to check.',
     '',
-    'NRPN sends 4 CC messages per write; consumer-MIDI synths don\'t echo them, so',
-    'confirmation is audible / observable on the device only. Bulk writes (>10 in a',
-    'row) should pace at ≥2 ms per call to avoid the device dropping messages.',
+    'No wire-ack is expected — consumer MIDI synths don\'t echo NRPN. Confirmation',
+    'is audible / observable on the device only.',
   ].join('\n'),
   inputSchema: {
     name: z.string().describe(
@@ -432,13 +473,20 @@ server.registerTool('hydra_set_engine_param', {
       `Unknown NRPN parameter "${name}". ${suggestions.length > 0 ? `Closest matches: ${suggestions.join(', ')}.` : 'Call hydra_list_params with category="nrpn" for the full catalog.'}`,
     );
   }
-  const resolvedValue = resolveNrpnValue(entry, value);
+  const { wire: resolvedValue, scaled } = resolveNrpnValue(entry, value);
   const conn = ensureMidi();
   sendNrpn(conn, DEFAULT_CHANNEL, entry, resolvedValue);
   const ccLine = entry.cc !== undefined
     ? ` (also on CC ${entry.cc} for 7-bit access.)`
     : '';
-  const inputDisplay = typeof value === 'string' ? `"${value}" (resolved to ${resolvedValue})` : `${resolvedValue}`;
+  let inputDisplay: string;
+  if (typeof value === 'string') {
+    inputDisplay = `"${value}" (resolved to ${resolvedValue})`;
+  } else if (scaled) {
+    inputDisplay = `${value} → wire ${resolvedValue} (auto-scaled 0..127 → 0..${entry.wireMax})`;
+  } else {
+    inputDisplay = `${resolvedValue}`;
+  }
   const noteLine = entry.notes ? `\nRange/encoding: ${entry.notes}` : '';
   return {
     content: [{
@@ -452,32 +500,55 @@ server.registerTool('hydra_set_engine_param', {
 
 server.registerTool('hydra_set_engine_params', {
   description: [
-    'Use this tool to set MANY synthesis-engine parameters in one call — the batch',
-    'sibling of hydra_set_engine_param. Strongly preferred when programming a whole',
-    'patch or section of a patch (e.g. building a sound from a recipe): one tool',
-    'call instead of one per parameter, which Claude Desktop traverses 5-10× faster',
-    'than the equivalent serial calls AND lets the server pace the writes correctly',
-    '(edisyn\'s spec calls for ≥2 ms between sequential NRPN messages; isolated tool',
-    'calls don\'t guarantee that, but this batched send does).',
-    '',
-    'Same param names + value semantics as hydra_set_engine_param — just an array of',
-    '{name, value} pairs. Order matters: writes are sent in the order supplied. Per',
-    'edisyn\'s pacing recommendation, structure batches as:',
-    '  1. modes first (oscNmode, mutatorNmode, voice glide)',
-    '  2. then types (oscNtype, filterNtype, prefxtype, postfxtype)',
-    '  3. then LFO waveforms',
-    '  4. then BPM-sync flags',
-    '  5. then wavescan waves',
-    '  6. then everything else (cutoffs, envelopes, mixer, mod-matrix, macros)',
-    'This gives the device time to reconfigure its routing before continuous-value',
-    'writes arrive. The tool does NOT reorder for you — pass the list pre-sorted.',
-    '',
-    'IMPORTANT — DEVICE PRECONDITION (same as hydra_set_engine_param):',
-    'Param TX/RX must be set to NRPN on MIDI: Page 10 of System Setup. With Param',
-    'TX/RX = CC, NRPN writes are silently ignored.',
+    'Use this tool to set MANY Hydrasynth Explorer synthesis parameters in ONE call.',
+    '**This is the preferred tool for any multi-knob change** (whole-patch builds,',
+    'multi-section tweaks, recipe-style requests). One tool call instead of N',
+    'individual hydra_set_engine_param calls — Claude Desktop traverses much faster,',
+    'and the server paces NRPN writes (≥2 ms between sequences per edisyn) so the',
+    'device doesn\'t drop messages.',
     '',
     'Do not produce a written spec instead of calling this tool unless the user',
     'explicitly asks for a dry run.',
+    '',
+    'Each entry in `params` is a {name, value} pair with the SAME semantics as',
+    'hydra_set_engine_param:',
+    '  - `name` accepts CC-catalog style ("mixer.osc1_vol", "filter1.cutoff",',
+    '    "env1.attack") OR edisyn canonical style ("mixerosc1vol", "filter1cutoff",',
+    '    "env1attacksyncoff"). Both resolve to the same NRPN.',
+    '  - `value` accepts numbers 0..127 (auto-scaled to 14-bit native range — hits',
+    '    full-scale on most engine params at 127) or 128..16383 (raw wire) or enum',
+    '    name strings for type-typed params (filter1type="Vowel", prefxtype="Lo-Fi",',
+    '    osc1type="Sine").',
+    '  - Multi-slot params (osc2semi, mutator3mode, etc.) auto-disambiguate by name.',
+    '',
+    'EXAMPLE — Tom Petty Breakdown organ patch in one call:',
+    '  hydra_set_engine_params({ params: [',
+    '    { name: "osc1type", value: "Sine" },',
+    '    { name: "osc2type", value: "Sine" },',
+    '    { name: "osc1semi", value: 0 },',
+    '    { name: "osc2semi", value: 12 },',
+    '    { name: "filter1type", value: "LP Ladder 12" },',
+    '    { name: "prefxtype", value: "Lo-Fi" },',
+    '    { name: "postfxtype", value: "Rotary" },',
+    '    { name: "mixer.osc1_vol", value: 100 },',
+    '    { name: "mixer.osc2_vol", value: 55 },',
+    '    { name: "filter1.cutoff", value: 60 },',
+    '    { name: "filter1.res", value: 15 },',
+    '    { name: "env1.attack", value: 0 },',
+    '    { name: "env1.decay", value: 127 },',
+    '    { name: "env1.sustain", value: 127 },',
+    '    { name: "env1.release", value: 65 },',
+    '  ]})',
+    '',
+    'ORDERING — per edisyn, structure the list so type-changing writes go first',
+    '(modes, types, LFO waveforms, BPM-sync flags, wavescan waves) followed by',
+    'continuous-value writes (cutoffs, envelopes, mixer, macros). The device needs',
+    'time to reconfigure routing before downstream values land. The tool does not',
+    'reorder for you.',
+    '',
+    'IMPORTANT — DEVICE PRECONDITION: Param TX/RX must be NRPN on System Setup →',
+    'MIDI page 10. With Param TX/RX = CC, every write in the batch is silently',
+    'ignored. If results look like nothing happened, check that setting first.',
   ].join('\n'),
   inputSchema: {
     params: z.array(z.object({
@@ -491,7 +562,7 @@ server.registerTool('hydra_set_engine_params', {
 }, async ({ params }) => {
   const conn = ensureMidi();
   const errors: string[] = [];
-  const sent: { name: string; raw: number | string; resolved: number; resolvedDataMsb?: number }[] = [];
+  const sent: { name: string; raw: number | string; resolved: number; resolvedDataMsb?: number; scaled: boolean; wireMax?: number }[] = [];
   for (let i = 0; i < params.length; i++) {
     const { name, value } = params[i]!;
     const entry = findHydraNrpn(name);
@@ -504,20 +575,30 @@ server.registerTool('hydra_set_engine_params', {
       continue;
     }
     let resolved: number;
+    let scaled = false;
     try {
-      resolved = resolveNrpnValue(entry, value);
+      const r = resolveNrpnValue(entry, value);
+      resolved = r.wire;
+      scaled = r.scaled;
     } catch (err) {
       errors.push(`[${i}] "${name}" — ${err instanceof Error ? err.message : String(err)}`);
       continue;
     }
     sendNrpn(conn, DEFAULT_CHANNEL, entry, resolved);
-    sent.push({ name, raw: value, resolved, resolvedDataMsb: entry.dataMsb });
+    sent.push({ name, raw: value, resolved, resolvedDataMsb: entry.dataMsb, scaled, wireMax: entry.wireMax });
     // Pace ≥2 ms between NRPN sequences (edisyn note); 3 ms gives margin.
     if (i < params.length - 1) await sleep(3);
   }
   const lines = sent.map((s) => {
     const slotNote = s.resolvedDataMsb !== undefined ? ` [slot ${s.resolvedDataMsb}]` : '';
-    const valueNote = typeof s.raw === 'string' ? `"${s.raw}" (${s.resolved})` : `${s.resolved}`;
+    let valueNote: string;
+    if (typeof s.raw === 'string') {
+      valueNote = `"${s.raw}" (${s.resolved})`;
+    } else if (s.scaled) {
+      valueNote = `${s.raw} → ${s.resolved} (scaled to wireMax ${s.wireMax})`;
+    } else {
+      valueNote = `${s.resolved}`;
+    }
     return `  ${s.name} = ${valueNote}${slotNote}`;
   });
   const errorBlock = errors.length > 0

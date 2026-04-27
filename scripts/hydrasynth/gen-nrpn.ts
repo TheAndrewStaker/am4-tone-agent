@@ -119,6 +119,26 @@ interface NrpnRow {
    */
   enumValueScale?: number;
   /**
+   * Alternate names that should resolve to this entry. Auto-derived
+   * from the CC catalog (params.ts): when an NRPN param shares its
+   * CC with a CC-catalog param, the CC-catalog id (e.g. "filter1.res",
+   * "mixer.osc1_vol", "env1.attack") becomes an alias for the NRPN
+   * canonical name (e.g. "filter1resonance", "mixerosc1vol",
+   * "env1attacksyncoff"). This bridges the two naming conventions
+   * so Claude can use whichever it found in `hydra_list_params`.
+   */
+  aliases?: string[];
+  /**
+   * Maximum raw wire value, parsed from leading `[0,N]` or `[0-N]`
+   * pattern in the notes. Most Hydrasynth engine NRPNs are 14-bit
+   * (wireMax 8192) displayed 0..128.0 or 0ms..60sec; some are 7-bit
+   * (wireMax 127). Used at runtime to auto-scale 7-bit-style inputs
+   * (value ≤ 127) onto 14-bit registers so callers can keep the
+   * familiar 0..127 mental model — without this, "value=127" hits a
+   * 14-bit register at ~1.5% of max instead of full.
+   */
+  wireMax?: number;
+  /**
    * Range / display notes from the CSV. Often blank for "follow-on"
    * params (osc2type defers to osc1type for its description); we
    * resolve those at generation time so the emitted file is
@@ -339,6 +359,23 @@ function main(): void {
       knownEnumNames.add(em[1]!);
     }
   }
+  // Build a CC → CC-catalog-id map so we can derive aliases for NRPN
+  // entries that share a CC with the CC catalog. The CC catalog is
+  // generated from cc-chart-raw.txt and lives in
+  // src/devices/hydrasynth-explorer/params.ts; we read it as text and
+  // pull the cc/id pairs out.
+  const PARAMS_PATH = path.resolve(__dirname, '../../src/devices/hydrasynth-explorer/params.ts');
+  const ccToCatalogId = new Map<number, string>();
+  if (fs.existsSync(PARAMS_PATH)) {
+    const paramsText = fs.readFileSync(PARAMS_PATH, 'utf8');
+    const re = /\bcc:\s*(\d+)[^,]*,\s*module:[^,]*,\s*parameter:[^,]*,\s*id:\s*"([^"]+)"/g;
+    let pm: RegExpExecArray | null;
+    while ((pm = re.exec(paramsText)) !== null) {
+      ccToCatalogId.set(Number.parseInt(pm[1]!, 10), pm[2]!);
+    }
+  }
+  let aliasCount = 0;
+
   let enumLinkedCount = 0;
   for (const e of entries) {
     // Hand-curated overrides take precedence (FX sparse encoding etc.).
@@ -359,6 +396,34 @@ function main(): void {
         enumLinkedCount++;
         break;
       }
+    }
+  }
+
+  // Derive CC-catalog aliases. For each NRPN entry that has a CC, look
+  // up the matching CC-catalog id and add it as an alias if it's
+  // different from the canonical NRPN name.
+  for (const e of entries) {
+    if (e.cc === undefined) continue;
+    const catalogId = ccToCatalogId.get(e.cc);
+    if (!catalogId) continue;
+    if (catalogId === e.name) continue;
+    e.aliases = [catalogId];
+    aliasCount++;
+  }
+
+  // Parse wireMax from the leading "[0,N]" or "[0-N]" pattern in the
+  // notes. Skips entries whose notes start with "MSB = ..." (multi-
+  // slot) — those have a sub-range in the LSB but no clean leading
+  // [0,N] for the data field as a whole.
+  const wireMaxRe = /^\[0[,\-](\d+)\]/;
+  let wireMaxCount = 0;
+  for (const e of entries) {
+    const m = e.notes.match(wireMaxRe);
+    if (!m) continue;
+    const max = Number.parseInt(m[1]!, 10);
+    if (max > 0 && max <= 16383) {
+      e.wireMax = max;
+      wireMaxCount++;
     }
   }
 
@@ -408,6 +473,19 @@ function main(): void {
   out.push('  readonly enumValueScale?: number;');
   out.push('  /** 7-bit CC alias if the param is also on the manual chart. */');
   out.push('  readonly cc?: number;');
+  out.push('  /**');
+  out.push('   * Alternate names that resolve to this entry — typically the');
+  out.push("   * CC-catalog id (e.g. \"mixer.osc1_vol\" aliases \"mixerosc1vol\";");
+  out.push("   * \"env1.attack\" aliases \"env1attacksyncoff\"). Bridges the CC and");
+  out.push('   * NRPN naming conventions so callers can use either.');
+  out.push('   */');
+  out.push('  readonly aliases?: readonly string[];');
+  out.push('  /**');
+  out.push('   * Maximum raw wire value (parsed from leading "[0,N]" in notes).');
+  out.push('   * 8192 for 14-bit linear params (mixer vols, filter cutoff/res,');
+  out.push('   * sustain, env timings); 127 or smaller for 7-bit params.');
+  out.push('   */');
+  out.push('  readonly wireMax?: number;');
   out.push('  /** Range + display instructions from edisyn\'s CSV. */');
   out.push('  readonly notes: string;');
   out.push('}');
@@ -418,16 +496,27 @@ function main(): void {
     const enumTablePart = e.enumTable !== undefined ? `, enumTable: ${JSON.stringify(e.enumTable)}` : '';
     const enumScalePart = e.enumValueScale !== undefined ? `, enumValueScale: ${e.enumValueScale}` : '';
     const ccPart = e.cc !== undefined ? `, cc: 0x${e.cc.toString(16).padStart(2, '0')}` : '';
+    const aliasPart = e.aliases && e.aliases.length > 0 ? `, aliases: ${JSON.stringify(e.aliases)}` : '';
+    const wireMaxPart = e.wireMax !== undefined ? `, wireMax: ${e.wireMax}` : '';
     const notes = JSON.stringify(e.notes);
     out.push(
-      `  { name: ${JSON.stringify(e.name).padEnd(36)}, msb: 0x${e.msb.toString(16).padStart(2, '0')}, lsb: 0x${e.lsb.toString(16).padStart(2, '0')}${dataMsbPart}${enumTablePart}${enumScalePart}${ccPart}, notes: ${notes} },`,
+      `  { name: ${JSON.stringify(e.name).padEnd(36)}, msb: 0x${e.msb.toString(16).padStart(2, '0')}, lsb: 0x${e.lsb.toString(16).padStart(2, '0')}${dataMsbPart}${enumTablePart}${enumScalePart}${ccPart}${aliasPart}${wireMaxPart}, notes: ${notes} },`,
     );
   }
   out.push('];');
   out.push('');
-  out.push('const BY_NAME = new Map(HYDRASYNTH_NRPNS.map((e) => [e.name, e] as const));');
+  out.push('const BY_NAME = new Map<string, HydrasynthNrpn>();');
+  out.push('for (const e of HYDRASYNTH_NRPNS) {');
+  out.push('  BY_NAME.set(e.name, e);');
+  out.push('  if (e.aliases) for (const a of e.aliases) BY_NAME.set(a, e);');
+  out.push('}');
   out.push('');
-  out.push('/** Lookup by canonical name. Returns undefined if the name is unknown. */');
+  out.push('/**');
+  out.push(' * Lookup by canonical name OR alias. Aliases include the matching');
+  out.push(" * CC-catalog id when one exists (e.g. \"mixer.osc1_vol\", \"env1.attack\",");
+  out.push(" * \"filter1.res\") so callers don't have to know which naming convention");
+  out.push(' * the NRPN map uses internally.');
+  out.push(' */');
   out.push('export function findHydraNrpn(name: string): HydrasynthNrpn | undefined {');
   out.push('  return BY_NAME.get(name);');
   out.push('}');
@@ -440,6 +529,8 @@ function main(): void {
   console.log(`  with dataMsb (multi-slot families): ${entries.filter((e) => e.dataMsb !== undefined).length}`);
   console.log(`  multi-slot families detected: ${slotFamilyCount}`);
   console.log(`  with enumTable (named-value linkage): ${enumLinkedCount}`);
+  console.log(`  with CC-catalog alias: ${aliasCount}`);
+  console.log(`  with wireMax (auto-scale eligible): ${wireMaxCount}`);
   console.log(`  notes inherited: ${entries.filter((e) => e.notes && !rawNotesPresent(dataRows, e.name)).length}`);
   if (skipped.length > 0) {
     console.log(`  skipped (no NRPN): ${skipped.length}`);
