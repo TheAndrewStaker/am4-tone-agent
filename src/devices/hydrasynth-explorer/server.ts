@@ -47,7 +47,8 @@ import {
   HYDRASYNTH_PARAMS_BY_ID,
 } from './params.js';
 import { HYDRASYNTH_NRPNS, findHydraNrpn, type HydrasynthNrpn } from './nrpn.js';
-import { HYDRASYNTH_ENUMS, resolveHydraEnum } from './enums.js';
+import { HYDRASYNTH_ENUMS } from './enums.js';
+import { resolveNrpnValue, nrpnMessagesFor } from './encoding.js';
 import {
   connectHydrasynth,
   listHydrasynthOutputs,
@@ -81,87 +82,19 @@ function ccBytes(channel: number, cc: number, value: number): number[] {
 }
 
 /**
- * Send the 4-CC NRPN write sequence the Hydrasynth listens for.
- * Order is mandatory: address-MSB → address-LSB → data-MSB → data-LSB.
+ * Send a Hydrasynth NRPN write — 4 sequential CC messages.
  *
- * Two value-encoding modes:
- *   1. Plain 14-bit (most NRPN params): user value 0..16383 splits into
- *      data-MSB = (value >> 7) and data-LSB = value & 0x7F. Used for
- *      cent fine-tunes, wavescan position, mod-matrix amounts, etc.
- *   2. Multi-slot (osc1/2/3, mutator1..4, ringmod1/2 etc.): the slot
- *      index lives in the data-MSB byte, the value lives in data-LSB.
- *      Without this, every osc2/osc3 write secretly hits osc1 because
- *      the family shares one NRPN address. The slot index is baked
- *      into the registry's `dataMsb` field at gen time.
+ * Each CC must be its own `sendMessage()` call. node-midi expects one
+ * MIDI message per invocation; bundling 12 bytes into one call makes
+ * the device only see the first CC (the NRPN address MSB).
  *
- * Each CC must be sent as its own `sendMessage()` call — node-midi's
- * `sendMessage` expects a single MIDI message per invocation. Bundling
- * all 12 bytes into one call made the device receive the first 3 bytes
- * as a CC and ignore the rest as a runt message — only the NRPN
- * address-MSB landed.
+ * Encoding logic (multi-slot dataMsb, 14-bit value split) lives in
+ * `encoding.ts` so it can be golden-tested without a MIDI handle.
  */
-/**
- * Resolve a user-supplied value (number or display name) for an NRPN
- * entry to the integer the device expects on the wire.
- *
- * Three resolution paths:
- *   1. String input → enum-table lookup (filter1type="Vowel" → 10).
- *      Applies any per-param sparse-encoding scale (FX types ×8).
- *   2. Numeric input on a 14-bit param with value ≤ 127 → auto-scale
- *      from 7-bit-style 0..127 onto the param's wireMax range. Lets
- *      callers stay in the familiar 0..127 mental model — sending
- *      "decay=127" puts a 14-bit register near max instead of at
- *      ~1.5% of max. Skipped when the param is a multi-slot register
- *      (dataMsb defined) since those use the LSB byte as a slot-
- *      relative 7-bit value with its own range.
- *   3. Numeric input above 127 OR small wireMax → pass through.
- *
- * Returns the value to feed into sendNrpn (which will further encode
- * data-MSB / data-LSB based on the entry's dataMsb).
- */
-function resolveNrpnValue(entry: HydrasynthNrpn, input: number | string): { wire: number; scaled: boolean } {
-  if (typeof input === 'string') {
-    if (!entry.enumTable) {
-      throw new Error(
-        `Parameter "${entry.name}" doesn't accept name strings — pass a numeric value (notes: ${entry.notes}).`,
-      );
-    }
-    const idx = resolveHydraEnum(entry.enumTable, input);
-    if (idx === undefined) {
-      const table = HYDRASYNTH_ENUMS[entry.enumTable];
-      const sample = table ? Object.values(table).slice(0, 6).join(', ') : '';
-      throw new Error(
-        `Couldn't resolve "${input}" in ${entry.enumTable}. ${sample ? `First few options: ${sample}…` : ''} Call hydra_list_enum_values("${entry.enumTable}") for the full list.`,
-      );
-    }
-    return { wire: idx * (entry.enumValueScale ?? 1), scaled: false };
-  }
-  // Numeric input. Auto-scale 7-bit-style values onto the entry's
-  // 14-bit register when relevant — only for non-slot, non-enum
-  // params with a known wireMax > 127.
-  const isFourteenBit =
-    entry.wireMax !== undefined &&
-    entry.wireMax > 127 &&
-    entry.dataMsb === undefined &&
-    entry.enumTable === undefined;
-  if (isFourteenBit && input >= 0 && input <= 127) {
-    const scaled = Math.round((input * entry.wireMax!) / 127);
-    return { wire: scaled, scaled: true };
-  }
-  return { wire: input, scaled: false };
-}
-
 function sendNrpn(conn: HydrasynthConnection, channel: number, entry: HydrasynthNrpn, value: number): void {
-  const dataMsb = entry.dataMsb !== undefined
-    ? entry.dataMsb & 0x7F
-    : (value >> 7) & 0x7F;
-  const dataLsb = entry.dataMsb !== undefined
-    ? value & 0x7F
-    : value & 0x7F;
-  conn.send(ccBytes(channel, 99, entry.msb));  // CC 99 — NRPN address MSB
-  conn.send(ccBytes(channel, 98, entry.lsb));  // CC 98 — NRPN address LSB
-  conn.send(ccBytes(channel, 6, dataMsb));     // CC  6 — Data Entry MSB
-  conn.send(ccBytes(channel, 38, dataLsb));    // CC 38 — Data Entry LSB
+  for (const msg of nrpnMessagesFor(entry, channel, value)) {
+    conn.send(msg);
+  }
 }
 
 function noteOnBytes(channel: number, note: number, velocity: number): number[] {
