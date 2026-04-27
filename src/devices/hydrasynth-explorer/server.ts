@@ -47,6 +47,7 @@ import {
   HYDRASYNTH_PARAMS_BY_ID,
 } from './params.js';
 import { HYDRASYNTH_NRPNS, findHydraNrpn, type HydrasynthNrpn } from './nrpn.js';
+import { HYDRASYNTH_ENUMS, resolveHydraEnum } from './enums.js';
 import {
   connectHydrasynth,
   listHydrasynthOutputs,
@@ -99,6 +100,35 @@ function ccBytes(channel: number, cc: number, value: number): number[] {
  * as a CC and ignore the rest as a runt message — only the NRPN
  * address-MSB landed.
  */
+/**
+ * Resolve a user-supplied value (number or display name) for an NRPN
+ * entry to the integer the device expects on the wire. For enum-linked
+ * params (filter1type=Vowel, prefxtype="Lo-Fi") this looks up the
+ * index in the bound enum table and applies any value-scaling rule
+ * (FX types use ×8 sparse encoding). For numeric input or non-enum
+ * params it passes through.
+ *
+ * Throws if the input is a string but the param has no enum linkage,
+ * or if the name resolution fails.
+ */
+function resolveNrpnValue(entry: HydrasynthNrpn, input: number | string): number {
+  if (typeof input === 'number') return input;
+  if (!entry.enumTable) {
+    throw new Error(
+      `Parameter "${entry.name}" doesn't accept name strings — pass a numeric value (notes: ${entry.notes}).`,
+    );
+  }
+  const idx = resolveHydraEnum(entry.enumTable, input);
+  if (idx === undefined) {
+    const table = HYDRASYNTH_ENUMS[entry.enumTable];
+    const sample = table ? Object.values(table).slice(0, 6).join(', ') : '';
+    throw new Error(
+      `Couldn't resolve "${input}" in ${entry.enumTable}. ${sample ? `First few options: ${sample}…` : ''} Call hydra_list_enum_values("${entry.enumTable}") for the full list.`,
+    );
+  }
+  return idx * (entry.enumValueScale ?? 1);
+}
+
 function sendNrpn(conn: HydrasynthConnection, channel: number, entry: HydrasynthNrpn, value: number): void {
   const dataMsb = entry.dataMsb !== undefined
     ? entry.dataMsb & 0x7F
@@ -385,10 +415,10 @@ server.registerTool('hydra_set_engine_param', {
   ].join('\n'),
   inputSchema: {
     name: z.string().describe(
-      'Canonical NRPN parameter name (e.g. "filter1type", "osc1semi", "prefxtype", "env1attack"). Call hydra_list_params with category="nrpn" for the full catalog.',
+      'Canonical NRPN parameter name (e.g. "filter1type", "osc1semi", "prefxtype", "env1attacksyncoff"). Call hydra_list_params with category="nrpn" for the full catalog.',
     ),
-    value: z.number().int().min(0).max(16383).describe(
-      '14-bit data value 0..16383. Most engine params use only 0..127 (the low 7 bits); osc cents / wavescan / mod-matrix amount use the full 14-bit range. Consult the param\'s notes (returned in the response) for per-param ranges and signedness.',
+    value: z.union([z.number(), z.string()]).describe(
+      'Numeric value (0..16383) OR — for enum-typed params — the display name as a string. Examples: filter1type=10 or filter1type="Vowel"; prefxtype=40 or prefxtype="Lo-Fi"; osc1type=0 or osc1type="Sine". Most non-enum params use only 0..127 (the low 7 bits); osc cents / wavescan / mod-matrix amount use the full 14-bit range. The tool response includes the parameter\'s notes for per-param ranges and signedness.',
     ),
   },
 }, async ({ name, value }) => {
@@ -402,16 +432,18 @@ server.registerTool('hydra_set_engine_param', {
       `Unknown NRPN parameter "${name}". ${suggestions.length > 0 ? `Closest matches: ${suggestions.join(', ')}.` : 'Call hydra_list_params with category="nrpn" for the full catalog.'}`,
     );
   }
+  const resolvedValue = resolveNrpnValue(entry, value);
   const conn = ensureMidi();
-  sendNrpn(conn, DEFAULT_CHANNEL, entry, value);
+  sendNrpn(conn, DEFAULT_CHANNEL, entry, resolvedValue);
   const ccLine = entry.cc !== undefined
     ? ` (also on CC ${entry.cc} for 7-bit access.)`
     : '';
+  const inputDisplay = typeof value === 'string' ? `"${value}" (resolved to ${resolvedValue})` : `${resolvedValue}`;
   const noteLine = entry.notes ? `\nRange/encoding: ${entry.notes}` : '';
   return {
     content: [{
       type: 'text',
-      text: `Sent NRPN MSB=0x${entry.msb.toString(16).padStart(2, '0')} LSB=0x${entry.lsb.toString(16).padStart(2, '0')} value=${value} (${name}).${ccLine} Reminder: requires Param TX/RX = NRPN on the device.${noteLine}`,
+      text: `Sent NRPN MSB=0x${entry.msb.toString(16).padStart(2, '0')} LSB=0x${entry.lsb.toString(16).padStart(2, '0')} value=${inputDisplay} (${name}).${ccLine} Reminder: requires Param TX/RX = NRPN on the device.${noteLine}`,
     }],
   };
 });
@@ -450,7 +482,7 @@ server.registerTool('hydra_set_engine_params', {
   inputSchema: {
     params: z.array(z.object({
       name: z.string().describe('Canonical NRPN parameter name (e.g. "filter1type", "osc2semi", "env1attacksyncoff").'),
-      value: z.number().int().min(0).max(16383).describe('14-bit data value 0..16383. Most params use only 0..127. Consult the param\'s notes for per-param ranges and signedness.'),
+      value: z.union([z.number(), z.string()]).describe('Numeric value (0..16383) OR enum display name (e.g. "Vowel", "Lo-Fi", "Sine"). Most non-enum params use only 0..127.'),
     }))
       .min(1)
       .max(200)
@@ -459,7 +491,7 @@ server.registerTool('hydra_set_engine_params', {
 }, async ({ params }) => {
   const conn = ensureMidi();
   const errors: string[] = [];
-  const sent: { name: string; value: number; resolvedDataMsb?: number }[] = [];
+  const sent: { name: string; raw: number | string; resolved: number; resolvedDataMsb?: number }[] = [];
   for (let i = 0; i < params.length; i++) {
     const { name, value } = params[i]!;
     const entry = findHydraNrpn(name);
@@ -471,14 +503,22 @@ server.registerTool('hydra_set_engine_params', {
       errors.push(`[${i}] "${name}" — unknown${suggestions.length > 0 ? ` (closest: ${suggestions.join(', ')})` : ''}`);
       continue;
     }
-    sendNrpn(conn, DEFAULT_CHANNEL, entry, value);
-    sent.push({ name, value, resolvedDataMsb: entry.dataMsb });
+    let resolved: number;
+    try {
+      resolved = resolveNrpnValue(entry, value);
+    } catch (err) {
+      errors.push(`[${i}] "${name}" — ${err instanceof Error ? err.message : String(err)}`);
+      continue;
+    }
+    sendNrpn(conn, DEFAULT_CHANNEL, entry, resolved);
+    sent.push({ name, raw: value, resolved, resolvedDataMsb: entry.dataMsb });
     // Pace ≥2 ms between NRPN sequences (edisyn note); 3 ms gives margin.
     if (i < params.length - 1) await sleep(3);
   }
   const lines = sent.map((s) => {
     const slotNote = s.resolvedDataMsb !== undefined ? ` [slot ${s.resolvedDataMsb}]` : '';
-    return `  ${s.name} = ${s.value}${slotNote}`;
+    const valueNote = typeof s.raw === 'string' ? `"${s.raw}" (${s.resolved})` : `${s.resolved}`;
+    return `  ${s.name} = ${valueNote}${slotNote}`;
   });
   const errorBlock = errors.length > 0
     ? `\n\nErrors (${errors.length}):\n${errors.map((e) => `  ${e}`).join('\n')}`
@@ -487,6 +527,57 @@ server.registerTool('hydra_set_engine_params', {
     content: [{
       type: 'text',
       text: `Sent ${sent.length} NRPN write(s) with ~3 ms pacing:\n${lines.join('\n')}${errorBlock}\n\nReminder: requires Param TX/RX = NRPN on the device.`,
+    }],
+  };
+});
+
+// hydra_list_enum_values --------------------------------------------------
+
+server.registerTool('hydra_list_enum_values', {
+  description: [
+    'Use this tool to inspect the named lookup tables backing the Hydrasynth\'s',
+    'enum-typed parameters — wave names (OSC_WAVES, 219 entries), filter types',
+    '(FILTER_1_TYPES = 16, FILTER_2_TYPES = 2), FX types (FX_TYPES = 10), mutant',
+    'modes, ARP modes, vibrato rates, and ~40 more. 49 tables / 2716 entries total.',
+    '',
+    'When you call hydra_set_engine_param or hydra_set_engine_params for an',
+    'enum-typed parameter (filter1type, osc1type, prefxtype, postfxtype,',
+    'mutator1mode, etc.), the value field accepts the display name as a string',
+    '— e.g. filter1type="Vowel" instead of filter1type=10. This tool helps',
+    'you discover which display names a given table contains.',
+    '',
+    'Without an argument, returns the list of table names + entry counts.',
+    'With a name, returns the index→name mapping for that table.',
+  ].join('\n'),
+  inputSchema: {
+    name: z.string().optional().describe('Optional enum-table name (e.g. "FILTER_1_TYPES", "OSC_WAVES", "FX_TYPES"). Case-sensitive. Omit to list all tables.'),
+  },
+}, async ({ name }) => {
+  if (!name) {
+    const summary = Object.entries(HYDRASYNTH_ENUMS)
+      .map(([n, t]) => `  ${n.padEnd(28)} ${Object.keys(t).length} entries`)
+      .join('\n');
+    return {
+      content: [{
+        type: 'text',
+        text: `${Object.keys(HYDRASYNTH_ENUMS).length} enum tables:\n${summary}`,
+      }],
+    };
+  }
+  const table = HYDRASYNTH_ENUMS[name];
+  if (!table) {
+    const closest = Object.keys(HYDRASYNTH_ENUMS)
+      .filter((n) => n.toLowerCase().includes(name.toLowerCase()) || name.toLowerCase().includes(n.toLowerCase().slice(0, 4)))
+      .slice(0, 6);
+    throw new Error(
+      `Unknown enum table "${name}". ${closest.length > 0 ? `Closest matches: ${closest.join(', ')}.` : 'Call hydra_list_enum_values without an argument to see all tables.'}`,
+    );
+  }
+  const rows = Object.entries(table).map(([idx, val]) => `  ${String(idx).padStart(3)}  ${val}`).join('\n');
+  return {
+    content: [{
+      type: 'text',
+      text: `${name} (${Object.keys(table).length} entries):\n${rows}`,
     }],
   };
 });

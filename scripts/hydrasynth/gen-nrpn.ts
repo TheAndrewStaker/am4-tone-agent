@@ -103,6 +103,22 @@ interface NrpnRow {
    */
   dataMsb?: number;
   /**
+   * Name of the enum lookup table that maps integer indices to
+   * display names (e.g. "FILTER_1_TYPES" → ["LP Ladder 12", ...]).
+   * Set when the NRPN notes reference one by name — auto-detected
+   * at gen time. Tools use this to accept name strings ("Vowel")
+   * in addition to integers (10).
+   */
+  enumTable?: string;
+  /**
+   * Multiplier applied to the resolved enum index before sending.
+   * Hydrasynth's prefxtype / postfxtype use index × 8 sparse
+   * encoding: Bypass=0, Chorus=8, Flanger=16, etc. Without the
+   * multiplier, "Lo-Fi" (index 5) would write as 5 to the device,
+   * which the device interprets as a near-Bypass value.
+   */
+  enumValueScale?: number;
+  /**
    * Range / display notes from the CSV. Often blank for "follow-on"
    * params (osc2type defers to osc1type for its description); we
    * resolve those at generation time so the emitted file is
@@ -110,6 +126,36 @@ interface NrpnRow {
    */
   notes: string;
 }
+
+/**
+ * Hand-curated overrides where the NRPN notes use an inline-list
+ * form ("[0,9] output as 0,8,16,... representing Bypass, Chorus,
+ * Flanger, ...") rather than naming a canonical enum table. We
+ * map these to the corresponding ASMHydrasynth.java enum and
+ * record any value-scaling rule.
+ */
+const ENUM_OVERRIDES: Record<string, { enumTable: string; enumValueScale?: number }> = {
+  prefxtype: { enumTable: 'FX_TYPES', enumValueScale: 8 },
+  postfxtype: { enumTable: 'FX_TYPES', enumValueScale: 8 },
+  // Mutator mode notes use inline string lists ("FM-Linear", ...)
+  // instead of naming MUTANT_MODES; link manually.
+  mutator1mode: { enumTable: 'MUTANT_MODES' },
+  mutator2mode: { enumTable: 'MUTANT_MODES' },
+  mutator3mode: { enumTable: 'MUTANT_MODES' },
+  mutator4mode: { enumTable: 'MUTANT_MODES' },
+  // Filter 2 type notes use inline ("LP-BP-HP", "LP-Notch-HP") form.
+  filter2type: { enumTable: 'FILTER_2_TYPES' },
+  // Mutator FM-Linear sources (inline list, names match MUTANT_SOURCES_FM_LIN).
+  mutator1sourcefmlin: { enumTable: 'MUTANT_SOURCES_FM_LIN' },
+  mutator2sourcefmlin: { enumTable: 'MUTANT_SOURCES_FM_LIN' },
+  mutator3sourcefmlin: { enumTable: 'MUTANT_SOURCES_FM_LIN' },
+  mutator4sourcefmlin: { enumTable: 'MUTANT_SOURCES_FM_LIN' },
+  // Mutator Osc-Sync sources.
+  mutator1sourceoscsync: { enumTable: 'MUTANT_SOURCES_OSC_SYNC' },
+  mutator2sourceoscsync: { enumTable: 'MUTANT_SOURCES_OSC_SYNC' },
+  mutator3sourceoscsync: { enumTable: 'MUTANT_SOURCES_OSC_SYNC' },
+  mutator4sourceoscsync: { enumTable: 'MUTANT_SOURCES_OSC_SYNC' },
+};
 
 /**
  * The CSV uses a "look up the first numbered sibling" convention for
@@ -278,6 +324,44 @@ function main(): void {
     slotFamilyCount++;
   }
 
+  // Detect enum-table references in the notes column. Edisyn writes
+  // "[0-218] OSC_WAVES" or "[0,15] FILTER_1_TYPES" when the param
+  // indexes a named lookup table. We grep for any token matching the
+  // ALL_CAPS_WITH_UNDERSCORES naming convention that ASMHydrasynth.java
+  // uses, then verify the named table actually exists in enums.ts.
+  const ENUMS_PATH = path.resolve(__dirname, '../../src/devices/hydrasynth-explorer/enums.ts');
+  const knownEnumNames = new Set<string>();
+  if (fs.existsSync(ENUMS_PATH)) {
+    const enumsText = fs.readFileSync(ENUMS_PATH, 'utf8');
+    const exportRe = /export const ([A-Z][A-Z_0-9]+):/g;
+    let em: RegExpExecArray | null;
+    while ((em = exportRe.exec(enumsText)) !== null) {
+      knownEnumNames.add(em[1]!);
+    }
+  }
+  let enumLinkedCount = 0;
+  for (const e of entries) {
+    // Hand-curated overrides take precedence (FX sparse encoding etc.).
+    const stripped = e.name.replace(/_bpm_sync$/, '');
+    const override = ENUM_OVERRIDES[stripped];
+    if (override) {
+      e.enumTable = override.enumTable;
+      e.enumValueScale = override.enumValueScale;
+      enumLinkedCount++;
+      continue;
+    }
+    // Otherwise scan the notes for a known enum-table token.
+    const tokenRe = /\b([A-Z][A-Z_0-9]{2,})\b/g;
+    let tm: RegExpExecArray | null;
+    while ((tm = tokenRe.exec(e.notes)) !== null) {
+      if (knownEnumNames.has(tm[1]!)) {
+        e.enumTable = tm[1]!;
+        enumLinkedCount++;
+        break;
+      }
+    }
+  }
+
   // Emit TypeScript.
   const out: string[] = [];
   out.push('// AUTO-GENERATED FILE — do not edit by hand.');
@@ -310,6 +394,18 @@ function main(): void {
   out.push('   * the value is split across data-MSB+LSB as a 14-bit number.');
   out.push('   */');
   out.push('  readonly dataMsb?: number;');
+  out.push('  /**');
+  out.push('   * Name of the enum lookup table from enums.ts (e.g. "OSC_WAVES",');
+  out.push('   * "FILTER_1_TYPES", "FX_TYPES"). Auto-detected from the notes column');
+  out.push('   * at gen time. When set, the runtime accepts a name string in addition');
+  out.push('   * to a number for the value field.');
+  out.push('   */');
+  out.push('  readonly enumTable?: string;');
+  out.push('  /**');
+  out.push('   * Multiplier applied to a resolved enum index before sending. Used for');
+  out.push("   * Hydrasynth's sparse-encoded FX type (×8 — Bypass=0, Chorus=8, etc.).");
+  out.push('   */');
+  out.push('  readonly enumValueScale?: number;');
   out.push('  /** 7-bit CC alias if the param is also on the manual chart. */');
   out.push('  readonly cc?: number;');
   out.push('  /** Range + display instructions from edisyn\'s CSV. */');
@@ -319,10 +415,12 @@ function main(): void {
   out.push('export const HYDRASYNTH_NRPNS: readonly HydrasynthNrpn[] = [');
   for (const e of entries) {
     const dataMsbPart = e.dataMsb !== undefined ? `, dataMsb: ${e.dataMsb}` : '';
+    const enumTablePart = e.enumTable !== undefined ? `, enumTable: ${JSON.stringify(e.enumTable)}` : '';
+    const enumScalePart = e.enumValueScale !== undefined ? `, enumValueScale: ${e.enumValueScale}` : '';
     const ccPart = e.cc !== undefined ? `, cc: 0x${e.cc.toString(16).padStart(2, '0')}` : '';
     const notes = JSON.stringify(e.notes);
     out.push(
-      `  { name: ${JSON.stringify(e.name).padEnd(36)}, msb: 0x${e.msb.toString(16).padStart(2, '0')}, lsb: 0x${e.lsb.toString(16).padStart(2, '0')}${dataMsbPart}${ccPart}, notes: ${notes} },`,
+      `  { name: ${JSON.stringify(e.name).padEnd(36)}, msb: 0x${e.msb.toString(16).padStart(2, '0')}, lsb: 0x${e.lsb.toString(16).padStart(2, '0')}${dataMsbPart}${enumTablePart}${enumScalePart}${ccPart}, notes: ${notes} },`,
     );
   }
   out.push('];');
@@ -341,6 +439,7 @@ function main(): void {
   console.log(`  with CC alias: ${entries.filter((e) => e.cc !== undefined).length}`);
   console.log(`  with dataMsb (multi-slot families): ${entries.filter((e) => e.dataMsb !== undefined).length}`);
   console.log(`  multi-slot families detected: ${slotFamilyCount}`);
+  console.log(`  with enumTable (named-value linkage): ${enumLinkedCount}`);
   console.log(`  notes inherited: ${entries.filter((e) => e.notes && !rawNotesPresent(dataRows, e.name)).length}`);
   if (skipped.length > 0) {
     console.log(`  skipped (no NRPN): ${skipped.length}`);
