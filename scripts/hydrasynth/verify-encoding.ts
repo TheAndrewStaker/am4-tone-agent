@@ -89,15 +89,19 @@ const cases: Case[] = [
   }),
 
   // ---------------- 14-bit auto-scale -------------------------------------
-  check('auto-scale: filter1cutoff value=64 → wire ≈ 4128 (50% of 8192)', () => {
+  check('auto-scale: filter1cutoff value=64 → wire 4096 (display 64.0 exact)', () => {
     const r = resolveNrpnValue(getOrThrow('filter1cutoff'), 64);
     if (!r.scaled) return 'should have scaled';
-    return r.wire === Math.round(64 * 8192 / 127)
-      ? true : `wire=${r.wire}`;
+    return r.wire === 4096 ? true : `wire=${r.wire}`;
   }),
-  check('auto-scale: filter1cutoff value=127 → wire 8192 (max)', () => {
-    const r = resolveNrpnValue(getOrThrow('filter1cutoff'), 127);
+  check('auto-scale: filter1cutoff value=128 → wire 8192 (max)', () => {
+    const r = resolveNrpnValue(getOrThrow('filter1cutoff'), 128);
     return r.wire === 8192 && r.scaled
+      ? true : `got ${JSON.stringify(r)}`;
+  }),
+  check('auto-scale: filter1cutoff value=127 → wire 8128 (display 127.0 exact)', () => {
+    const r = resolveNrpnValue(getOrThrow('filter1cutoff'), 127);
+    return r.wire === 8128 && r.scaled
       ? true : `got ${JSON.stringify(r)}`;
   }),
   check('auto-scale: filter1cutoff value=0 → wire 0 (min)', () => {
@@ -105,21 +109,25 @@ const cases: Case[] = [
     return r.wire === 0 && r.scaled
       ? true : `got ${JSON.stringify(r)}`;
   }),
-  check('auto-scale skipped: filter1cutoff value=8000 passes through (>127)', () => {
+  check('auto-scale skipped: filter1cutoff value=8000 passes through (>128)', () => {
     const r = resolveNrpnValue(getOrThrow('filter1cutoff'), 8000);
     return r.wire === 8000 && !r.scaled
       ? true : `got ${JSON.stringify(r)}`;
   }),
-  check('auto-scale: env1sustain value=127 → wire ≈ 8128', () => {
-    const r = resolveNrpnValue(getOrThrow('env1sustain'), 127);
+  check('auto-scale: mixerosc1vol value=55 → wire 3520 (display 55.0 exact)', () => {
+    const r = resolveNrpnValue(getOrThrow('mixerosc1vol'), 55);
+    return r.wire === 3520 && r.scaled
+      ? true : `got wire=${r.wire}`;
+  }),
+  check('auto-scale: filter1resonance value=15 → wire 960 (display 15.0 exact)', () => {
+    const r = resolveNrpnValue(getOrThrow('filter1resonance'), 15);
+    return r.wire === 960 && r.scaled
+      ? true : `got wire=${r.wire}`;
+  }),
+  check('auto-scale: env1sustain value=128 → wire 8192 (max)', () => {
+    const r = resolveNrpnValue(getOrThrow('env1sustain'), 128);
     return r.wire === 8192 && r.scaled
       ? true : `got ${JSON.stringify(r)}`;
-  }),
-  check('auto-scale: mixerosc1vol value=100 → wire ≈ 6450', () => {
-    const r = resolveNrpnValue(getOrThrow('mixerosc1vol'), 100);
-    const expected = Math.round(100 * 8192 / 127);
-    return r.wire === expected && r.scaled
-      ? true : `got wire=${r.wire}, expected ${expected}`;
   }),
 
   // ---------------- Multi-slot disambiguation -----------------------------
@@ -225,11 +233,11 @@ const cases: Case[] = [
   }),
 
   // ---------------- Plain 14-bit splitting (no auto-scale, no slot) -------
-  check('14-bit split: filter1cutoff wire=4128 → data MSB 32 / LSB 32', () => {
-    const msgs = nrpnMessagesFor(getOrThrow('filter1cutoff'), 1, 4128);
-    // 4128 = 0x1020 → MSB = 0x20 = 32, LSB = 0x20 = 32
+  check('14-bit split: filter1cutoff wire=4096 → data MSB 32 / LSB 0', () => {
+    const msgs = nrpnMessagesFor(getOrThrow('filter1cutoff'), 1, 4096);
+    // 4096 = 0x1000 → MSB = 0x20 = 32, LSB = 0x00 = 0
     return deepEq(msgs[2], [0xb0, 6, 32], 'data MSB') === true
-        && deepEq(msgs[3], [0xb0, 38, 32], 'data LSB') === true
+        && deepEq(msgs[3], [0xb0, 38, 0], 'data LSB') === true
       ? true : `got data MSB=${msgs[2]?.[2]}, LSB=${msgs[3]?.[2]}`;
   }),
   check('14-bit split: filter1cutoff wire=8192 → data MSB 64 / LSB 0', () => {

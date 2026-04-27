@@ -61,8 +61,15 @@ export function resolveNrpnValue(entry: HydrasynthNrpn, input: number | string):
     entry.wireMax > 127 &&
     entry.dataMsb === undefined &&
     entry.enumTable === undefined;
-  if (isFourteenBit && input >= 0 && input <= 127) {
-    return { wire: Math.round((input * entry.wireMax!) / 127), scaled: true };
+  if (isFourteenBit && input >= 0 && input <= 128) {
+    // Hydrasynth's display goes 0..128, not 0..127. Most engine knobs
+    // show `display = wire / 64` (with wireMax=8192 ⇒ display max 128.0).
+    // We scale `value × wireMax / 128` so integer inputs land on integer
+    // displays — value=55 → wire=3520 → display=55.0 exact, not 55.4.
+    // Trade-off: value=127 hits 127.0 display rather than max; pass 128
+    // (or any value ≥ 128) to reach the actual max wire value.
+    const wire = Math.min(Math.round((input * entry.wireMax!) / 128), entry.wireMax!);
+    return { wire, scaled: true };
   }
   return { wire: input, scaled: false };
 }
