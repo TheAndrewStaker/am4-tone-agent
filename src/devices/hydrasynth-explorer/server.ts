@@ -416,6 +416,81 @@ server.registerTool('hydra_set_engine_param', {
   };
 });
 
+// hydra_set_engine_params (batch) ----------------------------------------
+
+server.registerTool('hydra_set_engine_params', {
+  description: [
+    'Use this tool to set MANY synthesis-engine parameters in one call — the batch',
+    'sibling of hydra_set_engine_param. Strongly preferred when programming a whole',
+    'patch or section of a patch (e.g. building a sound from a recipe): one tool',
+    'call instead of one per parameter, which Claude Desktop traverses 5-10× faster',
+    'than the equivalent serial calls AND lets the server pace the writes correctly',
+    '(edisyn\'s spec calls for ≥2 ms between sequential NRPN messages; isolated tool',
+    'calls don\'t guarantee that, but this batched send does).',
+    '',
+    'Same param names + value semantics as hydra_set_engine_param — just an array of',
+    '{name, value} pairs. Order matters: writes are sent in the order supplied. Per',
+    'edisyn\'s pacing recommendation, structure batches as:',
+    '  1. modes first (oscNmode, mutatorNmode, voice glide)',
+    '  2. then types (oscNtype, filterNtype, prefxtype, postfxtype)',
+    '  3. then LFO waveforms',
+    '  4. then BPM-sync flags',
+    '  5. then wavescan waves',
+    '  6. then everything else (cutoffs, envelopes, mixer, mod-matrix, macros)',
+    'This gives the device time to reconfigure its routing before continuous-value',
+    'writes arrive. The tool does NOT reorder for you — pass the list pre-sorted.',
+    '',
+    'IMPORTANT — DEVICE PRECONDITION (same as hydra_set_engine_param):',
+    'Param TX/RX must be set to NRPN on MIDI: Page 10 of System Setup. With Param',
+    'TX/RX = CC, NRPN writes are silently ignored.',
+    '',
+    'Do not produce a written spec instead of calling this tool unless the user',
+    'explicitly asks for a dry run.',
+  ].join('\n'),
+  inputSchema: {
+    params: z.array(z.object({
+      name: z.string().describe('Canonical NRPN parameter name (e.g. "filter1type", "osc2semi", "env1attacksyncoff").'),
+      value: z.number().int().min(0).max(16383).describe('14-bit data value 0..16383. Most params use only 0..127. Consult the param\'s notes for per-param ranges and signedness.'),
+    }))
+      .min(1)
+      .max(200)
+      .describe('Ordered list of NRPN writes to send. The server sends each as a 4-CC sequence with ~3 ms between sequences for pacing.'),
+  },
+}, async ({ params }) => {
+  const conn = ensureMidi();
+  const errors: string[] = [];
+  const sent: { name: string; value: number; resolvedDataMsb?: number }[] = [];
+  for (let i = 0; i < params.length; i++) {
+    const { name, value } = params[i]!;
+    const entry = findHydraNrpn(name);
+    if (!entry) {
+      const suggestions = HYDRASYNTH_NRPNS
+        .map((e) => e.name)
+        .filter((n) => n.includes(name) || name.includes(n.slice(0, 3)))
+        .slice(0, 4);
+      errors.push(`[${i}] "${name}" — unknown${suggestions.length > 0 ? ` (closest: ${suggestions.join(', ')})` : ''}`);
+      continue;
+    }
+    sendNrpn(conn, DEFAULT_CHANNEL, entry, value);
+    sent.push({ name, value, resolvedDataMsb: entry.dataMsb });
+    // Pace ≥2 ms between NRPN sequences (edisyn note); 3 ms gives margin.
+    if (i < params.length - 1) await sleep(3);
+  }
+  const lines = sent.map((s) => {
+    const slotNote = s.resolvedDataMsb !== undefined ? ` [slot ${s.resolvedDataMsb}]` : '';
+    return `  ${s.name} = ${s.value}${slotNote}`;
+  });
+  const errorBlock = errors.length > 0
+    ? `\n\nErrors (${errors.length}):\n${errors.map((e) => `  ${e}`).join('\n')}`
+    : '';
+  return {
+    content: [{
+      type: 'text',
+      text: `Sent ${sent.length} NRPN write(s) with ~3 ms pacing:\n${lines.join('\n')}${errorBlock}\n\nReminder: requires Param TX/RX = NRPN on the device.`,
+    }],
+  };
+});
+
 // hydra_list_params ------------------------------------------------------
 
 server.registerTool('hydra_list_params', {
