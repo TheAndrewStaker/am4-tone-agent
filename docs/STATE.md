@@ -5,7 +5,59 @@
 > hardware tasks (USB captures, round-trip tests, reference dumps) live
 > in **`docs/HARDWARE-TASKS.md`** — check that file alongside this one at
 > session start.
-> Last updated: **2026-04-26** (Session 34 — HW-035 + HW-036 Gate /
+> Last updated: **2026-04-28** (Session 35 — Hydrasynth pivot to
+> SysEx patch flow). **BK-037 partially shipped, remainder
+> superseded.** Bipolar auto-scale landed: registry now flags 483
+> bipolar entries (`displayMin`/`displayMax`) auto-detected by
+> gen-nrpn from the `displayed as [-X,Y]` notes pattern;
+> `resolveNrpnValue` adds a bipolar branch where `value 0` →
+> wire-center for signed-display params (was `value 0` → wire 0
+> = display-min, the original bug). 13 new bipolar goldens cover
+> the two confirmed silence cases (filter1env1amount = 0 → wire
+> 4096; filter1keytrack = 0 → wire 4096) plus pan, the asymmetric
+> EQ ranges, and the regression case (value=-52 → wire 768, the
+> original Van Halen value). New `hydra_apply_init` MCP tool
+> ships INIT_PATCH-only as a recovery primitive; `params:
+> minItems` relaxed from 1 to 0 with a runtime guard. Tool
+> response now surfaces `[bipolar -X..+Y, display ±N]` so callers
+> see the resolution. 61/61 hydra goldens pass; tsc clean.
+>
+> **Hardware verification: bipolar fix confirmed live, but silence
+> persists from another cause.** Founder pressed device INIT,
+> sent value=12 to filter1env1amount on the OLD code → display
+> showed -52.0 (math: 768 / 6.4 - 64 = -52, exact). After
+> shipping the fix and restarting Claude Desktop, `hydra_apply_init`
+> still leaves the device silent with no waveform on key-press —
+> meaning the bipolar bug was *one* of multiple silence causes,
+> not the only one. Strongest remaining suspect: INIT_PATCH writes
+> `modmatrix1..32 modtarget = 0` which likely disables factory-
+> hardwired routings (env1 → DCA amp). Root cause **not pinned**;
+> investigation halted by founder decision (see pivot below).
+>
+> **Pivot to BK-036 SysEx (founder confirmed 2026-04-28).**
+> NRPN-prelude approach is fundamentally bleed-through-prone —
+> any param NOT explicitly written carries forward from the prior
+> patch, and any param written destructively (bipolar, mod-matrix,
+> velocity-sensitivity, …) silences or warps the patch. SysEx
+> sends a complete 2462-byte patch buffer atomically — every
+> parameter at a known value, no prelude, no whack-a-mole. BK-036
+> escalated to P0 in `04-BACKLOG.md`. INIT_PATCH retires once
+> SysEx lands; `hydra_apply_init` rewires under the hood to send
+> a SysEx default patch (~3 ms wire time vs current ~300 ms,
+> audible-by-construction). Bipolar auto-scale stays — benefits
+> single-knob NRPN tweaks ("make it brighter") which are the
+> natural conversational flow regardless of patch primitive.
+> Iconic-tone testing pauses until BK-036 lands (~2-3 sessions).
+>
+> **BK-038 backlogged — Hydrasynth `hydra_reconnect_midi`.** Hydra
+> server has no equivalent to AM4's `reconnect_midi`. Two failure
+> modes observed: (a) starting server with synth powered off
+> caches `midiError` permanently; (b) mid-session unplug+replug
+> dies on the cached handle with no refresh path. Workaround
+> today: full Claude Desktop quit+restart. P1, ship before
+> non-technical users see the tool.
+>
+> Pre-existing context — Session 34 — HW-035 + HW-036 Gate /
 > In-Gate decode landed. Founder captured a Modern Gate (slot)
 > + an Intelligent In-Gate with paired AM4-Edit screenshots
 > (`samples/captured/session-34-{slotgate,inputgate}-extended.pcapng`
@@ -614,21 +666,54 @@ float32. One open question remains before the IR can cover full presets:
 
 ## The single next action
 
-**Most-likely next session: HW-037 (Enhancer first-page knob
-mapping) or BK-032 closure check.**
-HW-035 + HW-036 closed Session 34 — 10 new Gate / In-Gate
-params landed in one combined capture pass. The remaining
-HW-032 residual is HW-037 (Enhancer first-page knob mapping).
-HW-032 captured the Enhancer pcapng but didn't pair a
-screenshot, so 5 captured pidHighs (0x0000=11, 0x000a=0.20,
-0x000b=0.10, 0x000c=11, 0x000d=3200) still can't be matched
-to UI labels. One screenshot of the Enhancer Config page
-showing every knob's value is enough — no recapture needed
-unless the existing pcapng's state has drifted. With HW-037
-done, BK-032 first-page-knob coverage hits its release-gate
-target across every block. After that the protocol track
-mostly winds down for this phase; preset-management UX (auto-
-backup, save flow polish) takes over as the critical path.
+**Most-likely next session: BK-036 — Hydrasynth SysEx patch
+flow. Start with the SysEx envelope module (~1 session).**
+
+The Hydrasynth NRPN-prelude approach (`freshPatch: true` /
+`hydra_apply_init`) is fundamentally bleed-through-prone and
+just landed in a "silent on init" regression that founder chose
+to halt rather than chase further (see top-of-file Session 35
+entry for full context). SysEx sends a complete patch atomically
+— every parameter at a known value, no prelude, no whack-a-mole.
+
+**BK-036 sequencing (per `04-BACKLOG.md`):**
+1. **SysEx envelope module** (~1 session, no hardware needed).
+   New file `src/devices/hydrasynth-explorer/sysexEnvelope.ts`:
+   - `wrapSysex(payload: Uint8Array): number[]` — produces the
+     full F0…F7 message with `F0 00 20 2B 00 6F` header,
+     base64-encoded payload, 4-byte CRC-32, F7 footer.
+   - `unwrapSysex(msg: number[]): Uint8Array` — reverse.
+   - Goldens against edisyn's documented byte-traces in
+     `references/SysexEncoding.txt`.
+   - **Why first:** pure encoding logic; can be developed and
+     verified without touching the device. Unblocks step 2.
+2. **Patch byte-map encoder** (~1 session). `patchEncoder.ts`
+   with `encodePatch(params)` / `decodePatch(buf)` against the
+   2462-byte format documented in `references/SysexPatchFormat.txt`.
+3. **MCP tool surface** (~1 session, hardware verification).
+   `hydra_apply_patch`, `hydra_request_patch`,
+   `hydra_load_hydra_file`. Rewire `hydra_apply_init` to send a
+   SysEx default patch instead of NRPN prelude. INIT_PATCH file
+   retires.
+
+**What survives from BK-037 (do not touch):**
+- Bipolar `displayMin`/`displayMax` registry tags + bipolar branch
+  in `resolveNrpnValue` — benefits single-knob NRPN tweaks, which
+  remain the natural conversational flow even after SysEx ships.
+- `hydra_set_engine_param` and `hydra_set_engine_params` for
+  single-tweak / few-param recipes.
+
+**What's abandoned (do not implement):**
+- BK-037 deliverable 6 (filter2/amp-vel INIT_PATCH expansion).
+- Mod-matrix-target investigation (modmatrix*modtarget=0 disabling
+  factory routings — irrelevant once SysEx replaces the prelude).
+- Any further INIT_PATCH bug-hunting.
+
+**Earlier (still applicable, AM4 track):** HW-037 (Enhancer
+first-page knob mapping) is the last HW-032 residual on the AM4
+side — one screenshot, no recapture. Can run in parallel with
+BK-036 (different device, no contention). Closes BK-032's
+release-gate target across every AM4 block.
 
 **Earlier (still applicable):**
 BK-030 closed Session 30 cont 7 — connection registry, five

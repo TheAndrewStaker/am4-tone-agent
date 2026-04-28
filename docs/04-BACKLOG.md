@@ -2899,7 +2899,276 @@ Skip until explicit user demand materializes.
   envelope from a USBPcap capture of ASM Manager doing a
   Save-Patch operation.
 
-- **Priority:** medium-high. After the next 1–2 hardware tests
-  validate `freshPatch` covers the practical use case; move up
-  if `freshPatch` proves insufficient or `.hydra` loading
-  becomes a user request.
+- **Priority — escalated to P0 (2026-04-28).** `freshPatch` did
+  NOT prove sufficient. Hardware testing post-BK-037 confirmed
+  silence persists from causes the NRPN prelude can't address —
+  most likely INIT_PATCH disabling factory mod-matrix routings
+  (e.g. env1 → DCA amp), but exact root cause not pinned because
+  the founder explicitly chose to stop debugging the NRPN prelude
+  and pivot to SysEx as the durable solution. SysEx eliminates
+  the bleed-through whack-a-mole entirely: a complete patch is
+  sent atomically, every parameter at a known value, no prelude
+  to debug. INIT_PATCH retires once SysEx lands.
+
+- **Pivot decision (2026-04-28).** Founder confirmed: stop
+  investigating INIT_PATCH bugs; ship BK-036 instead. Iconic-tone
+  testing pauses until SysEx lands (~2-3 sessions of work).
+
+- **What survives from BK-037:**
+  - **Bipolar auto-scale** (encoding.ts) stays — benefits every
+    single-knob NRPN tweak (`filter1cutoff = 90`, etc.), which is
+    the natural conversational flow even when SysEx is the
+    patch-build primitive. The bipolar flag carries through to
+    SysEx encoding too (display values still need signed semantics
+    in the patch byte map).
+  - **`hydra_apply_init` tool** stays as the recovery primitive
+    but rewires under the hood: instead of sending the 99-write
+    NRPN prelude, it sends a known-good default *patch* via
+    SysEx (~3 ms wire time vs ~300 ms, audible-by-construction
+    since every byte is set explicitly).
+
+- **What retires when BK-036 ships:**
+  - `INIT_PATCH` template (`initPatch.ts`) — replaced by a
+    default patch buffer encoded once via `encodePatch`.
+  - `freshPatch: true` flag on `hydra_set_engine_params` —
+    deprecated; recipe-style requests route through
+    `hydra_apply_patch` instead. Or kept as a thin alias that
+    builds an init-merged param map and calls
+    `hydra_apply_patch`.
+  - BK-037 deliverable 6 (filter2 / amp-vel INIT_PATCH expansion)
+    — never built. Subsumed by SysEx covering all 1175 params.
+
+### BK-037 Hydrasynth bipolar-aware auto-scale + INIT_PATCH safety — 🟡 partially shipped, remainder superseded by BK-036
+
+- **Status (2026-04-28):** Deliverables 1, 2, 3, 4, 5 shipped.
+  Deliverable 6 (INIT_PATCH expansion for filter2/amp-vel) and
+  any further INIT_PATCH bug-hunting (e.g. mod-matrix routings)
+  are **abandoned** in favor of BK-036's SysEx patch flow, which
+  eliminates the prelude entirely. Hardware validation revealed a
+  third silence cause (likely mod-matrix targets disabling
+  factory routings) that was not pinned down before the pivot —
+  it's irrelevant once the NRPN prelude retires.
+
+- **What shipped (still in production):**
+  - `displayMin` / `displayMax` flagged on 483 bipolar registry
+    entries (gen-nrpn.ts auto-detection).
+  - Bipolar-aware `resolveNrpnValue` — value 0 → wire-center for
+    bipolar params; signed offsets for ±N. Carries forward to
+    BK-036 since SysEx patch encoding still needs signed display
+    semantics for the same params.
+  - `hydra_apply_init` MCP tool (currently sends INIT_PATCH;
+    rewires under BK-036 to send a SysEx default patch).
+  - `params: minItems: 0` schema relax + runtime guard.
+  - 13 new bipolar goldens in `verify-encoding.ts`.
+
+- **What's abandoned (do not implement):**
+  - Deliverable 6 — filter2/amp-vel INIT_PATCH expansion.
+  - Mod-matrix-target investigation — factory routings get
+    re-installed when SysEx sends a complete patch, so the
+    "INIT_PATCH disables critical routes" problem evaporates.
+  - Any further INIT_PATCH bug-hunting.
+
+- **Original problem statement preserved below for context.**
+  Surfaced 2026-04-28 during Van Halen "Jump" silence diagnosis.
+  Two distinct bipolar-related defects landed the device in
+  unrecoverably-silent state from `freshPatch: true` alone.
+
+- **Root cause confirmed on hardware** (2026-04-28, Session
+  post-Van-Halen):
+  - The auto-scale rule (`wire = round(value × wireMax / 128)`) is
+    correct for unipolar params (display 0..N). For bipolar params
+    (display −N..+N centered at wire `wireMax/2`), value 0 maps to
+    wire 0 = max NEGATIVE display, not center.
+  - INIT_PATCH writes `value: 0` to two bipolar params intending
+    "neutral":
+    - `filter1env1amount` → display **−64** (envelope slams filter
+      shut on every note; user-confirmed `Filter1.ENV1amt = -64.0`
+      on device).
+    - `filter1keytrack` → display **−200%** (cutoff drops 200% per
+      octave; user-confirmed `KEYTRACK = -200%` on device).
+  - Compounding effect: prelude sets cutoff = 128, then yanks
+    cutoff down by 64 (env mod) and again by up to 200% (keytrack)
+    on any note above the keytrack reference. Result: silent or
+    near-silent across the full keyboard.
+  - Diagnosis confirmed by isolating prelude-only via
+    `hydra_set_engine_params({ params: [{name: "osc1type", value:
+    "Sine"}], freshPatch: true })` — the no-op overlay leaves only
+    the prelude, which silenced an INIT-baseline patch.
+  - Same trap is dormant for any user write to a bipolar param
+    (env amounts, pan, keytrack, mod-matrix depth, etc.). The
+    Van Halen "Jump" silence Claude couldn't recover from in
+    Session 4 (2026-04-28) had this as one of two layered causes.
+
+- **Deliverables:**
+
+  1. **Bipolar-aware auto-scale.** Add a `bipolar?: true` flag to
+     registry entries whose display range is signed. Sweep
+     `nrpn.ts` for notes containing `[-`, `2's complement`,
+     `centered`, signed-range patterns; tag each entry. Estimated
+     30–60 entries (pan, keytrack, env amounts, glide signed
+     values, mod-matrix depths, vibrato depth in some cases).
+     When `bipolar: true`, auto-scale becomes:
+     - value 0   → wire = `wireMax / 2`     (display 0, no mod)
+     - value +N  → wire = `wireMax/2 + round(N × (wireMax/2) / N_MAX)`
+     - value -N  → wire = `wireMax/2 - round(N × (wireMax/2) / N_MAX)`
+     where `N_MAX` is the display-side maximum (64 for env amount,
+     200 for keytrack, etc.). Either store `displayMax` in the
+     registry or derive a per-entry signedness convention.
+
+     Alternative: refuse to auto-scale bipolar params and require
+     raw wire values (`wireMax/2 ± offset`). Less ergonomic but
+     simpler. Lean toward auto-scale + bipolar flag for symmetry
+     with unipolar.
+
+  2. **Fix the two confirmed INIT_PATCH bugs.** Once (1) lands,
+     `filter1env1amount = 0` and `filter1keytrack = 0` resolve
+     correctly. Add golden tests asserting both produce
+     wire 4096 (display 0), not wire 0 (display −64 / −200%).
+
+  3. **`hydra_apply_init` recovery tool.** Sends INIT_PATCH only,
+     no user params, ~300ms wire time. Recovery primitive when an
+     agent paints itself silent. Tool description should call out:
+     *"use this when the device has gone unexpectedly silent after
+     recipe writes — restores audible-saw default state."* Always
+     audible by construction (single sine osc, max mixer vol,
+     filter wide open, env1 sustain max, all FX bypassed, no
+     bipolar mod routing post-fix).
+
+  4. **Relax `params: minItems: 1` on `hydra_set_engine_params`**
+     when `freshPatch: true`. Lets debug callers send prelude-only
+     batches without the no-op-param workaround. Pure schema
+     change.
+
+  5. **Audit registry for missed bipolar entries.** Sweep
+     `nrpn.ts` notes for signed-range markers; tag each entry's
+     `bipolar` flag and `displayMax`. Estimate: 30–60 entries.
+     Outputs feed (1) and (6).
+
+  6. **Expand INIT_PATCH coverage** for filter2 (`filter2env1amount`,
+     `filter2keytrack`, `filter2drive`, `filter2env1velsen`),
+     amp velocity sensitivity, and any other bipolar params that
+     can carry destructive values forward from a prior patch.
+     Bleed-through path the current prelude doesn't close. Use
+     (5)'s tagged registry to find candidates.
+
+- **Test plan:**
+  - Golden tests in `verify-encoding.ts` for every tagged bipolar
+    param: assert value 0 → wire `wireMax/2` (display 0); value +N
+    and −N → wire `wireMax/2 ± offset`.
+  - Lock the two confirmed INIT_PATCH bugs in goldens so they
+    never regress.
+  - Hardware A/B: from device-INIT button, then
+    `hydra_set_engine_params({ params: [...], freshPatch: true })`
+    must remain audible. Bonus check: device shows
+    `Filter1.ENV1amt = 0.0` and `KEYTRACK = 0%`.
+  - Re-run Van Halen "Jump" recipe with `freshPatch: true` —
+    should land cleanly without iterative-fix-then-INIT-button
+    cycle. Update ICONIC-TONES.md results log row from 🟡 to ✅
+    (or new ❌ if there's a third hidden cause).
+
+- **Risk / non-obvious:**
+  - Existing recipes that pass numeric values to bipolar params
+    expecting unipolar behavior will change behavior. Document
+    prominently in the tool description; possibly emit a
+    `bipolar: true` annotation in the response so callers see it.
+    Mitigated by limited recipe corpus so far (iconic-tones tests
+    only) — small blast radius.
+  - `hydra_apply_init` overlaps with `freshPatch: true` (no
+    params). Both have their place: `apply_init` is the cleaner
+    recovery primitive; `freshPatch` is the merge-overlay
+    primitive. Keep both.
+  - Auto-scale convention asymmetry: unipolar `value: 0` = off,
+    bipolar `value: 0` = center. Risk of caller confusion. Tool
+    description should make the convention loud and explicit, and
+    the smart-error suggestion should say
+    *"this is a bipolar param — value 0 = no modulation, ±N for
+    signed offset"*.
+
+- **Sequencing:**
+  - (5) feeds (1). Run sweep first, then implement bipolar logic.
+  - (1) → (2) — encoding correctness lands.
+  - (3) + (4) independent, can ship together.
+  - (6) last; benefits from (5)'s registry tagging.
+  - Estimate: 1 session for (1)+(2)+(5); 0.5 session for (3)+(4);
+    0.5 session for (6). Total ~2 sessions of focused work.
+
+- **Priority:** P0. The current `freshPatch` prelude is a known
+  destructive write — every `freshPatch: true` call silences the
+  device. This is a regression-class bug, not a polish item. Ship
+  before the next hardware test that uses `freshPatch`.
+
+### BK-038 Hydrasynth `hydra_reconnect_midi` tool + sticky-error recovery
+
+- **Status:** Open. Surfaced 2026-04-28 immediately after BK-037
+  shipped, while attempting to validate the bipolar fix on hardware.
+
+- **Problem.** The Hydrasynth Explorer MCP server has no equivalent
+  to the AM4 server's `reconnect_midi` tool. Two failure modes
+  observed in the same session:
+  1. Server started while the synth was powered off / unplugged →
+     `midiError` got cached at module level and stayed sticky for
+     the full server lifetime. Every subsequent tool call threw
+     "no Hydrasynth output port found", even after the device was
+     reconnected. The user's only recourse was a full Claude
+     Desktop restart (which respawns the server).
+  2. Mid-session unplug + replug invalidates the cached handle but
+     the server keeps using it (writes go to a dead handle). No
+     way to force a refresh without restarting Desktop.
+
+- **Comparison.** AM4 server (`src/server/index.ts`) has
+  `reconnect_midi({ port? })` that closes the cached handle and
+  reopens. Auto-recovers after `STALE_HANDLE_TIMEOUT_THRESHOLD`
+  consecutive ack-less writes. Hydrasynth needs the same shape.
+
+- **Deliverables:**
+  1. **`hydra_reconnect_midi` MCP tool.** Inputs: optional `port`
+     name needle (defaults to "hydra"/"asm" needles already used
+     in `connectHydrasynth`). Behavior: closes current handle if
+     open, resets both `midi` and `midiError` module-level
+     variables, calls `connectHydrasynth()` fresh, returns the
+     port enumeration so the caller sees what the server can
+     find. On failure, returns the discovered port list so the
+     user can pick a different needle.
+  2. **`hydra_list_midi_ports` tool** (or fold into reconnect).
+     Returns currently-visible MIDI input/output port names. Lets
+     Claude diagnose "is the OS even seeing the device?" without
+     attempting a write.
+  3. **Sticky-error recovery.** When `midiError` is set, retry
+     once on the next tool call instead of throwing immediately —
+     transient enumeration delays at startup shouldn't permanently
+     wedge the server. Track retry attempts so we don't spam
+     `connectHydrasynth()` on every call when the device is
+     genuinely absent.
+  4. **Auto-reconnect after N ack-less writes** (mirrors AM4
+     server's STALE_HANDLE_TIMEOUT_THRESHOLD). Less critical for
+     Hydrasynth since NRPN writes don't ack — but a write-counter
+     reset on next tool call is still useful for the unplug-replug
+     case if we add round-trip detection later.
+
+- **Test plan:**
+  - Unit: open server with no device → first tool call throws but
+    `midiError` is NOT sticky → call again with device connected →
+    succeeds.
+  - Manual: start server, call any tool (fails), connect device,
+    call `hydra_reconnect_midi`, verify the next write lands.
+  - Manual: mid-session unplug + replug + reconnect call sequence
+    must restore writes without a Claude Desktop restart.
+
+- **Risk / non-obvious:**
+  - The current "sticky error" was probably defensive — re-trying
+    `connectHydrasynth()` on every call would log noise if the
+    device is genuinely absent. Mitigation: cache the failure
+    timestamp and only retry if N seconds have passed, or if a
+    `reconnect` was called explicitly.
+  - node-midi's port enumeration requires a process restart on
+    some platforms to pick up newly-connected devices. Test on
+    Windows specifically — the user's primary platform — to
+    confirm we can reuse an existing midi.Output() instance to
+    rescan, or whether we need to instantiate a new one.
+
+- **Priority:** P1. Doesn't gate hardware testing the way BK-037
+  did — user can still validate fixes via a full Claude Desktop
+  restart — but it adds significant friction every time the device
+  is power-cycled or unplugged. Ship before the founder shares
+  the tool with non-technical users (they will absolutely unplug
+  things).

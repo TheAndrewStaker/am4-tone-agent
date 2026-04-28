@@ -132,6 +132,89 @@ const cases: Case[] = [
       ? true : `got ${JSON.stringify(r)}`;
   }),
 
+  // ---------------- Bipolar auto-scale (BK-037) ---------------------------
+  // Symmetric range [-64, +64] with wireMax 8192. value 0 must land at
+  // wire 4096 (display 0), NOT wire 0 (display -64). Lock the
+  // freshPatch silence regression.
+  check('bipolar: filter1env1amount has displayMin=-64 displayMax=64', () => {
+    const e = getOrThrow('filter1env1amount');
+    return e.displayMin === -64 && e.displayMax === 64
+      ? true : `got displayMin=${e.displayMin} displayMax=${e.displayMax}`;
+  }),
+  check('bipolar: filter1env1amount value=0 → wire 4096 (display 0, NOT -64)', () => {
+    const r = resolveNrpnValue(getOrThrow('filter1env1amount'), 0);
+    return r.wire === 4096 && r.bipolar && r.scaled
+      ? true : `got ${JSON.stringify(r)}`;
+  }),
+  check('bipolar: filter1env1amount value=12 → wire 4864 (display +12)', () => {
+    const r = resolveNrpnValue(getOrThrow('filter1env1amount'), 12);
+    return r.wire === 4864 && r.bipolar
+      ? true : `got ${JSON.stringify(r)}`;
+  }),
+  check('bipolar: filter1env1amount value=-52 → wire 768 (display -52, the original bug case)', () => {
+    const r = resolveNrpnValue(getOrThrow('filter1env1amount'), -52);
+    return r.wire === 768 && r.bipolar
+      ? true : `got ${JSON.stringify(r)}`;
+  }),
+  check('bipolar: filter1env1amount value=64 → wire 8192 (max positive)', () => {
+    const r = resolveNrpnValue(getOrThrow('filter1env1amount'), 64);
+    return r.wire === 8192 && r.bipolar
+      ? true : `got ${JSON.stringify(r)}`;
+  }),
+  check('bipolar: filter1env1amount value=-64 → wire 0 (max negative)', () => {
+    const r = resolveNrpnValue(getOrThrow('filter1env1amount'), -64);
+    return r.wire === 0 && r.bipolar
+      ? true : `got ${JSON.stringify(r)}`;
+  }),
+
+  // Symmetric -200%..+200% with wireMax 8192. The second confirmed
+  // INIT_PATCH bug — value 0 must center at wire 4096.
+  check('bipolar: filter1keytrack has displayMin=-200 displayMax=200', () => {
+    const e = getOrThrow('filter1keytrack');
+    return e.displayMin === -200 && e.displayMax === 200
+      ? true : `got displayMin=${e.displayMin} displayMax=${e.displayMax}`;
+  }),
+  check('bipolar: filter1keytrack value=0 → wire 4096 (display 0%, NOT -200%)', () => {
+    const r = resolveNrpnValue(getOrThrow('filter1keytrack'), 0);
+    return r.wire === 4096 && r.bipolar
+      ? true : `got ${JSON.stringify(r)}`;
+  }),
+  check('bipolar: filter1keytrack value=100 → wire 6144 (display +100%)', () => {
+    const r = resolveNrpnValue(getOrThrow('filter1keytrack'), 100);
+    return r.wire === 6144 && r.bipolar
+      ? true : `got ${JSON.stringify(r)}`;
+  }),
+
+  // Pan: -64..+64 like env amount.
+  check('bipolar: mixerosc1pan value=0 → wire 4096 (centered)', () => {
+    const r = resolveNrpnValue(getOrThrow('mixerosc1pan'), 0);
+    return r.wire === 4096 && r.bipolar
+      ? true : `got ${JSON.stringify(r)}`;
+  }),
+  check('bipolar: mixerosc1pan value=-30 → wire 2176 (display -30, panned left)', () => {
+    const r = resolveNrpnValue(getOrThrow('mixerosc1pan'), -30);
+    return r.wire === 2176 && r.bipolar
+      ? true : `got ${JSON.stringify(r)}`;
+  }),
+
+  // Out-of-range bipolar input passes through as raw wire (escape hatch).
+  check('bipolar: out-of-range value 9000 passes through as raw wire', () => {
+    const r = resolveNrpnValue(getOrThrow('filter1env1amount'), 9000);
+    return r.wire === 9000 && !r.bipolar && !r.scaled
+      ? true : `got ${JSON.stringify(r)}`;
+  }),
+
+  // Unipolar regression — confirm the existing 14-bit auto-scale path
+  // is unchanged (filter1cutoff, mixerosc1vol, etc. don't have
+  // displayMin set, so they keep the old [0,128]→[0,wireMax] behavior).
+  check('regression: filter1cutoff stays unipolar (no displayMin), value=0 → wire 0', () => {
+    const e = getOrThrow('filter1cutoff');
+    if (e.displayMin !== undefined) return `unexpected displayMin=${e.displayMin}`;
+    const r = resolveNrpnValue(e, 0);
+    return r.wire === 0 && r.scaled && !r.bipolar
+      ? true : `got ${JSON.stringify(r)}`;
+  }),
+
   // ---------------- Multi-slot disambiguation -----------------------------
   check('multi-slot: osc1semi has dataMsb=0', () => {
     const e = getOrThrow('osc1semi');

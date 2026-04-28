@@ -176,6 +176,13 @@ export interface ResolvedNrpnValue {
   readonly wire: number;
   /** True when 7-bit auto-scaling kicked in. Surfaced in tool output for transparency. */
   readonly scaled: boolean;
+  /**
+   * True when the bipolar branch ran — input was treated as a signed
+   * display value (-displayMax..+displayMax) and centered on
+   * wireMax/2. Surfaced in tool output so callers see why "value 0"
+   * went to wire-center instead of wire-zero.
+   */
+  readonly bipolar: boolean;
 }
 
 /**
@@ -184,10 +191,14 @@ export interface ResolvedNrpnValue {
  *   - String input → enum-table lookup, then apply `enumValueScale`
  *     for sparse-encoded params (FX types use ×8: Bypass=0, Chorus=8,
  *     …, Distortion=72).
- *   - Number ≤ 127 on a 14-bit non-slot non-enum param → auto-scale
- *     to the param's `wireMax` so callers can stay in 0..127 mental
- *     model. Skipped for multi-slot registers (those use the LSB byte
- *     as a 7-bit slot-relative value).
+ *   - Number on a bipolar 14-bit param (displayMin defined, < 0) →
+ *     treat input as signed display value; auto-scale across the full
+ *     wire range with input 0 mapping to wire-center. Range check
+ *     against displayMin/displayMax — out-of-range passes through as
+ *     raw wire (escape hatch for advanced callers).
+ *   - Number ≤ 128 on a unipolar 14-bit non-slot non-enum param →
+ *     auto-scale to the param's `wireMax` so callers can stay in
+ *     0..128 mental model. Skipped for multi-slot registers.
  *   - Otherwise pass through.
  */
 export function resolveNrpnValue(entry: HydrasynthNrpn, input: number | string): ResolvedNrpnValue {
@@ -205,13 +216,39 @@ export function resolveNrpnValue(entry: HydrasynthNrpn, input: number | string):
         `Couldn't resolve "${input}" in ${entry.enumTable}. ${sample ? `First few options: ${sample}…` : ''} Call hydra_list_enum_values("${entry.enumTable}") for the full list.`,
       );
     }
-    return { wire: idx * (entry.enumValueScale ?? 1), scaled: false };
+    return { wire: idx * (entry.enumValueScale ?? 1), scaled: false, bipolar: false };
   }
   const isFourteenBit =
     entry.wireMax !== undefined &&
     entry.wireMax > 127 &&
     entry.dataMsb === undefined &&
     entry.enumTable === undefined;
+  // Bipolar branch — displayMin signals a signed display range. Input is
+  // treated as a display value, mapped linearly onto [0, wireMax] with
+  // displayMin → 0 and displayMax → wireMax. For symmetric ranges this
+  // means input 0 lands at wire = wireMax/2 (no modulation, the actual
+  // "off" state for bipolar params); +N and -N land on either side. This
+  // fixes the silent-prelude bug where INIT_PATCH wrote `value: 0` to
+  // bipolar params expecting "off" but got max-negative because the old
+  // unipolar formula resolved 0 × wireMax / 128 = 0 = display-min.
+  if (
+    isFourteenBit &&
+    entry.displayMin !== undefined &&
+    entry.displayMax !== undefined &&
+    entry.displayMin < 0
+  ) {
+    const { displayMin, displayMax, wireMax } = entry;
+    const range = displayMax - displayMin;
+    if (input >= displayMin && input <= displayMax && range > 0) {
+      const wire = Math.min(
+        Math.max(Math.round(((input - displayMin) * wireMax!) / range), 0),
+        wireMax!,
+      );
+      return { wire, scaled: true, bipolar: true };
+    }
+    // Outside the display range → fall through to raw pass-through. Lets
+    // advanced callers send wire values directly when they need to.
+  }
   if (isFourteenBit && input >= 0 && input <= 128) {
     // Hydrasynth's display goes 0..128, not 0..127. Most engine knobs
     // show `display = wire / 64` (with wireMax=8192 ⇒ display max 128.0).
@@ -220,9 +257,9 @@ export function resolveNrpnValue(entry: HydrasynthNrpn, input: number | string):
     // Trade-off: value=127 hits 127.0 display rather than max; pass 128
     // (or any value ≥ 128) to reach the actual max wire value.
     const wire = Math.min(Math.round((input * entry.wireMax!) / 128), entry.wireMax!);
-    return { wire, scaled: true };
+    return { wire, scaled: true, bipolar: false };
   }
-  return { wire: input, scaled: false };
+  return { wire: input, scaled: false, bipolar: false };
 }
 
 /**

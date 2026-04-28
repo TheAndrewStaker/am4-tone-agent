@@ -267,9 +267,9 @@ MACROS:
   macro1value..macro8value (also patch-defined CCs 16-23)
 
 VALUE NOTES:
-  - Numbers 0..128 auto-scale onto each param's wireMax (most engine knobs are 14-bit, wireMax=8192). value=64 → display 64.0 exact, value=128 → max.
-  - Numbers 129..16383 pass through as raw 14-bit wire values.
-  - For type-selector params (osc*type, filter*type, prefxtype, postfxtype, mutator*mode), pass the display name string — auto-resolved.
+  - **Unipolar params (most knobs).** Numbers 0..128 auto-scale onto each param's wireMax. value=64 → display 64.0, value=128 → max. Numbers 129..16383 pass through as raw 14-bit wire values.
+  - **Bipolar params** (env amounts, pan, keytrack, mod-matrix depth, EQ gain, lfo/fx phase). Pass a SIGNED display value: \`value: 0\` is centered (no modulation), \`value: +N\` and \`-N\` offset symmetrically. Examples: filter1env1amount=0 (no env mod), filter1env1amount=12 (display +12, mild brightening), filter1keytrack=0 (off), mixerosc1pan=-30 (left). The tool response calls these out as \`[bipolar -X..+Y, display ±N]\` so you see the resolution. Common ranges: env amounts / pan / lfo amounts = -64..+64; keytrack = -200..+200; macros = -128..+128.
+  - **Type-selector params** (osc*type, filter*type, prefxtype, postfxtype, mutator*mode): pass the display name string — auto-resolved.
 `.trim();
 
 // -- Server ---------------------------------------------------------------
@@ -474,7 +474,7 @@ server.registerTool('hydra_set_engine_param', {
       : ' Call hydra_param_catalog with a related query for fallback discovery.';
     throw new Error(`Unknown NRPN parameter "${name}".${lines}`);
   }
-  const { wire: resolvedValue, scaled } = resolveNrpnValue(entry, value);
+  const { wire: resolvedValue, scaled, bipolar } = resolveNrpnValue(entry, value);
   const conn = ensureMidi();
   sendNrpn(conn, DEFAULT_CHANNEL, entry, resolvedValue);
   const ccLine = entry.cc !== undefined
@@ -483,6 +483,8 @@ server.registerTool('hydra_set_engine_param', {
   let inputDisplay: string;
   if (typeof value === 'string') {
     inputDisplay = `"${value}" (resolved to ${resolvedValue})`;
+  } else if (bipolar) {
+    inputDisplay = `${value} → wire ${resolvedValue} (bipolar: display ${value >= 0 ? '+' : ''}${value} on ${entry.displayMin}..+${entry.displayMax})`;
   } else if (scaled) {
     inputDisplay = `${value} → wire ${resolvedValue} (auto-scaled 0..127 → 0..${entry.wireMax})`;
   } else {
@@ -561,17 +563,62 @@ server.registerTool('hydra_set_engine_params', {
       name: z.string().describe('Canonical NRPN parameter name (e.g. "filter1type", "osc2semi", "env1attacksyncoff").'),
       value: z.union([z.number(), z.string()]).describe('Numeric value (0..16383) OR enum display name (e.g. "Vowel", "Lo-Fi", "Sine"). Most non-enum params use only 0..127.'),
     }))
-      .min(1)
+      .min(0)
       .max(300)
-      .describe('Ordered list of NRPN writes to send. The server sends each as a 4-CC sequence with ~3 ms between sequences for pacing.'),
+      .describe('Ordered list of NRPN writes to send. The server sends each as a 4-CC sequence with ~3 ms between sequences for pacing. Empty array allowed only when freshPatch=true (sends just the prelude).'),
     freshPatch: z.boolean().optional().describe(
       'When true, prepend a neutralize prelude (~100 init defaults) before your params so previously-loaded patch state can\'t bleed through. Use for fresh patch builds (recipes). Default false for tweaks to an existing patch.',
     ),
   },
 }, async ({ params, freshPatch }) => {
+  if (params.length === 0 && !freshPatch) {
+    throw new Error('params is empty and freshPatch is not set — nothing to send. Pass at least one param, or set freshPatch=true to send the init prelude alone (or use hydra_apply_init for the dedicated recovery primitive).');
+  }
+  return runEngineParamBatch(params, freshPatch ?? false);
+});
+
+// hydra_apply_init -------------------------------------------------------
+
+server.registerTool('hydra_apply_init', {
+  description: [
+    '**Recovery primitive.** Sends the INIT_PATCH baseline (~100 NRPN writes) and',
+    'nothing else. Use when the device has gone unexpectedly silent or wedged after',
+    'recipe writes — restores a known-audible default state (single sine osc, mixer',
+    'osc1 at full, filter wide open, env1 sustaining at max, all FX bypassed, every',
+    'mod-matrix slot disabled). ~300 ms wire time.',
+    '',
+    'When to call: keys produce no audible tone after a previous batch, or the device',
+    'shows unexpected display values that suggest the working buffer is in a bad',
+    'state. Equivalent to pressing the device\'s INIT button + sending the same',
+    'neutralize prelude that `hydra_set_engine_params({ freshPatch: true })` uses.',
+    '',
+    'Audible-by-construction guarantee: every bipolar param in INIT_PATCH (env',
+    'amounts, keytrack, pan) is centered, so the prelude itself never silences the',
+    'device. Filter cutoff is wide open, env1 sustain is max, env1 attack is instant.',
+    '',
+    'Requires Param TX/RX = NRPN on System Setup → MIDI page 10. With Param TX/RX =',
+    'CC, the entire prelude is silently ignored.',
+  ].join('\n'),
+  inputSchema: {},
+}, async () => {
+  return runEngineParamBatch([], true);
+});
+
+/**
+ * Shared write-batch implementation backing `hydra_set_engine_params` and
+ * `hydra_apply_init`. Merges INIT_PATCH (when `freshPatch=true`) with the
+ * caller's params — user values win for any name that appears in both —
+ * resolves each entry through `resolveNrpnValue`, sends each as a 4-CC
+ * sequence with ~3 ms pacing, and formats a response that distinguishes
+ * init-prelude writes (one summary line) from user writes (one line each).
+ */
+async function runEngineParamBatch(
+  params: Array<{ name: string; value: number | string }>,
+  freshPatch: boolean,
+): Promise<{ content: Array<{ type: 'text'; text: string }> }> {
   const conn = ensureMidi();
   const errors: string[] = [];
-  const sent: { name: string; raw: number | string; resolved: number; resolvedDataMsb?: number; scaled: boolean; wireMax?: number; fromInit: boolean }[] = [];
+  const sent: { name: string; raw: number | string; resolved: number; resolvedDataMsb?: number; scaled: boolean; bipolar: boolean; wireMax?: number; displayMin?: number; displayMax?: number; fromInit: boolean }[] = [];
 
   // Server-side merge: when freshPatch is set, lay the INIT_PATCH down
   // first as a base, then overlay the user's params (later writes win
@@ -584,12 +631,6 @@ server.registerTool('hydra_set_engine_params', {
     const merged = new Map<string, { value: number | string; fromInit: boolean }>();
     for (const e of INIT_PATCH) merged.set(e.name, { value: e.value, fromInit: true });
     for (const p of params) merged.set(p.name, { value: p.value, fromInit: false });
-    // Iteration order preserves insertion: init params first (in their
-    // declared order), then any new user-only params after. Within
-    // names that appear in both, the value is the user's but the
-    // position is the init's — matches the "type-changing writes
-    // first" rule edisyn recommends since INIT_PATCH is sorted that
-    // way.
     writes = Array.from(merged, ([name, { value, fromInit }]) => ({ name, value, fromInit }));
   } else {
     writes = params.map((p) => ({ name: p.name, value: p.value, fromInit: false }));
@@ -608,23 +649,21 @@ server.registerTool('hydra_set_engine_params', {
     }
     let resolved: number;
     let scaled = false;
+    let bipolar = false;
     try {
       const r = resolveNrpnValue(entry, value);
       resolved = r.wire;
       scaled = r.scaled;
+      bipolar = r.bipolar;
     } catch (err) {
       errors.push(`[${i}] "${name}" — ${err instanceof Error ? err.message : String(err)}`);
       continue;
     }
     sendNrpn(conn, DEFAULT_CHANNEL, entry, resolved);
-    sent.push({ name, raw: value, resolved, resolvedDataMsb: entry.dataMsb, scaled, wireMax: entry.wireMax, fromInit: writes[i]!.fromInit });
-    // Pace ≥2 ms between NRPN sequences (edisyn note); 3 ms gives margin.
+    sent.push({ name, raw: value, resolved, resolvedDataMsb: entry.dataMsb, scaled, bipolar, wireMax: entry.wireMax, displayMin: entry.displayMin, displayMax: entry.displayMax, fromInit: writes[i]!.fromInit });
     if (i < writes.length - 1) await sleep(3);
   }
-  // Response formatting: if freshPatch was used, summarize the init
-  // prelude as one line and show user-overridden params in detail.
-  // Otherwise show every write. Keeps the output readable when a
-  // fresh-patch batch sends ~100 writes.
+
   const userWrites = sent.filter((s) => !s.fromInit);
   const initWrites = sent.filter((s) => s.fromInit);
   const userLines = userWrites.map((s) => {
@@ -632,6 +671,9 @@ server.registerTool('hydra_set_engine_params', {
     let valueNote: string;
     if (typeof s.raw === 'string') {
       valueNote = `"${s.raw}" (${s.resolved})`;
+    } else if (s.bipolar) {
+      const sign = (s.raw as number) >= 0 ? '+' : '';
+      valueNote = `${s.raw} → wire ${s.resolved} [bipolar ${s.displayMin}..+${s.displayMax}, display ${sign}${s.raw}]`;
     } else if (s.scaled) {
       valueNote = `${s.raw} → ${s.resolved} (scaled to wireMax ${s.wireMax})`;
     } else {
@@ -654,7 +696,7 @@ server.registerTool('hydra_set_engine_params', {
       text: `Sent ${sent.length} NRPN write(s) with ~3 ms pacing:\n${lines.join('\n')}${errorBlock}\n\nReminder: requires Param TX/RX = NRPN on the device.`,
     }],
   };
-});
+}
 
 // hydra_list_enum_values --------------------------------------------------
 

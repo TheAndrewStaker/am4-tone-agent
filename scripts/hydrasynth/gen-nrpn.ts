@@ -139,6 +139,22 @@ interface NrpnRow {
    */
   wireMax?: number;
   /**
+   * Signed display value at wire 0. For bipolar params (filter env
+   * amounts, pan, keytrack, mod-matrix depth, EQ gain, etc.) this is
+   * negative — e.g. filter1env1amount displays −64 when wire=0.
+   * Parsed from the `displayed as [-X,Y]` pattern in the notes.
+   * When defined together with `displayMax`, runtime auto-scale uses
+   * the signed range instead of assuming unipolar [0,128].
+   */
+  displayMin?: number;
+  /**
+   * Signed display value at wire = wireMax. For bipolar symmetric
+   * params this equals -displayMin (e.g. +64 for [-64,+64]). For
+   * asymmetric ranges like the EQ gains it can differ
+   * (displayMin=-36, displayMax=24).
+   */
+  displayMax?: number;
+  /**
    * Range / display notes from the CSV. Often blank for "follow-on"
    * params (osc2type defers to osc1type for its description); we
    * resolve those at generation time so the emitted file is
@@ -434,6 +450,37 @@ function main(): void {
     }
   }
 
+  // Parse signed display range (bipolar params) from the notes. Edisyn
+  // writes "displayed as [-64.0,64.0]" or "displayed as [-200%,200%]"
+  // for params whose visible range straddles zero (env amounts, pan,
+  // keytrack, mod-matrix depths, EQ gains, LFO/FX phases). The sign on
+  // the lower bound is the tell — `\[-` is unique to display ranges
+  // since wire ranges always start at 0 or 1.
+  //
+  // Captures both bounds so we handle asymmetric ranges (the three EQ
+  // gain params display as [-36.0, +24.0], not symmetric). For symmetric
+  // ranges displayMin = -displayMax; for asymmetric ranges they differ.
+  //
+  // The runtime in encoding.ts uses these to compute wire-center for
+  // bipolar auto-scale: wire = round((input - displayMin) × wireMax /
+  // (displayMax - displayMin)). Without these fields, value 0 silently
+  // resolves to wire 0 = max NEGATIVE display — the trap that silenced
+  // the freshPatch INIT_PATCH on 2026-04-28 (filter1env1amount = -64,
+  // filter1keytrack = -200%).
+  const bipolarRangeRe = /\[(-\d+(?:\.\d+)?)\s*%?\s*,\s*\+?(-?\d+(?:\.\d+)?)\s*%?\s*\]/;
+  let bipolarCount = 0;
+  for (const e of entries) {
+    const m = e.notes.match(bipolarRangeRe);
+    if (!m) continue;
+    const min = Number.parseFloat(m[1]!);
+    const max = Number.parseFloat(m[2]!);
+    if (Number.isFinite(min) && Number.isFinite(max) && min < 0 && max > min) {
+      e.displayMin = min;
+      e.displayMax = max;
+      bipolarCount++;
+    }
+  }
+
   // Emit TypeScript.
   const out: string[] = [];
   out.push('// AUTO-GENERATED FILE — do not edit by hand.');
@@ -493,6 +540,16 @@ function main(): void {
   out.push('   * sustain, env timings); 127 or smaller for 7-bit params.');
   out.push('   */');
   out.push('  readonly wireMax?: number;');
+  out.push('  /**');
+  out.push('   * Signed display value at wire 0. Negative for bipolar params');
+  out.push('   * (env amounts, pan, keytrack, mod-matrix depth, EQ gain, etc.).');
+  out.push('   * When set together with displayMax, the auto-scale rule treats');
+  out.push('   * the user input as a signed display value instead of a 0..128');
+  out.push('   * unipolar value — input 0 maps to wire-center, not wire 0.');
+  out.push('   */');
+  out.push('  readonly displayMin?: number;');
+  out.push('  /** Signed display value at wire = wireMax. Equals -displayMin for symmetric ranges. */');
+  out.push('  readonly displayMax?: number;');
   out.push('  /** Range + display instructions from edisyn\'s CSV. */');
   out.push('  readonly notes: string;');
   out.push('}');
@@ -505,9 +562,11 @@ function main(): void {
     const ccPart = e.cc !== undefined ? `, cc: 0x${e.cc.toString(16).padStart(2, '0')}` : '';
     const aliasPart = e.aliases && e.aliases.length > 0 ? `, aliases: ${JSON.stringify(e.aliases)}` : '';
     const wireMaxPart = e.wireMax !== undefined ? `, wireMax: ${e.wireMax}` : '';
+    const displayMinPart = e.displayMin !== undefined ? `, displayMin: ${e.displayMin}` : '';
+    const displayMaxPart = e.displayMax !== undefined ? `, displayMax: ${e.displayMax}` : '';
     const notes = JSON.stringify(e.notes);
     out.push(
-      `  { name: ${JSON.stringify(e.name).padEnd(36)}, msb: 0x${e.msb.toString(16).padStart(2, '0')}, lsb: 0x${e.lsb.toString(16).padStart(2, '0')}${dataMsbPart}${enumTablePart}${enumScalePart}${ccPart}${aliasPart}${wireMaxPart}, notes: ${notes} },`,
+      `  { name: ${JSON.stringify(e.name).padEnd(36)}, msb: 0x${e.msb.toString(16).padStart(2, '0')}, lsb: 0x${e.lsb.toString(16).padStart(2, '0')}${dataMsbPart}${enumTablePart}${enumScalePart}${ccPart}${aliasPart}${wireMaxPart}${displayMinPart}${displayMaxPart}, notes: ${notes} },`,
     );
   }
   out.push('];');
@@ -538,6 +597,7 @@ function main(): void {
   console.log(`  with enumTable (named-value linkage): ${enumLinkedCount}`);
   console.log(`  with CC-catalog alias: ${aliasCount}`);
   console.log(`  with wireMax (auto-scale eligible): ${wireMaxCount}`);
+  console.log(`  with bipolar display range (signed): ${bipolarCount}`);
   console.log(`  notes inherited: ${entries.filter((e) => e.notes && !rawNotesPresent(dataRows, e.name)).length}`);
   if (skipped.length > 0) {
     console.log(`  skipped (no NRPN): ${skipped.length}`);
