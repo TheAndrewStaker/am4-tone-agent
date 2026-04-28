@@ -24,6 +24,7 @@ import {
   nrpnMessagesFor,
   findMatchingNrpns,
 } from '../../src/devices/hydrasynth-explorer/encoding.js';
+import { INIT_PATCH } from '../../src/devices/hydrasynth-explorer/initPatch.js';
 
 interface Case {
   label: string;
@@ -286,6 +287,44 @@ const cases: Case[] = [
   }),
   check('search: empty query returns no hits (no full-dump risk)', () => {
     return findMatchingNrpns('', 30).length === 0 ? true : 'empty query returned hits';
+  }),
+
+  // ---------------- INIT_PATCH integrity ----------------------------------
+  check('INIT_PATCH: every name resolves in the registry', () => {
+    const missing = INIT_PATCH
+      .map((e) => e.name)
+      .filter((n) => !findHydraNrpn(n));
+    return missing.length === 0
+      ? true
+      : `unresolved: ${missing.join(', ')}`;
+  }),
+  check('INIT_PATCH: every value resolves through resolveNrpnValue', () => {
+    for (const e of INIT_PATCH) {
+      const entry = findHydraNrpn(e.name);
+      if (!entry) return `${e.name} not in registry`;
+      try {
+        resolveNrpnValue(entry, e.value);
+      } catch (err) {
+        return `${e.name}=${JSON.stringify(e.value)}: ${(err as Error).message}`;
+      }
+    }
+    return true;
+  }),
+  check('INIT_PATCH: contains all 32 mod-matrix slot disables', () => {
+    const targets = INIT_PATCH.filter((e) => /^modmatrix\d+modtarget$/.test(e.name));
+    return targets.length === 32 && targets.every((e) => e.value === 0)
+      ? true
+      : `got ${targets.length} modtarget entries, all zero?=${targets.every((e) => e.value === 0)}`;
+  }),
+  check('INIT_PATCH: covers all 4 mutator wet zeros', () => {
+    const muts = INIT_PATCH.filter((e) => /^mutator\dwet$/.test(e.name));
+    return muts.length === 4 && muts.every((e) => e.value === 0)
+      ? true : `got ${muts.length} mutator wet entries`;
+  }),
+  check('INIT_PATCH: all 5 LFO levels zeroed', () => {
+    const lfos = INIT_PATCH.filter((e) => /^lfo\dlevel$/.test(e.name));
+    return lfos.length === 5 && lfos.every((e) => e.value === 0)
+      ? true : `got ${lfos.length} lfo level entries`;
   }),
 
   // ---------------- Error paths -------------------------------------------

@@ -157,6 +157,13 @@ interface NrpnRow {
 const ENUM_OVERRIDES: Record<string, { enumTable: string; enumValueScale?: number }> = {
   prefxtype: { enumTable: 'FX_TYPES', enumValueScale: 8 },
   postfxtype: { enumTable: 'FX_TYPES', enumValueScale: 8 },
+  // Oscillator modes: the notes column says "MSB = Osc [0,2]   LSB = [0,1]"
+  // — "Single" or "WaveScan" — but doesn't reference OSC_MODES by name,
+  // so the auto-detector misses it. Link manually so callers can pass
+  // osc1mode="Single" / osc1mode="WaveScan" instead of 0/1.
+  osc1mode: { enumTable: 'OSC_MODES' },
+  osc2mode: { enumTable: 'OSC_MODES' },
+  osc3mode: { enumTable: 'OSC_MODES' },
   // Mutator mode notes use inline string lists ("FM-Linear", ...)
   // instead of naming MUTANT_MODES; link manually.
   mutator1mode: { enumTable: 'MUTANT_MODES' },

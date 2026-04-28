@@ -46,6 +46,7 @@ import {
   HYDRASYNTH_PARAMS,
   HYDRASYNTH_PARAMS_BY_ID,
 } from './params.js';
+import { INIT_PATCH, type InitPatchEntry } from './initPatch.js';
 import { findHydraNrpn, type HydrasynthNrpn } from './nrpn.js';
 import { HYDRASYNTH_ENUMS } from './enums.js';
 import {
@@ -542,6 +543,18 @@ server.registerTool('hydra_set_engine_params', {
     '',
     'IMPORTANT — DEVICE PRECONDITION: Param TX/RX must be NRPN on System Setup →',
     'MIDI page 10. With Param TX/RX = CC, the entire batch is silently ignored.',
+    '',
+    '**FRESH PATCH MODE — `freshPatch: true`.** When building a patch from scratch',
+    '(recipe-style requests like "send a Van Halen Jump tone"), pass freshPatch: true',
+    'so the server prepends a ~100-write neutralize prelude before your params. The',
+    'prelude zeros every mod-matrix slot, mutator wet, LFO gain, and FX wet — exactly',
+    'the invisible state that bleeds through from the previously-loaded patch and',
+    'breaks recipes mid-build. Your params merge ON TOP of the prelude (you win for',
+    'any name you specify), so audible knobs you set in the recipe assert themselves',
+    'and unaddressed knobs land at safe init defaults. Cost: ~300 ms additional wire',
+    'time. Use ALWAYS for fresh-patch builds; default `false` for tweaks to an',
+    'existing patch ("make it brighter") so iterative edits don\'t churn the rest',
+    'of the state.',
   ].join('\n'),
   inputSchema: {
     params: z.array(z.object({
@@ -549,15 +562,41 @@ server.registerTool('hydra_set_engine_params', {
       value: z.union([z.number(), z.string()]).describe('Numeric value (0..16383) OR enum display name (e.g. "Vowel", "Lo-Fi", "Sine"). Most non-enum params use only 0..127.'),
     }))
       .min(1)
-      .max(200)
+      .max(300)
       .describe('Ordered list of NRPN writes to send. The server sends each as a 4-CC sequence with ~3 ms between sequences for pacing.'),
+    freshPatch: z.boolean().optional().describe(
+      'When true, prepend a neutralize prelude (~100 init defaults) before your params so previously-loaded patch state can\'t bleed through. Use for fresh patch builds (recipes). Default false for tweaks to an existing patch.',
+    ),
   },
-}, async ({ params }) => {
+}, async ({ params, freshPatch }) => {
   const conn = ensureMidi();
   const errors: string[] = [];
-  const sent: { name: string; raw: number | string; resolved: number; resolvedDataMsb?: number; scaled: boolean; wireMax?: number }[] = [];
-  for (let i = 0; i < params.length; i++) {
-    const { name, value } = params[i]!;
+  const sent: { name: string; raw: number | string; resolved: number; resolvedDataMsb?: number; scaled: boolean; wireMax?: number; fromInit: boolean }[] = [];
+
+  // Server-side merge: when freshPatch is set, lay the INIT_PATCH down
+  // first as a base, then overlay the user's params (later writes win
+  // for any name that appears in both). Each parameter gets sent
+  // exactly once — no redundant traffic. User recipes assert
+  // themselves; unaddressed parameters land at safe defaults instead
+  // of inheriting whatever the previous patch had.
+  let writes: Array<InitPatchEntry & { fromInit: boolean }>;
+  if (freshPatch) {
+    const merged = new Map<string, { value: number | string; fromInit: boolean }>();
+    for (const e of INIT_PATCH) merged.set(e.name, { value: e.value, fromInit: true });
+    for (const p of params) merged.set(p.name, { value: p.value, fromInit: false });
+    // Iteration order preserves insertion: init params first (in their
+    // declared order), then any new user-only params after. Within
+    // names that appear in both, the value is the user's but the
+    // position is the init's — matches the "type-changing writes
+    // first" rule edisyn recommends since INIT_PATCH is sorted that
+    // way.
+    writes = Array.from(merged, ([name, { value, fromInit }]) => ({ name, value, fromInit }));
+  } else {
+    writes = params.map((p) => ({ name: p.name, value: p.value, fromInit: false }));
+  }
+
+  for (let i = 0; i < writes.length; i++) {
+    const { name, value } = writes[i]!;
     const entry = findHydraNrpn(name);
     if (!entry) {
       const hits = findMatchingNrpns(name, 4);
@@ -578,11 +617,17 @@ server.registerTool('hydra_set_engine_params', {
       continue;
     }
     sendNrpn(conn, DEFAULT_CHANNEL, entry, resolved);
-    sent.push({ name, raw: value, resolved, resolvedDataMsb: entry.dataMsb, scaled, wireMax: entry.wireMax });
+    sent.push({ name, raw: value, resolved, resolvedDataMsb: entry.dataMsb, scaled, wireMax: entry.wireMax, fromInit: writes[i]!.fromInit });
     // Pace ≥2 ms between NRPN sequences (edisyn note); 3 ms gives margin.
-    if (i < params.length - 1) await sleep(3);
+    if (i < writes.length - 1) await sleep(3);
   }
-  const lines = sent.map((s) => {
+  // Response formatting: if freshPatch was used, summarize the init
+  // prelude as one line and show user-overridden params in detail.
+  // Otherwise show every write. Keeps the output readable when a
+  // fresh-patch batch sends ~100 writes.
+  const userWrites = sent.filter((s) => !s.fromInit);
+  const initWrites = sent.filter((s) => s.fromInit);
+  const userLines = userWrites.map((s) => {
     const slotNote = s.resolvedDataMsb !== undefined ? ` [slot ${s.resolvedDataMsb}]` : '';
     let valueNote: string;
     if (typeof s.raw === 'string') {
@@ -594,6 +639,12 @@ server.registerTool('hydra_set_engine_params', {
     }
     return `  ${s.name} = ${valueNote}${slotNote}`;
   });
+  const initLine = initWrites.length > 0
+    ? `  [+${initWrites.length} init prelude writes — neutralized previous patch state]\n`
+    : '';
+  const lines = userLines.length > 0
+    ? [initLine + 'User params:', ...userLines]
+    : [initLine.trim()];
   const errorBlock = errors.length > 0
     ? `\n\nErrors (${errors.length}):\n${errors.map((e) => `  ${e}`).join('\n')}`
     : '';

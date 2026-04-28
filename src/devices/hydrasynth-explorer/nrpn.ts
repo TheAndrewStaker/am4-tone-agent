@@ -60,9 +60,9 @@ export interface HydrasynthNrpn {
 }
 
 export const HYDRASYNTH_NRPNS: readonly HydrasynthNrpn[] = [
-  { name: "osc1mode"                          , msb: 0x3f, lsb: 0x18, dataMsb: 0, notes: "MSB = Osc [0,2]   LSB = [0,1]" },
-  { name: "osc2mode"                          , msb: 0x3f, lsb: 0x18, dataMsb: 1, notes: "MSB = Osc [0,2]   LSB = [0,1]" },
-  { name: "osc3mode"                          , msb: 0x3f, lsb: 0x18, dataMsb: 2, notes: "MSB = Osc [0,2]   LSB = [0,1]" },
+  { name: "osc1mode"                          , msb: 0x3f, lsb: 0x18, dataMsb: 0, enumTable: "OSC_MODES", notes: "MSB = Osc [0,2]   LSB = [0,1]" },
+  { name: "osc2mode"                          , msb: 0x3f, lsb: 0x18, dataMsb: 1, enumTable: "OSC_MODES", notes: "MSB = Osc [0,2]   LSB = [0,1]" },
+  { name: "osc3mode"                          , msb: 0x3f, lsb: 0x18, dataMsb: 2, enumTable: "OSC_MODES", notes: "MSB = Osc [0,2]   LSB = [0,1]" },
   { name: "osc1semi"                          , msb: 0x3f, lsb: 0x11, dataMsb: 0, notes: "MSB = Osc [0,2]  LSB = [-36,+36] 1-byte 2's Complement.  Thus the LSB goes 0=0, 1=1, 2=2, ..., 36=36,  then 92=-36, 93=-35, ..., 127=-1" },
   { name: "osc2semi"                          , msb: 0x3f, lsb: 0x11, dataMsb: 1, notes: "MSB = Osc [0,2]  LSB = [-36,+36] 1-byte 2's Complement.  Thus the LSB goes 0=0, 1=1, 2=2, ..., 36=36,  then 92=-36, 93=-35, ..., 127=-1" },
   { name: "osc3semi"                          , msb: 0x3f, lsb: 0x11, dataMsb: 2, notes: "MSB = Osc [0,2]  LSB = [-36,+36] 1-byte 2's Complement.  Thus the LSB goes 0=0, 1=1, 2=2, ..., 36=36,  then 92=-36, 93=-35, ..., 127=-1" },
