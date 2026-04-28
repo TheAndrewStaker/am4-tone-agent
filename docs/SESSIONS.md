@@ -6,7 +6,155 @@ file is the chronological trail that reference is built from.
 
 ---
 
-## 2026-04-28 — Session 36 — Hydrasynth BK-036 milestone 1: SysEx envelope codec
+## 2026-04-28 — Session 36 — Hydrasynth BK-036 milestones 1+2: SysEx envelope + patch byte-map encoder
+
+Two milestones shipped in one session: the SysEx envelope
+codec (commit cfdb56f) and the patch byte-map encoder. Both
+pure encoding work; no hardware traffic yet (that's
+milestone 3). 74 new goldens between the two modules.
+
+### Milestone 2 — patch byte-map encoder
+
+**New file: `src/devices/hydrasynth-explorer/patchEncoder.ts`.**
+Implements the 2790-byte patch buffer per
+`docs/devices/hydrasynth-explorer/references/SysexPatchFormat.txt`
+(edisyn, Sean Luke). Public surface:
+
+- `PATCH_BUFFER_SIZE = 2790` — corrected from the original
+  backlog plan's "2462" (which conflated the highest-
+  documented byte annotation with the total buffer size; the
+  chunking math 21×128 + 102 = 2790 is authoritative).
+- `PATCH_CHUNK_COUNT = 22` (21 full 128-byte chunks +
+  1 102-byte tail).
+- `PATCH_OFFSETS: PatchOffsetSpec[]` — curated 75-entry
+  name→offset table covering: voice/glide globals (polyphony,
+  density, detune, analog feel, stereo mode/width, glide
+  family — all under canonical names like `voicepolyphony`,
+  `voiceglide`, `voiceglidelegto`); osc1/2/3 first-page
+  (mode, type, semi, cent, keytrack, wave); ringmod + noise;
+  full mixer (vol, pan, filter ratio for osc1/2/3 + ringmod
+  + noise; routing); filter1 first-page (type, cutoff,
+  resonance, formant, env1 amount, lfo1 amount, vel-env,
+  keytrack, drive, drive-position, vowel-order); filter2
+  first-page (morph, cutoff, resonance, env1 amount, lfo1
+  amount, vel-env, keytrack, type at byte 472); amp (level,
+  vel-env, lfo2 amount); pre-FX type + dry/wet; delay (type,
+  bpm-sync flag, time, feedback, feed-tone, wet-tone,
+  dry/wet); reverb (type, time, tone, hi/lo damp, predelay,
+  dry/wet); post-FX type + dry/wet; env1 (attack, decay,
+  sustain, release, bpm-sync flag, delay, hold, three
+  curves, legato, reset, free-run, loop).
+- Four encoding kinds: `u16le` (low+high byte pair, used by
+  all 14-bit linear params), `s16le` (full signed 16-bit
+  little-endian, for params like `osc1cent` whose -50..-1
+  range writes 0xFFFF..0xFFFE high bytes), `u8` (single
+  byte at LSB position, MSB zeroed), `s8` (single signed
+  byte with sign-extension into the next byte —
+  `osc1semi=-36 → byte 84=0xDC, byte 85=0xFF` per the spec's
+  "sign-extended into the second byte" rule).
+- `encodePatch(overrides, { base? })` clones a base buffer
+  (default `defaultPatchBuffer()`) and applies a sparse
+  `Map<canonicalName, value>`. Throws on unknown param
+  names with a "extend PATCH_OFFSETS" hint so typos don't
+  silently paint patches into a broken state.
+- `decodePatch(buf)` returns a `Map<canonicalName, value>`
+  containing every entry in `PATCH_OFFSETS`.
+- `defaultPatchBuffer()` returns a structurally-valid 2790-
+  byte buffer with the spec's known-fixed bytes set: byte
+  0 = 0x06 Save-to-RAM marker; byte 4 = 0xC8 firmware 2.0.0;
+  the four ETCD magic bytes at 1766–1769 (without these,
+  spec line 73 says "writing will fail for most parameters
+  afterwards"); the alternating -100/-1 pattern at 2390–2399
+  per spec line 86. NOT audible — every other byte is zero.
+  Milestone 3 captures a real INIT patch dump from the
+  device to use as the audible-by-construction base.
+- `writePatchName(buf, name)` / `readPatchName(buf)` for
+  the 16-char patch-name region at bytes 9..24.
+- `splitIntoChunks(buf)` splits the 2790-byte buffer into
+  22 `PatchChunk` objects, each carrying `index` plus an
+  `info: Uint8Array` already framed with the chunk-dump
+  header `[0x16, 0x00, CHUNK, 0x16, …data…]`. Pass each
+  `info` to `wrapSysex` to get the wire bytes. `concatChunks`
+  is the inverse, used for parsing patch responses.
+
+**Bipolar bug params land at spec offsets** — both BK-037
+silence regressions are byte-exact in the new encoder:
+
+- `filter1env1amount` at byte 316/317 (spec line 433).
+  Wire 4096 (display 0) → bytes `0x00, 0x10`. Wire 768
+  (display -52, the original Van Halen "Jump" silence
+  case) round-trips byte-exact.
+- `filter1keytrack` at byte 322/323 (spec line 439). Wire
+  4096 (display 0%) → bytes `0x00, 0x10`.
+
+The display-vs-wire semantics still come from BK-037's
+`resolveNrpnValue` — the patch encoder takes wire values
+directly. Callers building patches use `resolveNrpnValue`
+to translate "I want display +12 on this bipolar param"
+into "wire 4864" before calling `encodePatch`.
+
+**Goldens: `scripts/hydrasynth/verify-sysex-patch.ts` (46
+cases).**
+
+- Constants sanity (2 cases): buffer size = 2790;
+  chunk count = 22.
+- `PATCH_OFFSETS` table consistency (3 cases): every name
+  resolves in the canonical `HYDRASYNTH_NRPNS` registry;
+  no duplicates; all offsets within buffer bounds.
+- Encoding-kind behavior (12 cases): `u16le` byte placement
+  + max value + negative-rejection; `s8` sign-extension
+  for +12, -1, -36 with correct byte 85 (0x00 vs 0xFF);
+  `s8` round-trips through read; `s16le` byte placement
+  for +50, -1, -50; `u8` single-byte placement.
+- BK-037 bipolar bug regression locks (4 cases):
+  `filter1env1amount`/`filter1keytrack` byte placement at
+  316/322; wire-center bytes for display 0; wire-768
+  bytes for the original Van Halen value round-trip.
+- `encodePatch`/`decodePatch` round-trip (5 cases): apply
+  overrides on default buffer; reject unknown name; reject
+  wrong-size base; doesn't mutate input; decode returns
+  every name; 12-param encode→decode→encode is byte-stable.
+- Patch name (4 cases): "Sawpressive GD" lands at the
+  spec's documented bytes; round-trip "Hello"; truncates
+  to 16 chars; rejects non-ASCII char.
+- Default buffer magic bytes (5 cases): byte 0 = 0x06; byte
+  4 = 0xC8; bytes 1766–1769 = 69, 84, 67, 68; bytes
+  2390–2399 = -100/-1 alternation; total length = 2790.
+- Chunk split/concat (5 cases): produces 22 chunks with
+  correct sizes; chunk header `[0x16, 0x00, CHUNK, 0x16]`;
+  byte-exact round-trip on default buffer; byte-exact
+  round-trip on populated buffer with overrides + name;
+  rejects wrong chunk count; rejects out-of-order index.
+- Spec-trace cross-check (3 cases): the spec's "Sawpressive
+  GD" patch chunk 0 has byte 4 = 0x9B (firmware 1.5.5),
+  byte 8 = 13 (Category), and bytes 9..23 decode via
+  `readPatchName` to "Sawpressive GD".
+
+Wired into `npm test` as `hydra:verify-sysex-patch`. tsc
+clean; full preflight green (61 hydra encoding + 28 envelope
++ 46 patch + all AM4 chains).
+
+**Naming gotchas surfaced.** Two passes through goldens
+were needed because some names I chose (`polyphony`,
+`density`, `detune`, `glide`, `glidetime`, etc.) don't
+exist in the canonical NRPN registry — Hydrasynth's NRPN
+table prefixes voice-global params with `voice` (e.g.
+`voicepolyphony`, `voiceglide`, `voiceglidelegto`). And
+reverb hi/lo damp use the truncated form (`reverbhidamp`,
+`reverblodamp`) not the full spelling. The
+`unmappedPatchOffsets()` helper + the table-consistency
+golden caught these on first run.
+
+**Files touched in milestone 2.** New:
+`src/devices/hydrasynth-explorer/patchEncoder.ts`,
+`scripts/hydrasynth/verify-sysex-patch.ts`. Modified:
+`package.json` (added `hydra:verify-sysex-patch` script
++ entry in `test` chain), `docs/STATE.md`,
+`docs/04-BACKLOG.md` (BK-036 milestone 2 marked ✅).
+
+---
+
+### Milestone 1 — SysEx envelope codec
 
 First milestone of BK-036 (Hydrasynth SysEx patch flow) ships.
 Pure encoding work, no hardware needed.

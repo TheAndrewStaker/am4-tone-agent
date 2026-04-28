@@ -2847,18 +2847,34 @@ Skip until explicit user demand materializes.
      path coverage). Wired into `npm test` as
      `hydra:verify-sysex-envelope`. tsc clean, full preflight green.
 
-  2. **Patch byte-map encoder** (~1 session). New file
-     `src/devices/hydrasynth-explorer/patchEncoder.ts`:
-     - `encodePatch(params: Map<canonicalName, number>): Uint8Array`
-       — 2462-byte patch buffer, every parameter at the offset
-       documented in SysexPatchFormat.txt.
-     - Generated from a hand-curated mapping of canonical NRPN
-       names → patch byte offsets. (NOT auto-generated from the
-       2906-line spec — too noisy. Hand-pick the ~100-200 params
-       that map cleanly; everything else stays at INIT defaults.)
-     - `decodePatch(buf: Uint8Array): Map<canonicalName, number>`
-       — reverse, for reading patches from device or `.hydra`
-       files.
+  2. **Patch byte-map encoder** ✅ shipped 2026-04-28 (Session 36).
+     `src/devices/hydrasynth-explorer/patchEncoder.ts` exposes
+     `PATCH_BUFFER_SIZE = 2790` (21×128 + 102 — corrected from
+     the original "2462" plan, which mistook the highest-
+     documented byte for the total buffer size; chunking math
+     gives 2790), `PATCH_OFFSETS` 75-entry curated table, four
+     encoding kinds (`u16le`/`s16le`/`u8`/`s8` with correct
+     sign-extension), `encodePatch(overrides, {base?})` /
+     `decodePatch(buf)`, `defaultPatchBuffer()` with byte 0 =
+     0x06 Save-to-RAM, byte 4 = 0xC8 firmware 2.0.0, the four
+     ETCD magic bytes at 1766–1769, and the alternating
+     -100/-1 pattern at 2390–2399. `writePatchName`/`readPatchName`
+     for the 16-char name region. `splitIntoChunks` /
+     `concatChunks` for 22-chunk wire framing. The two BK-037
+     bipolar-bug regressions land at the spec-documented
+     offsets: `filter1env1amount` byte 316/317;
+     `filter1keytrack` byte 322/323. 46 goldens in
+     `scripts/hydrasynth/verify-sysex-patch.ts` lock table
+     consistency, encoding-kind behavior, sign-extension,
+     12-param round-trip stability, patch-name round-trip,
+     default-buffer magic bytes, chunk split/concat round-trip,
+     and one cross-check against the spec's "Sawpressive GD"
+     trace (byte 4 = 0x9B for 1.5.5; name decodes to
+     "Sawpressive GD"; category byte 8 = 13). Wired into
+     `npm test` as `hydra:verify-sysex-patch`. Default buffer
+     is structurally valid but not audible — milestone 3
+     captures a real INIT patch dump from the device to use
+     as the audible-by-construction base.
 
   3. **MCP tool surface** (~1 session, depends on 1+2).
      - `hydra_apply_patch({ params: [...], slot?: 'A001' })` —

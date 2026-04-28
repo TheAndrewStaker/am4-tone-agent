@@ -5,9 +5,68 @@
 > hardware tasks (USB captures, round-trip tests, reference dumps) live
 > in **`docs/HARDWARE-TASKS.md`** — check that file alongside this one at
 > session start.
-> Last updated: **2026-04-28** (Session 36 — BK-036 milestone 1
-> shipped: Hydrasynth SysEx envelope codec). **First of three
-> BK-036 milestones lands.** New module
+> Last updated: **2026-04-28** (Session 36 — BK-036 milestones
+> 1+2 shipped: SysEx envelope + patch byte-map encoder).
+> **Two of three BK-036 milestones land in one session.**
+>
+> **Milestone 2 — `src/devices/hydrasynth-explorer/patchEncoder.ts`
+> (just shipped).** Patch buffer is **2790 bytes** (21×128 +
+> 102, not 2462 as the original backlog plan said — that was
+> a misread of "byte 2462 = vibrato decimal" annotation;
+> chunking math gives 2790). Module exposes:
+> `PATCH_BUFFER_SIZE`/`PATCH_CHUNK_SIZE`/`PATCH_CHUNK_COUNT`
+> constants; `PATCH_OFFSETS` table (curated 75-entry
+> name→offset map covering osc1/2/3 first-page, ringmod,
+> mixer, filter1/2 first-page, amp, env1, pre/post-FX +
+> dry/wet, delay, reverb, voice/glide globals); four encoding
+> kinds `u16le`/`s16le`/`u8`/`s8` with correct sign-extension;
+> `encodePatch(overrides, {base?})` that clones a base buffer
+> and applies a `Map<canonicalName, value>`; `decodePatch(buf)`
+> returns the curated subset; `defaultPatchBuffer()` produces
+> a structurally-valid (but not yet audible) 2790-byte buffer
+> with byte 0 = 0x06 Save-to-RAM marker, byte 4 = 0xC8
+> firmware 2.0.0, the four ETCD magic bytes at 1766–1769
+> (without these the device rejects most subsequent writes),
+> and the alternating -100/-1 pattern at 2390–2399 per spec
+> line 86; `writePatchName`/`readPatchName` for the 16-char
+> name region at bytes 9..24; `splitIntoChunks(buf)` /
+> `concatChunks(chunks)` for the 22-chunk wire framing.
+>
+> **Bipolar bug params correctly placed** (the BK-037
+> regression locks): `filter1env1amount` at byte 316/317 per
+> spec line 433; `filter1keytrack` at byte 322/323 per spec
+> line 439. Wire 4096 (display 0) → bytes `0x00, 0x10`. Wire
+> 768 (display -52, the original Van Halen "Jump" silence
+> case) round-trips byte-exact.
+>
+> **46 new goldens in `verify-sysex-patch.ts`** — table
+> consistency (every name resolves in `HYDRASYNTH_NRPNS`,
+> no duplicates, every offset in bounds), encoding-kind
+> behavior (u16le, s16le with -1 → `0xFF 0xFF`, s8
+> sign-extension `osc1semi=-36 → byte 84=0xDC byte 85=0xFF`,
+> u8 single-byte), bipolar-bug-param byte placement,
+> 12-param round-trip stability (encode → decode → encode is
+> byte-exact), patch-name read/write at bytes 9..24
+> ("Sawpressive GD" lands at the spec's documented bytes,
+> truncates to 16 chars, rejects non-ASCII), default-buffer
+> magic bytes, chunk split/concat round-trip on both default
+> and populated buffers, and one cross-check against the
+> spec's "Sawpressive GD" trace (byte 4 = 0x9B for firmware
+> 1.5.5, name decodes to "Sawpressive GD", category byte 8 =
+> 13). Wired into `npm test` as `hydra:verify-sysex-patch`.
+>
+> **What's still TODO before milestone 3 (hardware test).**
+> The `defaultPatchBuffer()` is structurally valid but not
+> audible — every other byte is zero, which means filter
+> cutoff at 0, envs all at 0, etc. The audible default
+> arrives in milestone 3 once we capture a real INIT patch
+> dump from the device via `hydra_request_patch`. Also
+> deferred to milestone 3: the MCP tool surface
+> (`hydra_apply_patch`, `hydra_request_patch`,
+> `hydra_load_hydra_file`), and the `INIT_PATCH` retirement.
+>
+> **Milestone 1 — SysEx envelope codec (shipped earlier this
+> session, commit cfdb56f).** Module
 > `src/devices/hydrasynth-explorer/sysexEnvelope.ts` exposes
 > `wrapSysex(info)` / `unwrapSysex(msg)` against the documented
 > `F0 00 20 2B 00 6F  <base64 payload>  F7` envelope from
@@ -15,20 +74,8 @@
 > 0xEDB88320) + base64 codec, validated against the spec's
 > worked example byte-exactly: info `[04 00 00 7F]` →
 > wrapped `F0 00 20 2B 00 6F 47 64 74 6A 6B 51 51 41 41 48 38
-> 3D F7` (the base64 ASCII "GdtjkQQAAH8="). 28 new goldens in
-> `verify-sysex-envelope.ts` — CRC sanity (empty, "123456789"
-> → 0xCBF43926, spec example), spec-exact wrap, ASCII payload
-> match, round-trip on every short protocol message
-> (handshake, header/footer, write request, patch request,
-> patch names request, chunk acks, patch saved ack), 132-byte
-> chunk-dump round-trip (chunk header + 128 data bytes from
-> the spec's "Sawpressive GD" example), plus error-path
-> coverage (bad start byte, bad end byte, wrong manufacturer
-> namespace, CRC corruption, truncated message). Wired into
-> `npm test` as `hydra:verify-sysex-envelope`. tsc clean,
-> full preflight green. Pure encoding module, no hardware
-> dependency — unblocks BK-036 milestone 2 (`patchEncoder.ts`
-> for the 2462-byte patch byte-map).
+> 3D F7` (base64 ASCII "GdtjkQQAAH8="). 28 goldens in
+> `verify-sysex-envelope.ts`.
 >
 > **No NRPN regression.** Both paths will coexist: SysEx for
 > whole-patch atomic writes (apply, slot writes, `.hydra`
@@ -698,53 +745,91 @@ float32. One open question remains before the IR can cover full presets:
 
 ## The single next action
 
-**Most-likely next session: BK-036 milestone 2 — Hydrasynth
-patch byte-map encoder (~1 session, no hardware needed).**
+**Most-likely next session: BK-036 milestone 3 — MCP tool
+surface + first hardware verification (~1 session, hardware
+needed). This is when the founder can finally test.**
 
-Milestone 1 (the SysEx envelope codec) shipped this session
-with 28 goldens green — see Session 36 entry above. The
-envelope is pure encoding logic that takes any logical inner
-message (e.g. `[0x18, 0x00]` "header", `[0x04, 0x00, BANK,
-PATCH]` "patch request", `[0x16, 0x00, CHUNK, 0x16, …128
-bytes…]` "chunk dump") and emits the F0…F7 wire bytes with
-correct CRC-32 + base64. The next milestone uses it.
+Milestones 1+2 shipped this session: SysEx envelope codec
+(commit cfdb56f) and patch byte-map encoder (just landed).
+74 new goldens lock both. Next session moves the work onto
+hardware.
 
-**Milestone 2: `src/devices/hydrasynth-explorer/patchEncoder.ts`**
-- `encodePatch(params: Map<canonicalName, number>): Uint8Array`
-  → 2462-byte patch buffer, every parameter at the offset
-  documented in `references/SysexPatchFormat.txt`. Hand-pick
-  the ~100-200 params that map cleanly between the canonical
-  NRPN names and the patch byte-map; everything else stays at
-  INIT defaults (a known-good default-patch buffer).
-- `decodePatch(buf: Uint8Array): Map<canonicalName, number>`
-  → reverse, for reading patches from device or `.hydra` files.
-- The 22 chunks are just `slice(0, 128)`, `slice(128, 256)`,
-  …, `slice(2688, 2790=2462+128*?)` — the patch buffer is
-  fixed-size, the last chunk is 102 bytes per the spec.
-- Goldens: re-encode the spec's "Sawpressive GD" patch from
-  the documented chunk traces and assert byte-equality, plus
-  round-trip a hand-built param map.
-- Bipolar carry-over: same display-vs-wire semantics from
-  BK-037 apply here. `filter1env1amount = 0` must encode to
-  the wire-center byte in the patch buffer, not 0.
+**Milestone 3 deliverables:**
 
-**After milestone 2: BK-036 milestone 3 — MCP tool surface
-and hardware verification (~1 session, hardware needed).**
-- `hydra_apply_patch({ params, slot? })` via SysEx.
-- `hydra_request_patch({ slot? })` — query device, parse
-  response, return param map.
-- `hydra_load_hydra_file({ path })` — read `.hydra` files,
-  extract `.patch` chunks, send via SysEx.
-- Rewire `hydra_apply_init` to send a known-good SysEx default
-  patch instead of the NRPN prelude. INIT_PATCH file retires.
+1. **`hydra_request_patch({ slot? })`** — first hardware
+   action. Triggers the `Header → Patch Request → 22 ×
+   (Chunk Dump + Ack) → Footer` flow from
+   `references/SysexEncoding.txt` §"Requesting a Single
+   Patch". Concats the 22 returned chunks (via
+   `concatChunks`), runs `decodePatch`, returns the 75
+   curated params. With no slot, queries working buffer
+   (caveat: spec says working-buffer requests are NOT
+   supported — verify on hardware; if confirmed, working-
+   buffer query goes away). With `slot: 'A001'`, queries
+   stored slot bank 0 patch 0.
 
-**Sequencing alternatives for next session.** If milestone 2
-feels too large, the alternative useful work without hardware:
-- (a) Mark milestone 1 as ✅ in `04-BACKLOG.md`'s BK-036
-  entry — already done this session, ready to verify.
-- (b) HW-037 Enhancer first-page knob screenshot (AM4 track)
-  is unaffected and can run in parallel — different device,
-  no contention.
+2. **Capture a real INIT patch buffer** as soon as
+   `hydra_request_patch` works: dump a fresh "INIT" preset
+   from the device, save the raw 2790 bytes as a constant
+   `INIT_PATCH_BUFFER` in a new file (or as base64 to keep
+   diffs sane), use it as the new `defaultPatchBuffer()`
+   replacement. THIS is what makes the patch flow audible
+   by construction — every byte is set to a known-good
+   value from a real device.
+
+3. **`hydra_apply_patch({ params, slot? })`** — second
+   hardware action. Builds patch via `encodePatch(params,
+   { base: INIT_PATCH_BUFFER })`, splits via
+   `splitIntoChunks`, sends each chunk wrapped via
+   `wrapSysex`, observing the chunk-ack handshake from
+   §"Writing a Patch". Without `slot`, sends to current
+   working memory (no Write Request). With `slot`, sends
+   the Write Request after the last chunk and waits the
+   spec's 3500ms before any further traffic.
+
+4. **`hydra_load_hydra_file({ path })`** — reads a `.hydra`
+   archive, extracts each `.patch`, calls
+   `hydra_apply_patch` per slot.
+
+5. **Rewire `hydra_apply_init`** to send INIT_PATCH_BUFFER
+   via `hydra_apply_patch` instead of running the NRPN
+   prelude. Retire `src/devices/hydrasynth-explorer/initPatch.ts`
+   once verified.
+
+6. **Goldens:** verify-msg-equivalent for the wire bytes.
+   With INIT_PATCH_BUFFER captured, lock its first 132
+   bytes against the device dump byte-exactly. Assert that
+   `wrapSysex(splitIntoChunks(applyOverrides(...))[0].info)`
+   matches what the device would expect for chunk 0 of a
+   patch write.
+
+**Hardware test plan once milestone 3 lands.** The first
+real test is the recovery primitive: `hydra_apply_init`
+must take a device that just had a destructive NRPN write
+and restore it to audible saw default in <100ms wire time
+(was ~300ms via the NRPN prelude). Then a Van Halen "Jump"
+recipe rebuild via SysEx — the test that previously failed
+on the NRPN-prelude path due to bipolar / mod-matrix bleed-
+through. With every byte explicitly set, that class of
+failure is structurally eliminated.
+
+**The current default buffer is structurally valid but
+not audible** — every byte that isn't explicitly set is
+zero (filter cutoff 0, envs at 0, mixer vols 0). Writing
+it to the device would produce silence, but won't get
+rejected outright (the four ETCD magic bytes are set). It
+exists to let `encodePatch` work without crashing in
+goldens; a real dump replaces it in milestone 3.
+
+**Sequencing alternatives for next session.** If hardware
+contention or timing prevents milestone 3:
+- (a) HW-037 Enhancer first-page knob screenshot (AM4 track)
+  — last HW-032 residual, one screenshot, no recapture.
+  Closes BK-032's release-gate target across every AM4
+  block. Different device, no contention.
+- (b) Extend `PATCH_OFFSETS` with more curated entries
+  (LFO 1–5 first pages, mod-matrix slots 1–8, env 2–4) —
+  pure extension, doesn't need hardware.
 
 **What survives from BK-037 (do not touch):**
 - Bipolar `displayMin`/`displayMax` registry tags + bipolar branch
