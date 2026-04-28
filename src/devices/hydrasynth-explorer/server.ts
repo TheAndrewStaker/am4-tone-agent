@@ -256,9 +256,11 @@ MUTATORS (4):
   mutator1ratio, mutator1depth, mutator1drywet
   Same shape for mutator2..mutator4.
 
-MOD MATRIX  (32 slots):
-  mod1source, mod1depth, mod1destination
-  ... mod32source / mod32depth / mod32destination
+MOD MATRIX  (32 slots — note edisyn names use "modmatrix" prefix):
+  modmatrix1modsource    — source (LFO, ENV, velocity, aftertouch, …)
+  modmatrix1modtarget    — destination (osc pitch, filter cutoff, …); set to 0 to disable a slot
+  modmatrix1depth        — modulation amount
+  ... modmatrix32modsource / modmatrix32modtarget / modmatrix32depth
 
 MACROS:
   macro1value..macro8value (also patch-defined CCs 16-23)

@@ -34,17 +34,76 @@ export interface NrpnSearchHit {
 }
 
 /**
+ * Split a string at digit→letter and letter→digit boundaries into
+ * alternating word / number segments. Used by `looseMatchSegments` to
+ * bridge user queries that have the right segments but wrong inter-
+ * segment glue: "mod1depth" → ["mod", "1", "depth"] should still
+ * structurally match "modmatrix1depth" even though no literal substring
+ * of "mod1depth" appears in "modmatrix1depth".
+ */
+function tokenizeAlphaNum(s: string): string[] {
+  return s.match(/\d+|[a-z]+/g) ?? [];
+}
+
+/**
+ * Returns true when `name` contains every segment of `query` IN ORDER,
+ * letting other characters appear between them. Used as a fallback when
+ * exact prefix / contains search returns nothing — bridges "mod1depth"
+ * → "modmatrix1depth", "ringmod1" → "ringmodsource1", etc.
+ */
+function looseMatchSegments(query: string, name: string): boolean {
+  const segs = tokenizeAlphaNum(query);
+  if (segs.length < 2) return false;
+  let pos = 0;
+  for (const seg of segs) {
+    const idx = name.indexOf(seg, pos);
+    if (idx < 0) return false;
+    pos = idx + seg.length;
+  }
+  return true;
+}
+
+/**
+ * Boundary-aware prefix score. When `q` is a prefix of `name`, prefer
+ * the case where the next char in `name` is a NON-digit (so "modmatrix1"
+ * matches "modmatrix1depth" cleanly but ranks lower for
+ * "modmatrix15modsource" because position 10 is '5' — a longer number).
+ * Returns the prefix-match base score with a bonus for tighter matches
+ * (shorter unmatched-suffix length).
+ */
+function prefixScore(q: string, name: string, baseStrong: number, baseWeak: number): number {
+  if (!name.startsWith(q)) return 0;
+  const next = name.charAt(q.length);
+  const tightnessBonus = Math.max(0, 8 - (name.length - q.length));
+  // No "next" char → exact match (handled separately above) or empty;
+  // a non-digit next char is a clean boundary; a digit means q sits in
+  // the middle of a longer number, weaker structural match.
+  const isBoundary = next === '' || !/\d/.test(next);
+  return (isBoundary ? baseStrong : baseWeak) + tightnessBonus;
+}
+
+/**
  * Fuzzy-search the NRPN registry by query string. Returns ranked matches
  * across canonical name, aliases, and notes (case- and punctuation-
- * insensitive). Scoring favors name hits over alias hits over notes hits;
- * within each, exact > prefix > contains.
+ * insensitive). Scoring tiers (highest first):
  *
- * Used by:
+ *   100 — exact name match
+ *   95  — exact alias match
+ *   90  — name prefix at boundary (modmatrix1 → modmatrix1depth)
+ *   85  — alias prefix at boundary
+ *   80  — name prefix at digit-mid (modmatrix1 → modmatrix15modsource)
+ *   70  — name contains query
+ *   65  — alias contains query
+ *   50  — loose-segment match (mod1depth → modmatrix1depth)
+ *   30  — notes contain query
+ *
+ * Plus a small tightness bonus (0–8) inside prefix tiers so the closest
+ * match by length surfaces first. Used by:
  *   - error paths in `hydra_set_engine_param` / `_params` to suggest
  *     close-by names when a write is rejected;
  *   - the `hydra_param_catalog` tool to answer query-driven discovery.
  */
-export function findMatchingNrpns(query: string, limit = 30): NrpnSearchHit[] {
+export function findMatchingNrpns(query: string, limit = 60): NrpnSearchHit[] {
   const q = normalize(query);
   if (!q) return [];
   const hits: NrpnSearchHit[] = [];
@@ -55,16 +114,31 @@ export function findMatchingNrpns(query: string, limit = 30): NrpnSearchHit[] {
     let source: NrpnSearchHit['matchSource'] = 'name';
 
     if (nameNorm === q) bestScore = Math.max(bestScore, 100);
-    else if (nameNorm.startsWith(q)) bestScore = Math.max(bestScore, 90);
-    else if (nameNorm.includes(q)) bestScore = Math.max(bestScore, 70);
+    else {
+      const ps = prefixScore(q, nameNorm, 90, 80);
+      if (ps > bestScore) bestScore = ps;
+      if (bestScore < 70 && nameNorm.includes(q)) bestScore = 70;
+    }
 
     if (e.aliases) {
       for (const a of e.aliases) {
         const aNorm = normalize(a);
         if (aNorm === q && bestScore < 95) { bestScore = 95; source = 'alias'; }
-        else if (aNorm.startsWith(q) && bestScore < 85) { bestScore = 85; source = 'alias'; }
-        else if (aNorm.includes(q) && bestScore < 65) { bestScore = 65; source = 'alias'; }
+        else {
+          const ps = prefixScore(q, aNorm, 85, 75);
+          if (ps > bestScore) { bestScore = ps; source = 'alias'; }
+          if (bestScore < 65 && aNorm.includes(q)) { bestScore = 65; source = 'alias'; }
+        }
       }
+    }
+
+    // Loose-segment fallback: bridges queries like "mod1depth" →
+    // "modmatrix1depth" where the segments are right but the user used
+    // a more compact name than the canonical edisyn label. Only kicks
+    // in if no stronger match was found, since otherwise it's noise.
+    if (bestScore < 50 && looseMatchSegments(q, nameNorm)) {
+      bestScore = 50;
+      source = 'name';
     }
 
     // Notes match — lowest priority. Helps when Claude searches by concept
@@ -78,7 +152,7 @@ export function findMatchingNrpns(query: string, limit = 30): NrpnSearchHit[] {
     if (bestScore > 0) hits.push({ entry: e, score: bestScore, matchSource: source });
   }
 
-  hits.sort((a, b) => b.score - a.score);
+  hits.sort((a, b) => b.score - a.score || a.entry.name.length - b.entry.name.length);
   return hits.slice(0, limit);
 }
 

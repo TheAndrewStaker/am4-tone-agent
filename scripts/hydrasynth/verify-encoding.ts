@@ -22,6 +22,7 @@ import { findHydraNrpn } from '../../src/devices/hydrasynth-explorer/nrpn.js';
 import {
   resolveNrpnValue,
   nrpnMessagesFor,
+  findMatchingNrpns,
 } from '../../src/devices/hydrasynth-explorer/encoding.js';
 
 interface Case {
@@ -255,6 +256,36 @@ const cases: Case[] = [
   check('channel 16 → status byte 0xBF', () => {
     const msgs = nrpnMessagesFor(getOrThrow('filter1cutoff'), 16, 0);
     return msgs.every((m) => m[0] === 0xbf) ? true : 'wrong status';
+  }),
+
+  // ---------------- Search ranking + loose match -------------------------
+  check('search: prefix at boundary outranks prefix mid-number', () => {
+    // "modmatrix1" should rank modmatrix1depth (next char "d") above
+    // modmatrix15modsource (next char "5"). Tests Fix B.
+    const hits = findMatchingNrpns('modmatrix1', 5).map((h) => h.entry.name);
+    const idx1 = hits.indexOf('modmatrix1depth');
+    const idx15 = hits.findIndex((n) => n.startsWith('modmatrix15'));
+    if (idx1 < 0) return 'modmatrix1depth not found';
+    if (idx15 >= 0 && idx1 > idx15) return `modmatrix1depth at ${idx1}, modmatrix15* at ${idx15}`;
+    return true;
+  }),
+  check('search: loose-segment match bridges mod1depth → modmatrix1depth', () => {
+    // The cheat-sheet originally listed mod1depth (wrong); user/Claude
+    // shouldn't have to know that. Tests Fix C.
+    const hits = findMatchingNrpns('mod1depth', 5).map((h) => h.entry.name);
+    return hits[0] === 'modmatrix1depth' ? true : `top hit was ${hits[0] ?? 'none'}`;
+  }),
+  check('search: loose match bridges ringmod1 → ringmodsource1', () => {
+    const hits = findMatchingNrpns('ringmod1', 3).map((h) => h.entry.name);
+    return hits[0] === 'ringmodsource1' ? true : `top hit was ${hits[0] ?? 'none'}`;
+  }),
+  check('search: alias direct hit still wins (filter1.cutoff)', () => {
+    const hits = findMatchingNrpns('filter1.cutoff', 3);
+    return hits[0]?.entry.name === 'filter1cutoff' && hits[0]?.score === 100
+      ? true : `top hit ${hits[0]?.entry.name} score ${hits[0]?.score}`;
+  }),
+  check('search: empty query returns no hits (no full-dump risk)', () => {
+    return findMatchingNrpns('', 30).length === 0 ? true : 'empty query returned hits';
   }),
 
   // ---------------- Error paths -------------------------------------------
