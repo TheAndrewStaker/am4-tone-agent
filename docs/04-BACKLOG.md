@@ -2794,3 +2794,112 @@ Skip until explicit user demand materializes.
   work. Queue for after BK-032 first-page coverage closes (the
   remaining HW-037 enhancer screenshot is the only thing left
   there).
+
+### BK-036 Hydrasynth SysEx patch flow — atomic single-message batch + `.hydra` loading
+
+- **For:** unblock three related Hydrasynth use cases that all need
+  the same underlying SysEx infrastructure:
+  1. **Atomic patch writes** — send a complete patch as ONE
+     ~3.3 KB SysEx message instead of 100+ NRPN sequences.
+     ~3 ms wire time vs ~300 ms; no drop-risk; eliminates
+     pacing concerns entirely.
+  2. **`.hydra` file loading** — read patches from `.hydra` /
+     `.patch` files (per BK-NNN .hydra-decoder backlog) and
+     push them via SysEx instead of decomposing into NRPN
+     calls.
+  3. **Slot-targeted writes** — write to a stored patch slot
+     (Bank A–H, program 0–127) without disturbing the
+     working buffer. NRPN can't do this — it only edits the
+     currently-loaded patch.
+
+- **Founder's stated priority (2026-04-28).** "Want this sooner
+  rather than later because I originally wanted .hydra support
+  and we should always prefer batch approaches with hardware
+  latency in mind." Ship after the next 1–2 hardware test
+  rounds confirm the freshPatch merge-batch approach is
+  sufficient for live patch building; SysEx is the proper
+  permanent solution.
+
+- **Source material — already vendored.**
+  - `docs/devices/hydrasynth-explorer/references/SysexEncoding.txt`
+    (695 lines, edisyn) — full envelope spec: `F0 00 20 2B 00 6F
+    …DATA… F7`, base64-encoded payload, 4-byte CRC-32. Documents
+    the handshake / patch-request / chunked-dump / write / bank-
+    name flows with literal byte traces.
+  - `docs/devices/hydrasynth-explorer/references/SysexPatchFormat.txt`
+    (2906 lines, edisyn) — byte-offset map of the 2462-byte
+    decoded patch. Every parameter's slot. Reference Java code
+    in `references/ASMHydrasynth.java`'s `Decode.java` /
+    `Encode.java`.
+
+- **Order of operations (estimated 2–3 focused sessions).**
+
+  1. **SysEx envelope module** (~1 session). New file
+     `src/devices/hydrasynth-explorer/sysexEnvelope.ts`:
+     - `wrapSysex(payload: Uint8Array): number[]` — produces the
+       full F0…F7 message: header, base64 payload, CRC-32, footer.
+     - `unwrapSysex(msg: number[]): Uint8Array` — reverse.
+     - CRC-32 over the data block (one-liner with bitwise math
+       or import from `node-crc`).
+     - Base64 encode/decode (built-in `Buffer`).
+     - Test harness producing byte-exact output against edisyn's
+       documented examples.
+
+  2. **Patch byte-map encoder** (~1 session). New file
+     `src/devices/hydrasynth-explorer/patchEncoder.ts`:
+     - `encodePatch(params: Map<canonicalName, number>): Uint8Array`
+       — 2462-byte patch buffer, every parameter at the offset
+       documented in SysexPatchFormat.txt.
+     - Generated from a hand-curated mapping of canonical NRPN
+       names → patch byte offsets. (NOT auto-generated from the
+       2906-line spec — too noisy. Hand-pick the ~100-200 params
+       that map cleanly; everything else stays at INIT defaults.)
+     - `decodePatch(buf: Uint8Array): Map<canonicalName, number>`
+       — reverse, for reading patches from device or `.hydra`
+       files.
+
+  3. **MCP tool surface** (~1 session, depends on 1+2).
+     - `hydra_apply_patch({ params: [...], slot?: 'A001' })` —
+       atomic patch send via SysEx. With `slot`, writes to the
+       stored slot; without, writes to the working buffer.
+     - `hydra_request_patch({ slot?: 'A001' })` — query device
+       for its current patch (working buffer or stored slot),
+       parses the response, returns the param map.
+     - `hydra_load_hydra_file({ path: '...' })` — reads a `.hydra`
+       file, extracts each `.patch`, sends via SysEx.
+     - Existing `hydra_set_engine_params` stays — useful for
+       single-knob tweaks. The new batch path is for whole-patch
+       work.
+
+  4. **Hardware verification.** Round-trip tests: build a patch
+     via NRPN → save → request via SysEx → assert byte-equality.
+     One full bank-load test against a vendor `.hydra` file.
+
+- **Why this maps to founder's request.** The "always prefer batch
+  with hardware latency in mind" framing is exactly what SysEx
+  delivers — one wire message instead of 100, atomic, drop-free.
+  The `.hydra` use case becomes trivial once this lands (just
+  SysEx-wrap each `.patch` file and send).
+
+- **Ship order with `freshPatch` already shipped.** `freshPatch`
+  is the interim — covers the "fresh recipe" use case with
+  acceptable latency (~300 ms). SysEx replaces it for fresh-patch
+  builds AND opens up the slot-write + `.hydra` flows. Once
+  SysEx lands, `freshPatch` can be deprecated to a thin alias
+  that constructs an INIT_PATCH-merged param map and calls
+  `hydra_apply_patch`.
+
+- **Risk: front-panel envelope mismatch.** Edisyn's notes flag
+  that the device's front-panel "Send Patch" / "Send Bank"
+  buttons emit a non-standard `F0 01…` / `F0 02…` envelope
+  that edisyn declined to RE. Our flow uses the documented
+  `F0 00 20 2B 00 6F` envelope per the spec — different code
+  path, should work, but needs hardware verification on first
+  send. If it doesn't, the workaround is to RE the front-panel
+  envelope from a USBPcap capture of ASM Manager doing a
+  Save-Patch operation.
+
+- **Priority:** medium-high. After the next 1–2 hardware tests
+  validate `freshPatch` covers the practical use case; move up
+  if `freshPatch` proves insufficient or `.hydra` loading
+  becomes a user request.
