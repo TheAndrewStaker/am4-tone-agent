@@ -37,6 +37,13 @@ samples/factory/*.txt
 # firmware-specific data. Local-only.
 samples/captured/
 
+# ASM Hydrasynth full bank files (bundled with ASM Hydrasynth Manager,
+# Ashun copyright). The single extracted .patch entries are committed
+# as derivative working material (analogous to docs/manuals/other-gear
+# .txt extractions). See samples/hydrasynth/README.md.
+samples/hydrasynth/*.hydra
+samples/hydrasynth/*.hydramulti
+
 # SPD-SX reverse-engineering scratch work (BK-019 feasibility probe).
 # Local-only until the format decode stabilizes and we decide what belongs
 # in the repo.
