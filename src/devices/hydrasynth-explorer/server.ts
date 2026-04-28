@@ -61,7 +61,7 @@ import {
   type HydrasynthConnection,
 } from './midi.js';
 import { wrapSysex, unwrapSysex } from './sysexEnvelope.js';
-import { splitIntoChunks, PATCH_CHUNK_COUNT } from './patchEncoder.js';
+import { splitIntoChunks, PATCH_CHUNK_COUNT, encodePatch } from './patchEncoder.js';
 import { INIT_PATCH_BUFFER } from './initPatchBuffer.js';
 
 // -- MIDI lazy-init -------------------------------------------------------
@@ -1085,6 +1085,157 @@ server.registerTool('hydra_apply_init_to', {
   }
   lines.push('');
   lines.push('Summary:');
+  lines.push(`  Header Response (19 00):   ${headerResponses > 0 ? '✓' : '✗'} (${headerResponses} seen)`);
+  lines.push(`  Chunk Acks (17 00 NN 16):  ${chunkAcksSeen.size}/${PATCH_CHUNK_COUNT} ${chunkAcksSeen.size === PATCH_CHUNK_COUNT ? '✓' : '✗'}`);
+  lines.push(`  Patch Saved (07 00 BB PP): ${patchSaveds > 0 ? '✓' : '✗'} (${patchSaveds} seen)`);
+  lines.push(`  Footer Response (1B 00):   ${footerResponses > 0 ? '✓' : '✗'} (${footerResponses} seen)`);
+  lines.push(`  Other / unrecognized:      ${others.length}`);
+
+  return {
+    content: [{
+      type: 'text',
+      text: lines.join('\n'),
+    }],
+  };
+});
+
+// hydra_apply_patch (milestone-3 prototype) -----------------------------
+
+server.registerTool('hydra_apply_patch', {
+  description: [
+    '**Milestone-3 prototype.** Builds a Hydrasynth patch by applying a',
+    'sparse `Map<name, value>` of overrides on top of the factory INIT',
+    'buffer, then dumps the result via SysEx to the named slot. Defaults',
+    'to a post-dump bank/PC bounce so the patch becomes audible (per',
+    'spec NOTE 2 — confirmed by HW-040 test 1 on 2026-04-28).',
+    '',
+    'Workflow:',
+    '  1. Navigate the device to the slot you intend to modify (e.g.',
+    '     `hydra_navigate_to({slot: "B001"})`) — required because',
+    '     SysEx-to-current-memory only modifies the active bank\'s',
+    '     working memory.',
+    '  2. Call `hydra_apply_patch({slot: "B001", params: [...]})`.',
+    '  3. Press a key.',
+    '',
+    'Values are PATCH-BUFFER WIRE values, not display units. For',
+    'non-bipolar params (filter cutoff 0..16383, mixer levels 0..127,',
+    'oscillator semitones as signed bytes) raw wire values work.',
+    '',
+    '**Known issue (BK-036.5 / task #10):** bipolar params (env',
+    'amounts, filter keytrack, asymmetric EQ ranges) currently encode',
+    'with the wrong scale — patch buffer stores values at NRPN_wire/8',
+    'with bipolar center 512, but our encoder uses NRPN_wire directly.',
+    'Avoid bipolar params for now or expect off-by-scale results.',
+    '',
+    'Does NOT save to flash (no Write Request). RAM only — modifies',
+    'the working memory of the bank specified in `slot`. Hard',
+    'precondition: device must have Pgm Chg RX = On (MIDI Page 11',
+    'knob 4) for the post-dump dance to fire.',
+  ].join('\n'),
+  inputSchema: {
+    slot: z.string().describe(
+      'Target slot in "A001".."H128" form. Should match the device\'s currently-active patch — only that bank\'s working memory will be modified.',
+    ),
+    params: z.array(z.object({
+      name: z.string().describe('Canonical patch-buffer parameter name (e.g. "filter1cutoff", "osc1type", "mixer.osc1_vol"). Must appear in PATCH_OFFSETS.'),
+      value: z.number().describe('Patch-buffer WIRE value. For non-bipolar params, equals NRPN wire (0..16383). Bipolar params are off-scale until task #10 lands.'),
+    })).min(1).describe('Sparse override map applied on top of the factory INIT buffer.'),
+    dance: z.enum(['none', 'post', 'both']).optional().describe(
+      '`post` (default) = bounce off E064 + return to target after the dump (audibilizes per NOTE 2). `none` = pure dump, no PC. `both` = pre + post (use when you haven\'t pre-navigated to the slot yourself).',
+    ),
+  },
+}, async ({ slot, params, dance }) => {
+  const conn = ensureMidi();
+  const target = parseSlot(slot);
+  const danceMode = dance ?? 'post';
+  const startMs = Date.now();
+
+  // Build the override map. Reject non-finite values up front so a
+  // typo doesn't get encoded as NaN bytes.
+  const overrides = new Map<string, number>();
+  for (const { name, value } of params) {
+    if (!Number.isFinite(value)) {
+      throw new Error(`hydra_apply_patch: param "${name}" has non-finite value ${value}.`);
+    }
+    overrides.set(name, value);
+  }
+
+  // Encode overrides on top of INIT. Routing header bytes 2-3 are
+  // overwritten after encoding so the chunk-0 metadata routes the
+  // dump to `target`.
+  let buf: Uint8Array;
+  try {
+    buf = encodePatch(overrides, { base: INIT_PATCH_BUFFER });
+  } catch (err) {
+    throw new Error(`hydra_apply_patch: encodePatch failed — ${err instanceof Error ? err.message : String(err)}`);
+  }
+  buf[2] = target.bank;
+  buf[3] = target.patch;
+
+  const observed: Array<{ ms: number; bytes: number[] }> = [];
+  const unsubscribe = conn.onMessage((bytes) => {
+    observed.push({ ms: Date.now() - startMs, bytes: [...bytes] });
+  });
+
+  try {
+    if (danceMode === 'both') {
+      await bankPcDance(conn, target);
+    }
+
+    conn.send(wrapSysex([0x18, 0x00]));
+    const chunks = splitIntoChunks(buf);
+    for (let i = 0; i < chunks.length; i++) {
+      conn.send(wrapSysex(chunks[i]!.info));
+      if (i < chunks.length - 1) await sleep(SYSEX_CHUNK_PACING_MS);
+    }
+    conn.send(wrapSysex([0x1a, 0x00]));
+
+    if (danceMode === 'post' || danceMode === 'both') {
+      await bankPcDance(conn, target);
+    }
+
+    await sleep(SYSEX_TAIL_DRAIN_MS);
+  } finally {
+    unsubscribe();
+  }
+
+  const elapsedMs = Date.now() - startMs;
+
+  let headerResponses = 0;
+  let footerResponses = 0;
+  let patchSaveds = 0;
+  const chunkAcksSeen = new Set<number>();
+  const others: string[] = [];
+  for (const { bytes } of observed) {
+    if (bytes[0] === 0xf0) {
+      let info: Uint8Array;
+      try {
+        info = unwrapSysex(bytes);
+      } catch {
+        others.push(describeInboundMessage(bytes));
+        continue;
+      }
+      if (info.length === 2 && info[0] === 0x19 && info[1] === 0x00) headerResponses++;
+      else if (info.length === 2 && info[0] === 0x1b && info[1] === 0x00) footerResponses++;
+      else if (info.length === 4 && info[0] === 0x17 && info[1] === 0x00 && info[3] === 0x16) chunkAcksSeen.add(info[2]!);
+      else if (info.length === 4 && info[0] === 0x07 && info[1] === 0x00) patchSaveds++;
+      else others.push(describeInboundMessage(bytes));
+    } else {
+      others.push(describeInboundMessage(bytes));
+    }
+  }
+
+  const lines: string[] = [];
+  lines.push(`Applied ${params.length} override${params.length === 1 ? '' : 's'} to ${target.display} via SysEx (dance=${danceMode}, ${PATCH_CHUNK_COUNT} chunks, ${elapsedMs} ms total).`);
+  lines.push('');
+  lines.push('Overrides:');
+  for (const { name, value } of params) {
+    lines.push(`  ${name} = ${value}`);
+  }
+  lines.push('');
+  lines.push(`Press a key. The active patch should now reflect your overrides on top of an INIT base.`);
+  lines.push('');
+  lines.push(`Summary:`);
   lines.push(`  Header Response (19 00):   ${headerResponses > 0 ? '✓' : '✗'} (${headerResponses} seen)`);
   lines.push(`  Chunk Acks (17 00 NN 16):  ${chunkAcksSeen.size}/${PATCH_CHUNK_COUNT} ${chunkAcksSeen.size === PATCH_CHUNK_COUNT ? '✓' : '✗'}`);
   lines.push(`  Patch Saved (07 00 BB PP): ${patchSaveds > 0 ? '✓' : '✗'} (${patchSaveds} seen)`);

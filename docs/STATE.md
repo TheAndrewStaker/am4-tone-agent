@@ -6,58 +6,84 @@
 > in **`docs/HARDWARE-TASKS.md`** — check that file alongside this one at
 > session start.
 >
-> **✅ Session 38 wrap — SysEx-to-current-memory confirmed working
-> on Hydrasynth Explorer.** HW-040 test 1 passed after flipping
-> device-side `Pgm Chg RX = On`. Path forward for milestone 3 is
-> clear: post-dump PC bounce required; pre-dump dance only needed
-> when dumping to a non-active slot.
+> **✅ Session 38 wrap — SysEx confirmed working on Hydrasynth.**
+> HW-040 test 1 passed after flipping device-side `Pgm Chg RX = On`.
+> Session 37+38 committed as `ec44521` on `hydrasynth-explorer`.
+> `hydra_apply_patch` shipped as milestone-3 prototype (uncommitted
+> on disk pending real-tone test verdict).
 >
 > **🚨 Next-session pickup checklist (Session 39 onward):**
 >
-> 1. **Task #10 unblocked — patch-buffer bipolar/scale fix
->    (BK-036.5).** Hypothesis: patch values = NRPN_wire / 8
->    (bipolar center 512, full-scale 1024). Verify against the
->    INIT_PATCH_BUFFER bytes already in the codebase (filter1env1amount
->    at byte 316/317 = 512 = display 0; filter1keytrack at byte
->    322/323 = 768 = some positive value). Fix `PATCH_OFFSETS`
->    encoding kinds in `src/devices/hydrasynth-explorer/patchEncoder.ts`,
->    update `verify-sysex-patch` goldens, run preflight.
+> **Strategic context:** founder set the priority order at the end
+> of Session 38 — finish Hydrasynth real-tone validation, plan the
+> main-merge, cross-pollinate Hydrasynth wins back into AM4 tools,
+> then **AM4 development takes priority until release**. Hydrasynth
+> resumes post-release. Don't drift into more Hydrasynth scope
+> without an explicit founder green-light.
 >
-> 2. **Scaffold `hydra_apply_patch({slot, params, dance?})`** —
->    same shape as `hydra_apply_init_to` but takes a `Map<canonical
->    name, value>` of overrides. Encode via fixed `encodePatch(overrides,
->    {base: INIT_PATCH_BUFFER})`, dump via SysEx, post-dump dance
->    to audibilize. Default dance = "post". HW-040 test 2 (Van Halen
->    "Jump" recipe) verifies this.
+> 1. **Confirm real-tone test from Session 38 close.** Founder was
+>    on B001 with INIT in working memory, about to run:
+>    ```
+>    hydra_apply_patch({
+>      slot: "B001",
+>      params: [
+>        { name: "filter1cutoff",    value: 3000 },
+>        { name: "filter1resonance", value: 11000 }
+>      ]
+>    })
+>    ```
+>    Expected: filter closes hard with audible resonance ("vocal /
+>    wow" character). If audible → SysEx pipeline is end-to-end
+>    proven and `hydra_apply_patch` works for non-bipolar params.
+>    If silent → debug the encoder path before anything else.
 >
-> 3. **Scaffold `hydra_request_patch({slot})`** — needs MIDI input
->    listener (already shipped via `connectHydrasynth()`'s Input
->    port). Send `[0x04, 0x00, BANK, PATCH]` SysEx request, collect
->    22 chunk responses, concatenate via `concatChunks`, decode via
->    `decodePatch`. HW-040 test 3 verifies.
+> 2. **Commit `hydra_apply_patch` once real-tone test passes.**
+>    Single-commit checkpoint marking milestone 3 prototype done.
+>    NOT a milestone-complete commit (request_patch + .hydra loader
+>    + bipolar fix all still pending) — just preserves the
+>    audible-validated state.
 >
-> 4. **Scaffold `hydra_load_hydra_file({path})`** — unzip `.hydra`
->    archive, extract a `.patch` entry, prepend 4-byte routing
->    header, send via SysEx. Tests 2-4 of HW-040 verify the round
->    trip.
+> 3. **Plan main-merge.** Currently 6 commits ahead on
+>    `hydrasynth-explorer` (`ec44521` plus the 5 prior). Conflict
+>    surface is mostly Hydra-only files; expected conflicts in
+>    `package.json` (test scripts), `docs/STATE.md`, and
+>    `docs/HARDWARE-TASKS.md`. Recommend rebase over merge so the
+>    Hydra commit chain stays linear. Founder asked for a dry-run
+>    before pulling the trigger — do `git fetch origin && git rebase
+>    --dry-run origin/main` style preview first.
 >
-> 5. **Optionally — fold pre-dance learning back into `hydra_apply_init`**
->    The pre-dance was theorized but unproven for the H128 case.
->    Now that we know post-dance is sufficient when dumping to the
->    active patch, re-test `hydra_apply_init` (which dumps to H128,
->    not active) with `dance: "both"` (current behavior) to confirm
->    it still works under Pgm Chg RX = On. If `dance: "post"` alone
->    suffices when starting from non-H128, we can drop the pre-dance
->    for ~350ms wire-time savings.
+> 4. **Cross-pollinate Hydra wins to AM4.** Three candidates:
+>    - **Inbound-MIDI capture in tool responses.** Adopt the
+>      `[+NNNms] HEX_BYTES` timeline + ack-summary pattern in
+>      selected AM4 diagnostic tools. AM4 already has Input via
+>      `src/protocol/midi.ts:connect()` so it's pure tool-surface
+>      work, no protocol changes.
+>    - **AM4-specific `describeInboundMessage` decoder** — same
+>      shape as the Hydra version but for `F0 00 01 74 15 …`
+>      envelopes and AM4 ack patterns. Goes alongside
+>      `src/protocol/midi.ts:toHex()`.
+>    - **`am4_test_navigate` / equivalent diagnostic primitive** —
+>      precedent from `hydra_navigate_to`. When a high-level tool
+>      fails inscrutably, having a "bypass the stack" probe saves
+>      multi-session debug arcs (this session's HW-040 lesson).
 >
-> Hard precondition for any tool that uses bank/PC: device must
-> have `Pgm Chg RX = On` (MIDI Page 11 knob 4). Document this in
-> tool descriptions when shipping milestone 3 tools, and consider
-> a one-time "first run" check in the connector setup flow.
+> 5. **AM4 development takes priority until release.** Resume
+>    BK-032 first-page coverage, BK-029 follow-up items, etc.
+>    Hydrasynth backlog for post-release: task #10 (bipolar/scale
+>    fix per BK-036.5) → `hydra_request_patch` → `hydra_load_hydra_file`
+>    → revisit pre-dance theory for `hydra_apply_init` (now-dropped
+>    pre-dance might save ~350 ms wire time).
 >
-> Last updated: **2026-04-28** (Session 38 — Pgm Chg RX root cause
-> found, HW-040 test 1 passed with `dance: "post"` after device
-> setting flipped, milestone 3 unblocked).
+> **Hard precondition reminder:** any Hydrasynth tool that uses
+> bank/PC (apply_init, apply_init_to, apply_patch, navigate_to)
+> requires device-side **Pgm Chg RX = On** (MIDI Page 11 knob 4).
+> NRPN/CC tools unaffected. Saved as project memory
+> `project_hydrasynth_pgm_chg_rx_requirement.md`.
+>
+> Last updated: **2026-04-28** (Session 38 wrap — Session 37+38
+> committed `ec44521`; `hydra_apply_patch` prototype on disk
+> pending real-tone test; main-merge + cross-pollination + AM4
+> priority queued for Session 39).
 >
 > **Session 38 highlights — Input listener, diagnostic tools,
 > and root cause: Pgm Chg RX = Off.**
