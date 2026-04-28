@@ -14,7 +14,8 @@
  *   - hydra_set_macro      shorthand for Macros 1-8 (CCs 16-23)
  *   - hydra_switch_patch   bank-select MSB/LSB + Program Change
  *   - hydra_play_note      Note On + (after duration) Note Off
- *   - hydra_list_params    describe the param catalog Claude can call
+ *   - hydra_list_enum_values discover enum-table contents (wave/filter/FX names)
+ *   - hydra_param_catalog  fallback search across the full 1175-entry NRPN catalog
  *
  * MIDI is opened lazily on the first tool call so the server can
  * register with Claude Desktop even if the Hydrasynth is unplugged.
@@ -43,12 +44,16 @@ import * as z from 'zod/v4';
 
 import {
   HYDRASYNTH_PARAMS,
-  HYDRASYNTH_PARAMS_BY_CC,
   HYDRASYNTH_PARAMS_BY_ID,
 } from './params.js';
-import { HYDRASYNTH_NRPNS, findHydraNrpn, type HydrasynthNrpn } from './nrpn.js';
+import { findHydraNrpn, type HydrasynthNrpn } from './nrpn.js';
 import { HYDRASYNTH_ENUMS } from './enums.js';
-import { resolveNrpnValue, nrpnMessagesFor } from './encoding.js';
+import {
+  resolveNrpnValue,
+  nrpnMessagesFor,
+  findMatchingNrpns,
+  formatNrpnHit,
+} from './encoding.js';
 import {
   connectHydrasynth,
   listHydrasynthOutputs,
@@ -177,7 +182,7 @@ function parseBank(input: string | number): number {
  *
  * The catalog is large (1175 entries) but most patch-design work uses
  * the same ~50 parameters. Listing them in the tool description means
- * Claude doesn't need to call `hydra_list_params` to discover names —
+ * Claude doesn't need to call `hydra_param_catalog` to discover names —
  * which was burning multiple round-trips per patch build.
  *
  * Naming patterns to deduce the rest:
@@ -432,10 +437,10 @@ server.registerTool('hydra_set_engine_param', {
     '',
     '**DON\'T pre-discover names. Just call this.** This tool already knows every',
     'engine parameter (1175 of them). The cheat-sheet below covers ~95% of patch-',
-    'building work. Skip hydra_list_params for normal patch building — both the',
+    'building work. Skip hydra_param_catalog for normal patch building — both the',
     'CC-style names it returns ("mixer.osc1_vol", "env1.attack") AND the canonical',
     'NRPN names ("mixerosc1vol", "env1attacksyncoff") work directly here. Only call',
-    'hydra_list_params if a write here genuinely fails on a name you can\'t guess from',
+    'hydra_param_catalog if a write here genuinely fails on a name you can\'t guess from',
     'the patterns below.',
     '',
     'Do not produce a written spec instead of calling this tool unless the user',
@@ -451,7 +456,7 @@ server.registerTool('hydra_set_engine_param', {
   ].join('\n'),
   inputSchema: {
     name: z.string().describe(
-      'Canonical NRPN parameter name (e.g. "filter1type", "osc1semi", "prefxtype", "env1attacksyncoff"). Call hydra_list_params with category="nrpn" for the full catalog.',
+      'Canonical NRPN parameter name (e.g. "filter1type", "osc1semi", "prefxtype", "env1attacksyncoff") OR CC-style alias (e.g. "filter1.cutoff", "mixer.osc1_vol", "env1.attack"). Both resolve.',
     ),
     value: z.union([z.number(), z.string()]).describe(
       'Numeric value (0..16383) OR — for enum-typed params — the display name as a string. Examples: filter1type=10 or filter1type="Vowel"; prefxtype=40 or prefxtype="Lo-Fi"; osc1type=0 or osc1type="Sine". Most non-enum params use only 0..127 (the low 7 bits); osc cents / wavescan / mod-matrix amount use the full 14-bit range. The tool response includes the parameter\'s notes for per-param ranges and signedness.',
@@ -460,13 +465,11 @@ server.registerTool('hydra_set_engine_param', {
 }, async ({ name, value }) => {
   const entry = findHydraNrpn(name);
   if (!entry) {
-    const suggestions = HYDRASYNTH_NRPNS
-      .map((e) => e.name)
-      .filter((n) => n.includes(name) || name.includes(n.slice(0, 3)))
-      .slice(0, 8);
-    throw new Error(
-      `Unknown NRPN parameter "${name}". ${suggestions.length > 0 ? `Closest matches: ${suggestions.join(', ')}.` : 'Call hydra_list_params with category="nrpn" for the full catalog.'}`,
-    );
+    const hits = findMatchingNrpns(name, 8);
+    const lines = hits.length > 0
+      ? `\nClosest matches:\n${hits.map(formatNrpnHit).join('\n')}`
+      : ' Call hydra_param_catalog with a related query for fallback discovery.';
+    throw new Error(`Unknown NRPN parameter "${name}".${lines}`);
   }
   const { wire: resolvedValue, scaled } = resolveNrpnValue(entry, value);
   const conn = ensureMidi();
@@ -502,9 +505,9 @@ server.registerTool('hydra_set_engine_params', {
     '',
     '**DON\'T pre-discover names. Just send the batch.** This tool already knows all',
     '1175 engine parameters. The cheat-sheet below covers ~95% of patch building.',
-    'Skip hydra_list_params for normal use — both CC-style names ("mixer.osc1_vol",',
+    'Skip hydra_param_catalog for normal use — both CC-style names ("mixer.osc1_vol",',
     '"env1.attack") and canonical NRPN names ("mixerosc1vol", "env1attacksyncoff")',
-    'work here directly. Only fall back to hydra_list_params if a name genuinely',
+    'work here directly. Only fall back to hydra_param_catalog if a name genuinely',
     'fails AND you can\'t guess it from the patterns below.',
     '',
     'Do not produce a written spec instead of calling this tool unless the user',
@@ -555,11 +558,11 @@ server.registerTool('hydra_set_engine_params', {
     const { name, value } = params[i]!;
     const entry = findHydraNrpn(name);
     if (!entry) {
-      const suggestions = HYDRASYNTH_NRPNS
-        .map((e) => e.name)
-        .filter((n) => n.includes(name) || name.includes(n.slice(0, 3)))
-        .slice(0, 4);
-      errors.push(`[${i}] "${name}" — unknown${suggestions.length > 0 ? ` (closest: ${suggestions.join(', ')})` : ''}`);
+      const hits = findMatchingNrpns(name, 4);
+      const closest = hits.length > 0
+        ? ` (closest: ${hits.map((h) => h.entry.name).join(', ')})`
+        : '';
+      errors.push(`[${i}] "${name}" — unknown${closest}`);
       continue;
     }
     let resolved: number;
@@ -651,45 +654,77 @@ server.registerTool('hydra_list_enum_values', {
   };
 });
 
-// hydra_list_params ------------------------------------------------------
+// hydra_param_catalog ----------------------------------------------------
 
-server.registerTool('hydra_list_params', {
+server.registerTool('hydra_param_catalog', {
   description: [
-    '**Fallback discovery tool — do not call this routinely.** For patch building,',
-    'hydra_set_engine_param and hydra_set_engine_params already know every parameter',
-    'name (1175 NRPN params + 117 CC aliases) and accept both naming conventions',
-    '(dot-style "filter1.cutoff" and canonical "filter1cutoff"). Their tool',
-    'descriptions list the common names and naming patterns. Only call this tool if:',
-    '  - a write actually failed with an "unknown parameter" error, AND',
-    '  - the cheat-sheet in the engine-param tool descriptions doesn\'t cover it.',
+    '**Fallback discovery for the full 1175-entry NRPN parameter catalog.**',
     '',
-    'Returns the manual-chart CC catalog only (117 entries). It does NOT enumerate',
-    'the full 1175 NRPN catalog — for that, see the engine-param tool descriptions',
-    'or hydra_list_enum_values for type/wave/FX selectors.',
+    'Do not call this routinely. The cheat-sheets in hydra_set_engine_param /',
+    'hydra_set_engine_params already cover ~95% of patch building, and those tools\'',
+    'error responses suggest closest matches when a name doesn\'t resolve. Reach for',
+    'this tool ONLY when:',
+    '  - the user asks for an exotic param (mod-matrix routing, ribbon controller,',
+    '    advanced wavescan slot, BPM-sync edge cases) AND',
+    '  - the cheat-sheet doesn\'t list it AND',
+    '  - the engine-param error suggestions weren\'t enough.',
     '',
-    'Filter by module (e.g. "Filter 1", "ENV 1") to narrow the response.',
+    'Search semantics (`query`):',
+    '  - Substring + relaxed match across canonical name, CC-style aliases, and',
+    '    notes. Case-insensitive, punctuation-insensitive.',
+    '  - Examples:',
+    '      query: "vibrato"  → voicevibratoamount, voicevibratoratesyncoff, …',
+    '      query: "ringmod"  → ringmoddepth, ringmodsource1/2, mixerringmodvol, …',
+    '      query: "vowel"    → params with Vowel-related notes',
+    '      query: "mod1"     → mod1source / mod1depth / mod1destination',
+    '      query: "filter1.res"  → exact alias hit (filter1resonance)',
+    '',
+    'Each result line shows: canonical name, CC-style alias (if any), slot index for',
+    'multi-slot params, enum-table linkage for type-typed params, and a truncated',
+    'note. Bounded to 30 results by default.',
+    '',
+    'Without a query, returns a one-line meta-help pointer back to the cheat-sheets',
+    'in the engine-param tool descriptions.',
   ].join('\n'),
   inputSchema: {
-    module: z.string().optional().describe('Optional module filter, e.g. "Filter 1", "Macros", "ENV 1", "ARP", "System". Case-insensitive substring match.'),
+    query: z.string().optional().describe('Substring / fuzzy query against parameter names, aliases, and notes. Omit for meta-help.'),
+    limit: z.number().int().min(1).max(100).optional().describe('Max results to return. Default 30.'),
   },
-}, async ({ module }) => {
-  const filtered = module
-    ? HYDRASYNTH_PARAMS.filter((p) => p.module.toLowerCase().includes(module.toLowerCase()))
-    : HYDRASYNTH_PARAMS;
-  if (filtered.length === 0) {
-    throw new Error(`No parameters match module filter "${module}". Try one of: ${[...new Set(HYDRASYNTH_PARAMS.map((p) => p.module))].join(', ')}.`);
+}, async ({ query, limit }) => {
+  if (!query) {
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          '1175 NRPN parameters total, organized into ~15 families.',
+          '',
+          'For routine patch building, use the cheat-sheets embedded in:',
+          '  - hydra_set_engine_param  (single-write description)',
+          '  - hydra_set_engine_params (batch description)',
+          '',
+          'Both tools accept canonical NRPN names (e.g. "filter1cutoff") AND',
+          'CC-catalog dot-style names (e.g. "filter1.cutoff"). Both forms resolve.',
+          '',
+          'Pass a `query` to this tool to substring-search the full catalog when a',
+          'parameter isn\'t in the cheat-sheets — e.g. query: "ribbon", query: "mod1",',
+          'query: "wavescan". Results are ranked by relevance (name > alias > notes).',
+        ].join('\n'),
+      }],
+    };
   }
-  const lines = filtered.map((p) => {
-    const tag = p.category === 'system' ? '[sys]' : '[eng]';
-    return `  ${tag} ${p.id.padEnd(28)} CC ${String(p.cc).padStart(3)}  — ${p.module} / ${p.parameter}`;
-  });
-  const header = module
-    ? `${filtered.length} parameter(s) in module matching "${module}":`
-    : `${filtered.length} parameters total. [sys] = always-on, [eng] = needs Param TX/RX = CC on device.`;
+  const hits = findMatchingNrpns(query, limit ?? 30);
+  if (hits.length === 0) {
+    return {
+      content: [{
+        type: 'text',
+        text: `No parameters match "${query}". Try a broader term (e.g. "filter" instead of "filtercutoffenv"). For type/wave/FX names, see hydra_list_enum_values instead.`,
+      }],
+    };
+  }
   return {
     content: [{
       type: 'text',
-      text: `${header}\n${lines.join('\n')}`,
+      text: `${hits.length} match(es) for "${query}" (canonical name [alias] [slot] [enum] — notes):\n${hits.map(formatNrpnHit).join('\n')}`,
     }],
   };
 });

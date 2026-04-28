@@ -17,8 +17,85 @@
  *   3. **Lookup / alias** — already in `nrpn.ts`'s `findHydraNrpn`,
  *      re-exported here for convenience.
  */
-import type { HydrasynthNrpn } from './nrpn.js';
+import { HYDRASYNTH_NRPNS, type HydrasynthNrpn } from './nrpn.js';
 import { HYDRASYNTH_ENUMS, resolveHydraEnum } from './enums.js';
+
+/** Lowercase, drop non-alphanumerics — for relaxed matching. */
+function normalize(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+export interface NrpnSearchHit {
+  readonly entry: HydrasynthNrpn;
+  /** Ranking score; higher is better. Used internally and not surfaced. */
+  readonly score: number;
+  /** Which field matched — informs response formatting. */
+  readonly matchSource: 'name' | 'alias' | 'notes';
+}
+
+/**
+ * Fuzzy-search the NRPN registry by query string. Returns ranked matches
+ * across canonical name, aliases, and notes (case- and punctuation-
+ * insensitive). Scoring favors name hits over alias hits over notes hits;
+ * within each, exact > prefix > contains.
+ *
+ * Used by:
+ *   - error paths in `hydra_set_engine_param` / `_params` to suggest
+ *     close-by names when a write is rejected;
+ *   - the `hydra_param_catalog` tool to answer query-driven discovery.
+ */
+export function findMatchingNrpns(query: string, limit = 30): NrpnSearchHit[] {
+  const q = normalize(query);
+  if (!q) return [];
+  const hits: NrpnSearchHit[] = [];
+
+  for (const e of HYDRASYNTH_NRPNS) {
+    const nameNorm = normalize(e.name);
+    let bestScore = 0;
+    let source: NrpnSearchHit['matchSource'] = 'name';
+
+    if (nameNorm === q) bestScore = Math.max(bestScore, 100);
+    else if (nameNorm.startsWith(q)) bestScore = Math.max(bestScore, 90);
+    else if (nameNorm.includes(q)) bestScore = Math.max(bestScore, 70);
+
+    if (e.aliases) {
+      for (const a of e.aliases) {
+        const aNorm = normalize(a);
+        if (aNorm === q && bestScore < 95) { bestScore = 95; source = 'alias'; }
+        else if (aNorm.startsWith(q) && bestScore < 85) { bestScore = 85; source = 'alias'; }
+        else if (aNorm.includes(q) && bestScore < 65) { bestScore = 65; source = 'alias'; }
+      }
+    }
+
+    // Notes match — lowest priority. Helps when Claude searches by concept
+    // ("vowel", "ribbon", "phaser") and the param's notes mention the term
+    // even if the canonical name doesn't.
+    if (bestScore < 30 && normalize(e.notes).includes(q)) {
+      bestScore = 30;
+      source = 'notes';
+    }
+
+    if (bestScore > 0) hits.push({ entry: e, score: bestScore, matchSource: source });
+  }
+
+  hits.sort((a, b) => b.score - a.score);
+  return hits.slice(0, limit);
+}
+
+/**
+ * Format a search hit as a one-line summary suitable for tool responses.
+ * Includes canonical name, alias hint, slot index, enum-table linkage, and
+ * a truncated note. Single line per hit so a list of 30 stays readable.
+ */
+export function formatNrpnHit(hit: NrpnSearchHit): string {
+  const e = hit.entry;
+  const aliasPart = e.aliases && e.aliases.length > 0 ? ` (alias: ${e.aliases[0]})` : '';
+  const slotPart = e.dataMsb !== undefined ? ` [slot ${e.dataMsb}]` : '';
+  const enumPart = e.enumTable !== undefined ? ` [enum: ${e.enumTable}]` : '';
+  const notesShort = e.notes.split('\n')[0]?.slice(0, 60) ?? '';
+  const notesPart = notesShort ? ` — ${notesShort}${notesShort.length === 60 ? '…' : ''}` : '';
+  return `  ${e.name}${aliasPart}${slotPart}${enumPart}${notesPart}`;
+}
 
 export interface ResolvedNrpnValue {
   /** Integer to send in the NRPN data field. */
