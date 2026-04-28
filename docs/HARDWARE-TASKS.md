@@ -23,6 +23,18 @@
 > collection (replaced by the Hydrasynth Explorer) and is now a
 > community-support item with no founder-hardware validation.
 >
+> **🆕 2026-04-28 (Session 36) — three Hydrasynth tasks queued for
+> BK-036 SysEx patch flow.** HW-038 (P0, gates milestone 3) is the
+> only one requiring action right now: a one-time INIT patch dump
+> from your device via ASM Manager so we have a known-audible
+> 2790-byte buffer to embed as `INIT_PATCH_BUFFER`. ~5 minutes of
+> founder time. HW-039 (P1) is a Bank A names export that helps
+> validate slot reads in milestone 3. HW-040 (P0) is the
+> post-milestone-3 hardware smoke test — only relevant after
+> milestone 3 ships. **Bottom line for next session start:**
+> if HW-038 isn't done, ask the founder to run it before
+> attempting milestone 3 work that touches the device.
+>
 > Last updated: 2026-04-25 (Session 30 cont — HW-019 + HW-020 +
 > HW-021 decoded + archived. **14 new params**: 5 drive (low_cut /
 > bass / mid / mid_freq / treble), 3 delay (level / stack_hold /
@@ -71,6 +83,149 @@ Claude picks up from there and moves the item to ⏳ or ✅.
 
 <!-- HW-024 completed 2026-04-25 (Session 30 cont 3) — see Archive
      below for the test report and findings. -->
+
+### HW-038 — Hydrasynth INIT patch dump for `INIT_PATCH_BUFFER` constant 🔜 P0 (gates BK-036 milestone 3)
+
+- **For:** BK-036 milestone 2 shipped a `defaultPatchBuffer()` that's
+  *structurally* valid (correct size, ETCD magic bytes, version byte,
+  Save-to-RAM marker) but *not audible* — every byte we didn't
+  explicitly fix is zero, which means filter cutoff 0, envs at 0,
+  mixer vols 0. To make `hydra_apply_patch` / `hydra_apply_init`
+  audible by construction in milestone 3, we need a real INIT patch
+  buffer captured from your device, embedded as a 2790-byte constant
+  `INIT_PATCH_BUFFER`. Every byte then has a known-good value from a
+  device that's actually making sound.
+- **Why it can't wait until milestone 3 starts:** the milestone-3
+  MCP tool that *would* do the dump (`hydra_request_patch`) is the
+  same module under test. We need an INDEPENDENT capture so we can
+  validate our `unwrapSysex` and `decodePatch` against real device
+  bytes BEFORE we trust them. Otherwise the first dump is
+  self-referential.
+- **What to do (one of these two paths — easier first):**
+
+  **Path A — ASM Hydrasynth Manager export (simplest):**
+  1. Open the official ASM Hydrasynth Manager desktop app.
+  2. Connect Hydrasynth via USB. On the Hydrasynth front panel,
+     load **Bank A, Patch 128** (or any factory INIT-style patch
+     you trust to be audible — a plain saw with filter open).
+  3. In the Manager, **Save / Export** that patch as a `.patch`
+     file (or `.hydra` archive — either works).
+  4. Drop the file at
+     `samples/hydrasynth/init-patch.patch`
+     (or `init-patch.hydra` — extension reflects what Manager
+     emits). Don't rename — let the original extension stand so
+     we know which export format produced it.
+  5. Signal "HW-038 done" + the filename and a one-line note on
+     which front-panel patch you exported (so the next session
+     knows what audible baseline to expect).
+
+  **Path B — USBPcap during a Manager dump (richer, only if
+  Path A produces something we can't decode):**
+  1. Start USBPcap targeting the Hydrasynth USB endpoint.
+  2. In ASM Manager: **Dump / Receive** Bank A Patch 128 over MIDI.
+  3. Stop the capture. Save as
+     `samples/hydrasynth/init-patch-dump.pcapng`.
+  4. Signal "HW-038 done (Path B)" + the path. We'll extract the
+     22-chunk SysEx stream and validate the envelope codec against
+     real wire traffic.
+
+- **What Claude does on receipt:** unwraps the file via `unwrapSysex`
+  + `concatChunks` (or directly if it's already a flat patch buffer),
+  asserts the buffer is exactly 2790 bytes, runs `decodePatch` and
+  prints the curated 75-param map, then embeds the buffer as a
+  `INIT_PATCH_BUFFER` Uint8Array constant in a new file
+  `src/devices/hydrasynth-explorer/initPatchBuffer.ts`. From that
+  point `defaultPatchBuffer()` returns a clone of `INIT_PATCH_BUFFER`
+  and every patch built via `encodePatch` is audible by construction.
+- **Priority:** P0. Milestone 3 (the MCP tool surface + first
+  hardware traffic) is gated on this. Without a known-good base
+  buffer, every test write to the device risks silence-from-zero
+  bytes and we'd be debugging the encoder instead of the device path.
+- **Estimated founder time:** ~5 minutes (Path A) or ~10 minutes
+  (Path B).
+
+### HW-039 — Hydrasynth Bank A patch-names dump for canonical-state reference 🔜 P1
+
+- **For:** validates our SysEx envelope codec against device wire
+  traffic for an operation that's structurally simpler than a full
+  patch dump (just one chunk of name strings vs 22 chunks of patch
+  data), AND gives us a record of which factory patches occupy each
+  Bank A slot on YOUR device. Useful for `hydra_request_patch` slot
+  testing in milestone 3 (we'll know what name to expect at each
+  Bank A position).
+- **What to do:**
+  1. In ASM Hydrasynth Manager, **Receive Bank A Patch Names** (or
+     equivalent — the Manager has a "list patch names" function).
+  2. Save the resulting list as text to
+     `samples/hydrasynth/bank-a-names.txt` — one name per line,
+     in slot order (A001, A002, …, A128).
+  3. Optionally (Path B): USBPcap the operation and save as
+     `samples/hydrasynth/bank-a-names-dump.pcapng` if the textual
+     export isn't directly available.
+  4. Signal "HW-039 done" + filename.
+- **What Claude does on receipt:** uses the names as expected output
+  for milestone-3 `hydra_request_patch` integration tests — given
+  Bank A, slot N, the device should return a patch whose name
+  matches `bank-a-names.txt[N]`.
+- **Priority:** P1. Helpful for milestone 3 hardware verification
+  but milestone 3 can ship without it; HW-038 is the hard gate.
+- **Estimated founder time:** ~3 minutes.
+
+### HW-040 — Hardware verification of BK-036 milestone 3 once it lands 🔜 P0 (post-milestone-3)
+
+- **For:** once milestone 3 ships the MCP tools (`hydra_apply_patch`,
+  `hydra_request_patch`, `hydra_load_hydra_file`, rewired
+  `hydra_apply_init`), this is the founder-driven smoke test that
+  proves the SysEx flow is audible and survives a destructive prior
+  state — the regression that the BK-037 NRPN-prelude approach
+  failed.
+- **Setup:** Hydrasynth Explorer connected, Claude Desktop with
+  `mcp-midi-tools` connector attached, milestone 3 installed.
+- **Test 1 — recovery primitive:**
+  1. From Claude Desktop, run a destructive NRPN write that's known
+     to silence the device (e.g. `hydra_set_engine_params({ params:
+     [{name: "filter1env1amount", value: -64}], freshPatch: true })`
+     against an INIT baseline). Confirm device is silent on
+     key-press.
+  2. Run `hydra_apply_init` (which now sends INIT_PATCH_BUFFER via
+     SysEx instead of the NRPN prelude). Wire time should report
+     <100ms (was ~300ms via NRPN prelude).
+  3. Press a key. **Pass:** audible saw default. **Fail:** still
+     silent → SysEx write didn't take effect, or
+     `INIT_PATCH_BUFFER` was the wrong dump.
+  4. Signal "HW-040 test 1 done" + audible/silent.
+
+- **Test 2 — Van Halen "Jump" rebuild via SysEx:**
+  1. Run a `hydra_apply_patch` recipe matching the Van Halen "Jump"
+     tone from `docs/devices/hydrasynth-explorer/ICONIC-TONES.md`
+     (filter1cutoff/resonance, env1 amount/keytrack, amp settings,
+     etc.).
+  2. Press a key. **Pass:** audible patch matching the recipe.
+     **Fail:** silent → some byte the recipe didn't override
+     carries a destructive value from the previous patch state
+     (the failure mode SysEx is meant to eliminate).
+  3. Signal "HW-040 test 2 done" + audible / what knob doesn't
+     match.
+
+- **Test 3 — slot read round-trip:**
+  1. Run `hydra_request_patch({ slot: 'A001' })`. Compare the
+     returned param map's patch name against
+     `bank-a-names.txt[0]` from HW-039 (if completed).
+  2. **Pass:** name matches; param map is plausible (filter cutoff
+     non-zero, amp level non-zero). **Fail:** envelope or chunk
+     concat is broken.
+  3. Signal "HW-040 test 3 done" + matched/diverged.
+
+- **Test 4 — slot write round-trip (destructive — uses scratch
+  slot H128 to avoid clobbering anything you care about):**
+  1. Run `hydra_apply_patch({ params: [...], slot: 'H128' })`
+     with a recognizable param set + name "MCPTest01".
+  2. On the Hydrasynth front panel, navigate to H128 and confirm
+     the name shows as "MCPTest01" and the patch is audible.
+  3. Run `hydra_request_patch({ slot: 'H128' })` and confirm the
+     read-back matches what we wrote.
+  4. Signal "HW-040 test 4 done" + observed name / wire status.
+- **Priority:** P0 — gates "BK-036 milestone 3 done".
 
 ### HW-032 — Capture newly-discovered first-page knobs (HW-024 finding F4) ⏳ partial-decode
 
@@ -627,18 +782,19 @@ looks like after the BK-012 package split.
 
 ## Queued next — Hydrasynth Explorer (BK-031)
 
-**Not active.** Gated on the AM4 depth quality-gate AND the BK-014
-Axe-Fx II slot (per founder-stated priority: AM4 → Axe-Fx II →
-Hydrasynth). Once BK-031 activates, the first hardware tasks will be
-**CC-mapping validation** (does CC N on channel M land on the expected
-engine parameter per manual pp. 94–96?) rather than capture-based
-decode — the Hydrasynth's MIDI is fully documented, unlike Fractal's
-RE-required protocol. Estimated hardware time: one founder session
-spot-checking 5–10 CCs per module.
+**🟢 Active.** BK-031 reactivated as a side-branch exploration while
+the AM4 USB capture queue was empty; BK-036 (SysEx patch flow) is
+the current sub-deliverable, escalated to P0 after the BK-037
+NRPN-prelude approach proved bleed-through-prone. Active hardware
+tasks for Hydrasynth now live in the **Pending — next up** section
+above (HW-038, HW-039, HW-040).
 
-If ASM publishes or the community has reverse-engineered the SysEx
-patch format later, HW entries for patch-dump / patch-upload captures
-would land here.
+The original BK-031 "CC-mapping validation" plan is superseded —
+the Hydrasynth NRPN/CC tools landed via direct registry import from
+edisyn's spec rather than capture-driven decode, so per-CC manual
+validation isn't gating progress. The remaining hardware work is
+the SysEx patch-flow validation (HW-038/039/040) which lands as
+part of BK-036.
 
 ---
 

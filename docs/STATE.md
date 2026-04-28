@@ -5,6 +5,36 @@
 > hardware tasks (USB captures, round-trip tests, reference dumps) live
 > in **`docs/HARDWARE-TASKS.md`** — check that file alongside this one at
 > session start.
+>
+> **🚨 Next-session pickup checklist (Session 37 onward):**
+>
+> 1. **Open `docs/HARDWARE-TASKS.md` first.** Three new Hydrasynth
+>    HW entries (HW-038, HW-039, HW-040) are queued for BK-036
+>    milestone 3. **HW-038 is P0 and gates milestone 3.** It's a
+>    ~5-minute founder action: dump an INIT-style audible patch
+>    from the Hydrasynth via ASM Manager and save it to
+>    `samples/hydrasynth/init-patch.patch` (or `.hydra`). If the
+>    file isn't there yet, ASK the founder to do HW-038 before
+>    starting any milestone 3 work that touches the device — the
+>    encoder needs a known-audible 2790-byte base buffer and we
+>    can't dump one ourselves until the MCP tool lands.
+>
+> 2. **If HW-038 is done:** load `samples/hydrasynth/init-patch.*`,
+>    unwrap via `unwrapSysex` + `concatChunks` (or treat as a flat
+>    2790-byte buffer if the export is decoded), assert size = 2790,
+>    print the decoded curated 75-param map for sanity, and embed
+>    the buffer as `INIT_PATCH_BUFFER` in a new file
+>    `src/devices/hydrasynth-explorer/initPatchBuffer.ts`. Wire
+>    `defaultPatchBuffer()` to clone it. Then proceed to milestone 3.
+>
+> 3. **Milestone 3 = the MCP tool surface.** New tools:
+>    `hydra_apply_patch`, `hydra_request_patch`,
+>    `hydra_load_hydra_file`. Rewire `hydra_apply_init` to send
+>    `INIT_PATCH_BUFFER` via SysEx (retire the NRPN prelude in
+>    `src/devices/hydrasynth-explorer/initPatch.ts`). After it
+>    ships, run HW-040 (4 founder-driven hardware tests) to gate
+>    "milestone 3 done".
+>
 > Last updated: **2026-04-28** (Session 36 — BK-036 milestones
 > 1+2 shipped: SysEx envelope + patch byte-map encoder).
 > **Two of three BK-036 milestones land in one session.**
@@ -746,90 +776,88 @@ float32. One open question remains before the IR can cover full presets:
 ## The single next action
 
 **Most-likely next session: BK-036 milestone 3 — MCP tool
-surface + first hardware verification (~1 session, hardware
-needed). This is when the founder can finally test.**
+surface + first hardware verification. This is when the
+founder can finally test on the device.**
 
-Milestones 1+2 shipped this session: SysEx envelope codec
-(commit cfdb56f) and patch byte-map encoder (just landed).
+Milestones 1+2 shipped Session 36: SysEx envelope codec
+(commit cfdb56f) and patch byte-map encoder (commit b4ce96f).
 74 new goldens lock both. Next session moves the work onto
 hardware.
 
-**Milestone 3 deliverables:**
+**Pre-flight: Hardware tasks are queued in
+`docs/HARDWARE-TASKS.md`.** See the next-session pickup
+checklist at the top of this file. Quick recap:
 
-1. **`hydra_request_patch({ slot? })`** — first hardware
-   action. Triggers the `Header → Patch Request → 22 ×
-   (Chunk Dump + Ack) → Footer` flow from
-   `references/SysexEncoding.txt` §"Requesting a Single
-   Patch". Concats the 22 returned chunks (via
-   `concatChunks`), runs `decodePatch`, returns the 75
-   curated params. With no slot, queries working buffer
-   (caveat: spec says working-buffer requests are NOT
-   supported — verify on hardware; if confirmed, working-
-   buffer query goes away). With `slot: 'A001'`, queries
-   stored slot bank 0 patch 0.
+- **HW-038 (P0, ~5 min founder time)** — gates milestone 3.
+  Founder dumps an INIT-style audible patch from the
+  Hydrasynth via ASM Manager so we have a known-good
+  2790-byte base buffer to embed as `INIT_PATCH_BUFFER`.
+  Without it, every milestone-3 patch send risks silence
+  from zero-valued bytes (filter cutoff 0, envs 0, mixer
+  vols 0).
+- **HW-039 (P1, ~3 min founder time)** — Bank A patch-
+  names export, helpful for slot-read validation in
+  milestone 3 but not blocking.
+- **HW-040 (P0, post-milestone-3)** — four-test hardware
+  smoke once the MCP tools ship: recovery primitive,
+  Van Halen "Jump" rebuild, slot read, slot write to H128.
 
-2. **Capture a real INIT patch buffer** as soon as
-   `hydra_request_patch` works: dump a fresh "INIT" preset
-   from the device, save the raw 2790 bytes as a constant
-   `INIT_PATCH_BUFFER` in a new file (or as base64 to keep
-   diffs sane), use it as the new `defaultPatchBuffer()`
-   replacement. THIS is what makes the patch flow audible
-   by construction — every byte is set to a known-good
-   value from a real device.
+**Milestone 3 implementation order (after HW-038 lands):**
 
-3. **`hydra_apply_patch({ params, slot? })`** — second
-   hardware action. Builds patch via `encodePatch(params,
-   { base: INIT_PATCH_BUFFER })`, splits via
+1. **Embed `INIT_PATCH_BUFFER`** — load
+   `samples/hydrasynth/init-patch.*`, unwrap (if SysEx-
+   wrapped) or use directly (if flat 2790-byte export),
+   assert size = 2790, embed as a Uint8Array constant in
+   `src/devices/hydrasynth-explorer/initPatchBuffer.ts`.
+   Rewire `defaultPatchBuffer()` to clone it.
+2. **`hydra_request_patch({ slot? })`** — runs the
+   `Header → Patch Request → 22 × (Chunk Dump + Ack) →
+   Footer` flow from `references/SysexEncoding.txt`
+   §"Requesting a Single Patch". Concats 22 chunks via
+   `concatChunks`, runs `decodePatch`, returns the 75
+   curated params. Spec says working-buffer requests are
+   NOT supported — verify on hardware; if confirmed,
+   `slot` becomes required.
+3. **`hydra_apply_patch({ params, slot? })`** — builds
+   patch via `encodePatch(params, { base: INIT_PATCH_BUFFER })`,
    `splitIntoChunks`, sends each chunk wrapped via
    `wrapSysex`, observing the chunk-ack handshake from
-   §"Writing a Patch". Without `slot`, sends to current
-   working memory (no Write Request). With `slot`, sends
-   the Write Request after the last chunk and waits the
-   spec's 3500ms before any further traffic.
-
+   §"Writing a Patch". Without `slot`, sends to working
+   memory (no Write Request). With `slot`, sends the Write
+   Request after the last chunk and waits the spec's
+   3500ms before any further traffic.
 4. **`hydra_load_hydra_file({ path })`** — reads a `.hydra`
    archive, extracts each `.patch`, calls
    `hydra_apply_patch` per slot.
-
-5. **Rewire `hydra_apply_init`** to send INIT_PATCH_BUFFER
-   via `hydra_apply_patch` instead of running the NRPN
-   prelude. Retire `src/devices/hydrasynth-explorer/initPatch.ts`
+5. **Rewire `hydra_apply_init`** to send `INIT_PATCH_BUFFER`
+   via `hydra_apply_patch` instead of the NRPN prelude.
+   Retire `src/devices/hydrasynth-explorer/initPatch.ts`
    once verified.
-
 6. **Goldens:** verify-msg-equivalent for the wire bytes.
-   With INIT_PATCH_BUFFER captured, lock its first 132
+   With `INIT_PATCH_BUFFER` captured, lock its first 132
    bytes against the device dump byte-exactly. Assert that
-   `wrapSysex(splitIntoChunks(applyOverrides(...))[0].info)`
-   matches what the device would expect for chunk 0 of a
-   patch write.
+   `wrapSysex(splitIntoChunks(...)[0].info)` matches what
+   the device expects for chunk 0 of a patch write.
 
-**Hardware test plan once milestone 3 lands.** The first
-real test is the recovery primitive: `hydra_apply_init`
-must take a device that just had a destructive NRPN write
-and restore it to audible saw default in <100ms wire time
-(was ~300ms via the NRPN prelude). Then a Van Halen "Jump"
-recipe rebuild via SysEx — the test that previously failed
-on the NRPN-prelude path due to bipolar / mod-matrix bleed-
-through. With every byte explicitly set, that class of
-failure is structurally eliminated.
-
-**The current default buffer is structurally valid but
-not audible** — every byte that isn't explicitly set is
-zero (filter cutoff 0, envs at 0, mixer vols 0). Writing
-it to the device would produce silence, but won't get
-rejected outright (the four ETCD magic bytes are set). It
-exists to let `encodePatch` work without crashing in
-goldens; a real dump replaces it in milestone 3.
-
-**Sequencing alternatives for next session.** If hardware
-contention or timing prevents milestone 3:
+**Sequencing alternatives if HW-038 isn't ready and
+hardware contention blocks milestone 3:**
 - (a) HW-037 Enhancer first-page knob screenshot (AM4 track)
   — last HW-032 residual, one screenshot, no recapture.
   Closes BK-032's release-gate target across every AM4
   block. Different device, no contention.
 - (b) Extend `PATCH_OFFSETS` with more curated entries
   (LFO 1–5 first pages, mod-matrix slots 1–8, env 2–4) —
-  pure extension, doesn't need hardware.
+  pure extension, doesn't need hardware. Strictly additive
+  to the milestone-2 deliverable.
+
+**Why current `defaultPatchBuffer()` is not audible.**
+Every byte that wasn't explicitly fixed in
+`defaultPatchBuffer()` is zero — filter cutoff 0, envs at
+0, mixer vols 0. The buffer is structurally valid (right
+size, correct magic bytes, version, save marker) so the
+device won't reject it outright, but it will produce
+silence on key-press. HW-038 replaces it with a real
+device-captured INIT dump.
 
 **What survives from BK-037 (do not touch):**
 - Bipolar `displayMin`/`displayMax` registry tags + bipolar branch
