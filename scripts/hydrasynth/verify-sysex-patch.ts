@@ -281,8 +281,9 @@ check('encodePatch: applies overrides on default buffer; unspecified params stay
   if (readPatchValue(buf, buildSpec('filter1cutoff')) !== 4096) return 'cutoff';
   if (readPatchValue(buf, buildSpec('filter1resonance')) !== 1024) return 'resonance';
   if (readPatchValue(buf, buildSpec('amplevel')) !== 8192) return 'amplevel';
-  // Unspecified bipolar param stays at default (0 from defaultPatchBuffer).
-  if (readPatchValue(buf, buildSpec('filter1env1amount')) !== 0) return 'env1 amount drifted';
+  // Unspecified bipolar param stays at the default value from the factory
+  // INIT (filter1env1amount = 512 in the bundled INIT_PATCH_BUFFER).
+  if (readPatchValue(buf, buildSpec('filter1env1amount')) !== 512) return 'env1 amount drifted';
   // Magic bytes preserved from default.
   if (buf[1766] !== 69 || buf[1767] !== 84 || buf[1768] !== 67 || buf[1769] !== 68) {
     return 'magic bytes corrupted by encodePatch';
@@ -409,8 +410,13 @@ check('defaultPatchBuffer: byte 0 = 0x06 (Save to RAM)', () => {
   return defaultPatchBuffer()[PATCH_META.saveMarker] === 0x06 ? true : 'mismatch';
 });
 
-check('defaultPatchBuffer: byte 4 = 0xC8 (firmware 2.0.0)', () => {
-  return defaultPatchBuffer()[PATCH_META.version] === 0xc8 ? true : 'mismatch';
+check('defaultPatchBuffer: byte 4 = 0xa0 (factory INIT firmware tag)', () => {
+  // The bundled `Single INIT Bank.hydra` was developed against firmware
+  // 1.6.0 (byte 4 = 0xa0) — undocumented in the spec but valid per
+  // SysexPatchFormat.txt line 99 ("other version numbers ... mostly
+  // from patches developed in-house at ASM"). Spec versions: 1.5.5=0x9b,
+  // 2.0.0=0xc8, 2.2.0=0xdc.
+  return defaultPatchBuffer()[PATCH_META.version] === 0xa0 ? true : 'mismatch';
 });
 
 check('defaultPatchBuffer: bytes 1766..1769 = 69, 84, 67, 68 (ETCD magic)', () => {

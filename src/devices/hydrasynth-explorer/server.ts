@@ -60,6 +60,9 @@ import {
   listHydrasynthOutputs,
   type HydrasynthConnection,
 } from './midi.js';
+import { wrapSysex, unwrapSysex } from './sysexEnvelope.js';
+import { splitIntoChunks, PATCH_CHUNK_COUNT } from './patchEncoder.js';
+import { INIT_PATCH_BUFFER } from './initPatchBuffer.js';
 
 // -- MIDI lazy-init -------------------------------------------------------
 
@@ -579,29 +582,521 @@ server.registerTool('hydra_set_engine_params', {
 
 // hydra_apply_init -------------------------------------------------------
 
+/**
+ * Pacing between SysEx chunks in milliseconds. The Hydrasynth ack-replies
+ * after each chunk per `SysexEncoding.txt:351-352`. Diagnostic-mode
+ * `hydra_apply_init` now records every inbound message so we can see
+ * whether acks arrive — but the send loop still uses time-based pacing,
+ * not ack-driven flow control. 5 ms is conservative: above MIDI 1.0's
+ * bandwidth floor and slow enough that the device's per-chunk processing
+ * should keep up. If the HW-040 capture shows acks but missing chunks,
+ * this is the first knob to bump.
+ */
+const SYSEX_CHUNK_PACING_MS = 5;
+
+/**
+ * After the bank/PC dance completes, drain inbound MIDI for this many ms
+ * so straggling SysEx acks (especially the final Patch Saved + Footer
+ * Response, which arrive after a slot-load delay) make it into the
+ * capture before the tool returns. Cheap; only used by `hydra_apply_init`.
+ */
+const SYSEX_TAIL_DRAIN_MS = 300;
+
+/**
+ * Decode an inbound message into a short human-readable label. SysEx is
+ * unwrapped via `unwrapSysex` so we can recognize Hydrasynth's documented
+ * acks (`SysexEncoding.txt:342-378`):
+ *   - `19 00`           → Header Response
+ *   - `17 00 NN 16`     → Chunk Ack #NN
+ *   - `07 00 BB PP`     → Patch Saved (bank=BB, patch=PP)
+ *   - `1B 00`           → Footer Response
+ * Anything else (or non-SysEx) is shown as raw hex with a status-byte
+ * label so we can still see CC/PC echoes that the device emits during
+ * the bank/PC dance.
+ */
+function describeInboundMessage(bytes: number[]): string {
+  const hex = bytes.map((b) => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+  if (bytes[0] === 0xf0) {
+    let info: Uint8Array;
+    try {
+      info = unwrapSysex(bytes);
+    } catch (err) {
+      return `SysEx (envelope error: ${err instanceof Error ? err.message : String(err)}) ${hex}`;
+    }
+    if (info.length === 2 && info[0] === 0x19 && info[1] === 0x00) return 'Header Response (19 00)';
+    if (info.length === 2 && info[0] === 0x1b && info[1] === 0x00) return 'Footer Response (1B 00)';
+    if (info.length === 4 && info[0] === 0x17 && info[1] === 0x00 && info[3] === 0x16) {
+      return `Chunk Ack #${info[2]} (17 00 ${info[2]!.toString(16).padStart(2, '0').toUpperCase()} 16)`;
+    }
+    if (info.length === 4 && info[0] === 0x07 && info[1] === 0x00) {
+      return `Patch Saved (bank=${info[2]}, patch=${info[3]})`;
+    }
+    const infoHex = Array.from(info)
+      .map((b) => b.toString(16).padStart(2, '0').toUpperCase())
+      .join(' ');
+    return `SysEx (info: ${infoHex})`;
+  }
+  const status = bytes[0] ?? 0;
+  if ((status & 0xf0) === 0xb0) return `CC ch=${(status & 0x0f) + 1} #${bytes[1]}=${bytes[2]} (${hex})`;
+  if ((status & 0xf0) === 0xc0) return `PC ch=${(status & 0x0f) + 1} program=${bytes[1]} (${hex})`;
+  if ((status & 0xf0) === 0x90) return `NoteOn ch=${(status & 0x0f) + 1} note=${bytes[1]} vel=${bytes[2]} (${hex})`;
+  if ((status & 0xf0) === 0x80) return `NoteOff ch=${(status & 0x0f) + 1} note=${bytes[1]} (${hex})`;
+  return `Other ${hex}`;
+}
+
+/**
+ * Scratch slot for `hydra_apply_init` SysEx dumps. Per
+ * `SysexEncoding.txt:645`: "your best strategy is probably to use a
+ * 'scratch patch', like H 127, and update it instead." H = bank 7,
+ * patch 127 (0-indexed) = displayed "H128", the last slot of bank H.
+ * Using a fixed scratch keeps the user's edited patches in lower banks
+ * untouched and contains the NOTE 0 cross-write-affects-bank-mate
+ * footgun to a corner of the patch space.
+ */
+const SCRATCH_BANK = 7; // H
+const SCRATCH_PATCH = 127; // displayed 128
+
+/**
+ * Bounce target for the bank/PC dance (both pre-dump and post-dump).
+ * Different bank from H (so the bank-change is effective regardless of
+ * current bank) AND different patch from 128 (so the PC is effective
+ * regardless of current patch). E064 is far from any plausible "user
+ * just pressed INIT" starting location (A001), so the dance won't
+ * NOOP if the founder presses INIT before testing — the failure mode
+ * we hit on the first HW-040 test 1 run.
+ */
+const BOUNCE_BANK = 4; // E
+const BOUNCE_PATCH = 63; // displayed 64
+
+/**
+ * Run the bank/PC dance: bounce off `BOUNCE_BANK`/`BOUNCE_PATCH`, pause
+ * 150 ms (per `SysexEncoding.txt:657`), settle on `target`, pause 200 ms
+ * (per spec line 658).
+ *
+ * Used by `hydra_apply_init` (settle on the scratch slot H128) and by
+ * `hydra_apply_init_to` (settle on a caller-chosen slot for diagnostic
+ * tests — typically the user's currently-active patch).
+ *
+ * Bank MSB is always 0 on the Explorer. Bank LSB selects 0..7 = A..H.
+ */
+async function bankPcDance(
+  conn: HydrasynthConnection,
+  target: { bank: number; patch: number },
+): Promise<void> {
+  conn.send(ccBytes(DEFAULT_CHANNEL, 0, 0));               // Bank MSB = 0
+  conn.send(ccBytes(DEFAULT_CHANNEL, 32, BOUNCE_BANK));    // Bank LSB → E
+  conn.send(programChangeBytes(DEFAULT_CHANNEL, BOUNCE_PATCH));
+  await sleep(150);
+  conn.send(ccBytes(DEFAULT_CHANNEL, 0, 0));               // Bank MSB = 0
+  conn.send(ccBytes(DEFAULT_CHANNEL, 32, target.bank));    // Bank LSB → target
+  conn.send(programChangeBytes(DEFAULT_CHANNEL, target.patch));
+  await sleep(200);
+}
+
+/**
+ * Parse a slot string like "A001" or "H128" into wire-format bank/patch
+ * indices. Letter A..H → bank 0..7. Patch 1..128 → wire 0..127 (device
+ * displays 1-indexed; SysEx wire format is 0-indexed). Returns the
+ * parsed pair plus a normalized display string for response formatting.
+ */
+function parseSlot(s: string): { bank: number; patch: number; display: string } {
+  const m = s.trim().toUpperCase().match(/^([A-H])(\d{1,3})$/);
+  if (!m) {
+    throw new Error(`Slot "${s}" must be like "A001" or "H128" (letter A..H + patch 1..128).`);
+  }
+  const bank = m[1]!.charCodeAt(0) - 'A'.charCodeAt(0);
+  const num = Number.parseInt(m[2]!, 10);
+  if (num < 1 || num > 128) {
+    throw new Error(`Slot "${s}" patch number must be 1..128, got ${num}.`);
+  }
+  return {
+    bank,
+    patch: num - 1,
+    display: `${m[1]}${num.toString().padStart(3, '0')}`,
+  };
+}
+
 server.registerTool('hydra_apply_init', {
   description: [
-    '**Recovery primitive.** Sends the INIT_PATCH baseline (~100 NRPN writes) and',
-    'nothing else. Use when the device has gone unexpectedly silent or wedged after',
-    'recipe writes — restores a known-audible default state (single sine osc, mixer',
-    'osc1 at full, filter wide open, env1 sustaining at max, all FX bypassed, every',
-    'mod-matrix slot disabled). ~300 ms wire time.',
+    '**Recovery primitive.** Loads a known-audible factory INIT patch into the',
+    'Hydrasynth\'s scratch slot (H128) via a SysEx whole-patch dump, then',
+    'bank/PC-dances to make it the actively-playing patch. Use when the device has',
+    'gone unexpectedly silent or wedged after recipe writes.',
     '',
-    'When to call: keys produce no audible tone after a previous batch, or the device',
-    'shows unexpected display values that suggest the working buffer is in a bad',
-    'state. Equivalent to pressing the device\'s INIT button + sending the same',
-    'neutralize prelude that `hydra_set_engine_params({ freshPatch: true })` uses.',
+    'How it works:',
+    '  - **Pre-dump bank/PC dance** to make H128 the active patch BEFORE the',
+    '    dump. This matters because Hydrasynth\'s SysEx-to-current-memory only',
+    '    modifies the active bank\'s working memory (per `SysexEncoding.txt`',
+    '    NOTE 0). If we dumped from any other bank, the dump lands somewhere',
+    '    we can\'t reach via PC.',
+    '  - Sends a 22-chunk SysEx patch dump (Header → 22 chunks → Footer) with the',
+    '    factory INIT bytes from ASM Hydrasynth Manager\'s bundled',
+    '    `Single INIT Bank.hydra`. Chunk-0 metadata targets bank H, patch 128.',
+    '  - Skips the SysEx Write Request → patch lives in RAM only, no flash burn.',
+    '  - **Post-dump bank/PC dance** to re-engage the modified working memory',
+    '    (per `SysexEncoding.txt` NOTE 2 — without a PC, "you will not hear the',
+    '    update"; PC to a slot you\'re already on is ignored, so we bounce off',
+    '    bank E first and PC back).',
+    '  - Wire time ~1.7s total including both dances.',
     '',
-    'Audible-by-construction guarantee: every bipolar param in INIT_PATCH (env',
-    'amounts, keytrack, pan) is centered, so the prelude itself never silences the',
-    'device. Filter cutoff is wide open, env1 sustain is max, env1 attack is instant.',
+    'After this completes, the device\'s active patch is H128 = "Init". The user',
+    'can navigate to a different patch when ready.',
     '',
-    'Requires Param TX/RX = NRPN on System Setup → MIDI page 10. With Param TX/RX =',
-    'CC, the entire prelude is silently ignored.',
+    'When to call: keys produce no audible tone after a previous batch, or the',
+    'device shows unexpected display values. Equivalent to pressing the device\'s',
+    'INIT button (with the addition of being callable from a tool).',
+    '',
+    'No device-mode preconditions — SysEx and PC ignore Param TX/RX gating.',
   ].join('\n'),
   inputSchema: {},
 }, async () => {
-  return runEngineParamBatch([], true);
+  const conn = ensureMidi();
+  const startMs = Date.now();
+
+  // Diagnostic capture (HW-040 test 1): subscribe to inbound MIDI before
+  // we send anything so we can observe Header / Chunk / Footer / Patch
+  // Saved acks per `SysexEncoding.txt:342-378`. If `conn.hasInput` is
+  // false (no Hydrasynth input port visible to the OS), the handler
+  // never fires and the capture report says so.
+  const observed: Array<{ ms: number; bytes: number[] }> = [];
+  const unsubscribe = conn.onMessage((bytes) => {
+    observed.push({ ms: Date.now() - startMs, bytes: [...bytes] });
+  });
+
+  try {
+    // 1. PRE-DUMP DANCE: force H128 to be the active patch. Required
+    //    because SysEx-to-current-memory only modifies the active bank's
+    //    working memory; dumping while on any other bank leaves the
+    //    update unreachable. HW-040 test 1 (Session 38, 2026-04-28)
+    //    confirmed this: dumped from A001 with full ack chain, silent
+    //    on key-press because H128 reloaded from flash.
+    await bankPcDance(conn, { bank: SCRATCH_BANK, patch: SCRATCH_PATCH });
+
+    // Mutate chunk-0 metadata in a clone of INIT_PATCH_BUFFER so the
+    // device routes the dump to the scratch slot. Per spec line 117-120:
+    // byte 0 = 0x06 ("Save to RAM"), byte 2 = bank, byte 3 = patch.
+    const buf = new Uint8Array(INIT_PATCH_BUFFER);
+    buf[2] = SCRATCH_BANK;
+    buf[3] = SCRATCH_PATCH;
+
+    // 2. Header (`18 00`) — initiates the patch-dump handshake.
+    conn.send(wrapSysex([0x18, 0x00]));
+
+    // 3. 22 chunk dumps. Each chunk is `[0x16, 0x00, INDEX, 0x16, …data…]`,
+    //    wrapped in the F0…F7 SysEx envelope.
+    const chunks = splitIntoChunks(buf);
+    for (let i = 0; i < chunks.length; i++) {
+      conn.send(wrapSysex(chunks[i]!.info));
+      if (i < chunks.length - 1) await sleep(SYSEX_CHUNK_PACING_MS);
+    }
+
+    // 4. Footer (`1A 00`). Deliberately skip the Write Request (`14 00`)
+    //    — that makes this a recovery primitive instead of a destructive
+    //    flash write. Per `SysexEncoding.txt:381-382`: "without the Write
+    //    Request, the patch isn't written to Flash. Instead it stays in RAM."
+    conn.send(wrapSysex([0x1a, 0x00]));
+
+    // 5. POST-DUMP DANCE: re-engage H128 to make the dump audible. Per
+    //    NOTE 2: "you will not hear the update unless you change to the
+    //    patch via a PC", and "if you change to a patch you're already
+    //    at... the change-patch request is entirely ignored." Bouncing
+    //    through E064 ensures both the bank-change and the patch-change
+    //    are effective.
+    await bankPcDance(conn, { bank: SCRATCH_BANK, patch: SCRATCH_PATCH });
+
+    // Drain inbound for a moment so trailing acks (especially Patch Saved
+    // + final Footer Response) make it into the report.
+    await sleep(SYSEX_TAIL_DRAIN_MS);
+  } finally {
+    unsubscribe();
+  }
+
+  const elapsedMs = Date.now() - startMs;
+
+  // Summarize what came back. Each Hydrasynth SysEx ack maps to a counter;
+  // anything unrecognized goes in the "other" bucket so we can see CC/PC
+  // echoes from the dance and any unexpected device chatter.
+  let headerResponses = 0;
+  let footerResponses = 0;
+  let patchSaveds = 0;
+  const chunkAcksSeen = new Set<number>();
+  const others: string[] = [];
+  for (const { bytes } of observed) {
+    if (bytes[0] === 0xf0) {
+      let info: Uint8Array;
+      try {
+        info = unwrapSysex(bytes);
+      } catch {
+        others.push(describeInboundMessage(bytes));
+        continue;
+      }
+      if (info.length === 2 && info[0] === 0x19 && info[1] === 0x00) headerResponses++;
+      else if (info.length === 2 && info[0] === 0x1b && info[1] === 0x00) footerResponses++;
+      else if (info.length === 4 && info[0] === 0x17 && info[1] === 0x00 && info[3] === 0x16) chunkAcksSeen.add(info[2]!);
+      else if (info.length === 4 && info[0] === 0x07 && info[1] === 0x00) patchSaveds++;
+      else others.push(describeInboundMessage(bytes));
+    } else {
+      others.push(describeInboundMessage(bytes));
+    }
+  }
+
+  const lines: string[] = [];
+  lines.push(`Loaded factory INIT patch into scratch slot H128 via SysEx (pre-dance + ${PATCH_CHUNK_COUNT} chunks + header + footer + post-dance, ${elapsedMs} ms).`);
+  lines.push('');
+  lines.push('Active patch is now H128 = "Init". Press a key to confirm audible.');
+  lines.push('');
+  lines.push(`HW-040 DIAGNOSTIC — inbound MIDI capture (hasInput=${conn.hasInput}, ${observed.length} message${observed.length === 1 ? '' : 's'}):`);
+  if (!conn.hasInput) {
+    lines.push('  (no Hydrasynth input port found — capture is empty by construction; reconnect or check OS MIDI enumeration)');
+  } else if (observed.length === 0) {
+    lines.push('  (none — device is fully silent on the MIDI input. Either acks are not being emitted, or the input port is to a different device.)');
+  } else {
+    for (const { ms, bytes } of observed) {
+      lines.push(`  [+${ms.toString().padStart(4)}ms] ${describeInboundMessage(bytes)}`);
+    }
+  }
+  lines.push('');
+  lines.push('Summary:');
+  lines.push(`  Header Response (19 00):   ${headerResponses > 0 ? '✓' : '✗'} (${headerResponses} seen)`);
+  lines.push(`  Chunk Acks (17 00 NN 16):  ${chunkAcksSeen.size}/${PATCH_CHUNK_COUNT} ${chunkAcksSeen.size === PATCH_CHUNK_COUNT ? '✓' : '✗'}`);
+  if (chunkAcksSeen.size > 0 && chunkAcksSeen.size < PATCH_CHUNK_COUNT) {
+    const missing: number[] = [];
+    for (let i = 0; i < PATCH_CHUNK_COUNT; i++) if (!chunkAcksSeen.has(i)) missing.push(i);
+    lines.push(`    missing chunk indices: ${missing.join(', ')}`);
+  }
+  lines.push(`  Patch Saved (07 00 BB PP): ${patchSaveds > 0 ? '✓' : '✗'} (${patchSaveds} seen)`);
+  lines.push(`  Footer Response (1B 00):   ${footerResponses > 0 ? '✓' : '✗'} (${footerResponses} seen)`);
+  lines.push(`  Other / unrecognized:      ${others.length}`);
+  lines.push('');
+  lines.push('If silent on key-press despite full ack chain (Header + 22 chunks +');
+  lines.push('Patch Saved + Footer): the SysEx-to-current-memory mechanism may be');
+  lines.push('fundamentally non-recoverable without a flash burn. Next step would be');
+  lines.push('to switch to the Write Request (`14 00`) flow, which DOES persist the');
+  lines.push('patch but is destructive (flashes H128). Decision-time for the founder.');
+
+  return {
+    content: [{
+      type: 'text',
+      text: lines.join('\n'),
+    }],
+  };
+});
+
+// hydra_navigate_to (diagnostic) ----------------------------------------
+
+server.registerTool('hydra_navigate_to', {
+  description: [
+    '**Diagnostic primitive.** Sends Bank Select (CC0=0, CC32=bank) +',
+    'Program Change to navigate the device\'s active patch to the named',
+    'slot. Captures any inbound MIDI for 200 ms after.',
+    '',
+    'Use BEFORE any test that bundles bank/PC navigation with SysEx, to',
+    'verify in isolation that the device responds to PC at all. If the',
+    'device\'s front-panel display does not change to the named slot when',
+    'this runs, navigation is broken upstream and any tool that bundles',
+    'PC + SysEx (like `hydra_apply_init`) is testing the wrong thing.',
+    '',
+    'Does NOT send SysEx. Does NOT modify any patch contents — just',
+    'changes which patch the device is currently playing.',
+  ].join('\n'),
+  inputSchema: {
+    slot: z.string().describe(
+      'Target slot in "A001".."H128" form. Letter A..H + patch 1..128.',
+    ),
+  },
+}, async ({ slot }) => {
+  const conn = ensureMidi();
+  const target = parseSlot(slot);
+  const startMs = Date.now();
+
+  const observed: Array<{ ms: number; bytes: number[] }> = [];
+  const unsubscribe = conn.onMessage((bytes) => {
+    observed.push({ ms: Date.now() - startMs, bytes: [...bytes] });
+  });
+
+  const sent: Array<{ ms: number; label: string }> = [];
+  function record(label: string): void {
+    sent.push({ ms: Date.now() - startMs, label });
+  }
+
+  try {
+    conn.send(ccBytes(DEFAULT_CHANNEL, 0, 0));
+    record('CC0 (Bank MSB) = 0');
+    conn.send(ccBytes(DEFAULT_CHANNEL, 32, target.bank));
+    record(`CC32 (Bank LSB) = ${target.bank} (${target.display[0]})`);
+    conn.send(programChangeBytes(DEFAULT_CHANNEL, target.patch));
+    record(`PC = ${target.patch} (displayed ${target.display})`);
+    await sleep(200);
+  } finally {
+    unsubscribe();
+  }
+
+  const elapsedMs = Date.now() - startMs;
+  const lines: string[] = [];
+  lines.push(`Navigation request sent to slot ${target.display} (bank=${target.bank}, patch=${target.patch}, ${elapsedMs} ms total).`);
+  lines.push('');
+  lines.push('CHECK THE DEVICE\'S FRONT-PANEL DISPLAY:');
+  lines.push(`  - If it now reads "${target.display}" → navigation works. Move on to the SysEx test.`);
+  lines.push(`  - If it still reads the old slot → device is not responding to bank/PC from MCP.`);
+  lines.push('    Likely causes: wrong MIDI channel (we\'re sending on ch 1), Param TX/RX gating,');
+  lines.push('    or the device is in a mode that locks the patch.');
+  lines.push('');
+  lines.push(`Sent (timeline, channel ${DEFAULT_CHANNEL}):`);
+  for (const s of sent) {
+    lines.push(`  [+${s.ms.toString().padStart(4)}ms] ${s.label}`);
+  }
+  lines.push('');
+  lines.push(`Inbound MIDI (hasInput=${conn.hasInput}, ${observed.length} message${observed.length === 1 ? '' : 's'}):`);
+  if (!conn.hasInput) {
+    lines.push('  (no input port open — can\'t observe device-side responses)');
+  } else if (observed.length === 0) {
+    lines.push('  (none — device sent nothing back. PC echoes are not standard, so absence does not prove anything.)');
+  } else {
+    for (const { ms, bytes } of observed) {
+      lines.push(`  [+${ms.toString().padStart(4)}ms] ${describeInboundMessage(bytes)}`);
+    }
+  }
+
+  return {
+    content: [{
+      type: 'text',
+      text: lines.join('\n'),
+    }],
+  };
+});
+
+// hydra_apply_init_to (diagnostic) --------------------------------------
+
+server.registerTool('hydra_apply_init_to', {
+  description: [
+    '**Diagnostic primitive — SysEx-to-current-memory test.** Dumps the',
+    'factory INIT patch via SysEx targeting the named slot. The point is',
+    'to test whether SysEx-to-current-memory modifies audible patch state',
+    'when the dump targets the patch the device is actively playing.',
+    '',
+    'Workflow to run this session:',
+    '  1. Press the device\'s INIT button (puts the device on A001).',
+    '  2. Run `hydra_apply_init_to({slot: "A001", dance: "none"})`.',
+    '  3. Press a key.',
+    '     - Audible → SysEx-to-current-memory works for active-patch',
+    '       dumps. Strong yes on SysEx for milestone 3.',
+    '     - Silent → re-run with `dance: "post"` (PC bounce after dump,',
+    '       per spec NOTE 2 "you will not hear the update unless you',
+    '       change to the patch via a PC").',
+    '     - Still silent → re-run with `dance: "both"` (pre + post,',
+    '       matches `hydra_apply_init` behavior but targets the active',
+    '       patch instead of H128).',
+    '     - All three silent → SysEx-to-current-memory may be',
+    '       fundamentally non-functional. Decision time.',
+    '',
+    'Does NOT save to flash (no Write Request). RAM only — modifies the',
+    'working memory of the bank specified in `slot`. Per spec NOTE 0,',
+    'this only modifies audible state when `slot`\'s bank == the active',
+    'bank, so set `slot` to whatever the device\'s display reads RIGHT NOW.',
+  ].join('\n'),
+  inputSchema: {
+    slot: z.string().describe(
+      'Target slot in "A001".."H128" form. Set this to whatever the device\'s display currently reads — that\'s the active patch the dump can actually modify.',
+    ),
+    dance: z.enum(['none', 'post', 'both']).optional().describe(
+      '`none` (default) = pure dump, no bank/PC navigation. `post` = bounce off E064 + return to target after the dump. `both` = same dance before AND after.',
+    ),
+  },
+}, async ({ slot, dance }) => {
+  const conn = ensureMidi();
+  const target = parseSlot(slot);
+  const danceMode = dance ?? 'none';
+  const startMs = Date.now();
+
+  const observed: Array<{ ms: number; bytes: number[] }> = [];
+  const unsubscribe = conn.onMessage((bytes) => {
+    observed.push({ ms: Date.now() - startMs, bytes: [...bytes] });
+  });
+
+  try {
+    if (danceMode === 'both') {
+      await bankPcDance(conn, target);
+    }
+
+    // Mutate chunk-0 metadata so the device routes the dump to `target`.
+    const buf = new Uint8Array(INIT_PATCH_BUFFER);
+    buf[2] = target.bank;
+    buf[3] = target.patch;
+
+    conn.send(wrapSysex([0x18, 0x00]));
+    const chunks = splitIntoChunks(buf);
+    for (let i = 0; i < chunks.length; i++) {
+      conn.send(wrapSysex(chunks[i]!.info));
+      if (i < chunks.length - 1) await sleep(SYSEX_CHUNK_PACING_MS);
+    }
+    conn.send(wrapSysex([0x1a, 0x00]));
+
+    if (danceMode === 'post' || danceMode === 'both') {
+      await bankPcDance(conn, target);
+    }
+
+    await sleep(SYSEX_TAIL_DRAIN_MS);
+  } finally {
+    unsubscribe();
+  }
+
+  const elapsedMs = Date.now() - startMs;
+
+  let headerResponses = 0;
+  let footerResponses = 0;
+  let patchSaveds = 0;
+  const chunkAcksSeen = new Set<number>();
+  const others: string[] = [];
+  for (const { bytes } of observed) {
+    if (bytes[0] === 0xf0) {
+      let info: Uint8Array;
+      try {
+        info = unwrapSysex(bytes);
+      } catch {
+        others.push(describeInboundMessage(bytes));
+        continue;
+      }
+      if (info.length === 2 && info[0] === 0x19 && info[1] === 0x00) headerResponses++;
+      else if (info.length === 2 && info[0] === 0x1b && info[1] === 0x00) footerResponses++;
+      else if (info.length === 4 && info[0] === 0x17 && info[1] === 0x00 && info[3] === 0x16) chunkAcksSeen.add(info[2]!);
+      else if (info.length === 4 && info[0] === 0x07 && info[1] === 0x00) patchSaveds++;
+      else others.push(describeInboundMessage(bytes));
+    } else {
+      others.push(describeInboundMessage(bytes));
+    }
+  }
+
+  const lines: string[] = [];
+  lines.push(`SysEx dump to ${target.display} (dance=${danceMode}, ${PATCH_CHUNK_COUNT} chunks, ${elapsedMs} ms total).`);
+  lines.push('');
+  lines.push(`Chunk-0 routing: bank=${target.bank} (${target.display[0]}), patch=${target.patch} (displayed ${target.display}).`);
+  lines.push('');
+  lines.push(`Press a key NOW. Audible patch with sine-saw oscillator and open filter = success.`);
+  lines.push('');
+  lines.push(`Inbound MIDI capture (hasInput=${conn.hasInput}, ${observed.length} message${observed.length === 1 ? '' : 's'}):`);
+  if (!conn.hasInput) {
+    lines.push('  (no input port open)');
+  } else if (observed.length === 0) {
+    lines.push('  (none)');
+  } else {
+    for (const { ms, bytes } of observed) {
+      lines.push(`  [+${ms.toString().padStart(4)}ms] ${describeInboundMessage(bytes)}`);
+    }
+  }
+  lines.push('');
+  lines.push('Summary:');
+  lines.push(`  Header Response (19 00):   ${headerResponses > 0 ? '✓' : '✗'} (${headerResponses} seen)`);
+  lines.push(`  Chunk Acks (17 00 NN 16):  ${chunkAcksSeen.size}/${PATCH_CHUNK_COUNT} ${chunkAcksSeen.size === PATCH_CHUNK_COUNT ? '✓' : '✗'}`);
+  lines.push(`  Patch Saved (07 00 BB PP): ${patchSaveds > 0 ? '✓' : '✗'} (${patchSaveds} seen)`);
+  lines.push(`  Footer Response (1B 00):   ${footerResponses > 0 ? '✓' : '✗'} (${footerResponses} seen)`);
+  lines.push(`  Other / unrecognized:      ${others.length}`);
+
+  return {
+    content: [{
+      type: 'text',
+      text: lines.join('\n'),
+    }],
+  };
 });
 
 /**

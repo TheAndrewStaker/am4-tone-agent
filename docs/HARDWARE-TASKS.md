@@ -23,17 +23,22 @@
 > collection (replaced by the Hydrasynth Explorer) and is now a
 > community-support item with no founder-hardware validation.
 >
-> **🆕 2026-04-28 (Session 36) — three Hydrasynth tasks queued for
-> BK-036 SysEx patch flow.** HW-038 (P0, gates milestone 3) is the
-> only one requiring action right now: a one-time INIT patch dump
-> from your device via ASM Manager so we have a known-audible
-> 2790-byte buffer to embed as `INIT_PATCH_BUFFER`. ~5 minutes of
-> founder time. HW-039 (P1) is a Bank A names export that helps
-> validate slot reads in milestone 3. HW-040 (P0) is the
-> post-milestone-3 hardware smoke test — only relevant after
-> milestone 3 ships. **Bottom line for next session start:**
-> if HW-038 isn't done, ask the founder to run it before
-> attempting milestone 3 work that touches the device.
+> **✅ 2026-04-28 (Session 38) — HW-040 test 1 RESOLVED. SysEx-to-
+> current-memory confirmed working on Hydrasynth Explorer.** Root
+> cause was device-side `Pgm Chg RX = Off` (MIDI Page 11 knob 4)
+> silently dropping every PC. After founder flipped it to On:
+> `hydra_navigate_to({slot: "B001"})` moved the display ✓;
+> `hydra_apply_init_to({slot: "B001", dance: "post"})` produced
+> audible output after the prior NRPN-silence ✓. Verdict: SysEx
+> works for setting tones, post-dump PC bounce required, pre-dump
+> dance not needed when dumping to active patch. Milestone 3
+> unblocked.
+
+> Pre-existing — 2026-04-28 (Session 36) — three Hydrasynth tasks queued for
+> BK-036 SysEx patch flow. HW-038 resolved offline (Session 37);
+> HW-039 (P1) is a Bank A names export that helps validate slot
+> reads in milestone 3; HW-040 (P0) is the post-milestone-3
+> hardware smoke test (now in re-run state — see top banner).
 >
 > Last updated: 2026-04-25 (Session 30 cont — HW-019 + HW-020 +
 > HW-021 decoded + archived. **14 new params**: 5 drive (low_cut /
@@ -84,7 +89,35 @@ Claude picks up from there and moves the item to ⏳ or ✅.
 <!-- HW-024 completed 2026-04-25 (Session 30 cont 3) — see Archive
      below for the test report and findings. -->
 
-### HW-038 — Hydrasynth INIT patch dump for `INIT_PATCH_BUFFER` constant 🔜 P0 (gates BK-036 milestone 3)
+### HW-038 — Hydrasynth INIT patch dump for `INIT_PATCH_BUFFER` constant ✅ resolved offline 2026-04-28
+
+**Outcome (Session 37):** No device action needed. ASM Hydrasynth Manager
+ships factory bank files at
+`%USERPROFILE%\Documents\ASM\Hydrasynth\Patch\Packs\` after install — one
+of which is `Single INIT Bank.hydra` containing 128 identical 2786-byte
+INIT `.patch` entries. Decoded the format end-to-end:
+
+- `.hydra` files are uncompressed ZIP archives. Bundled INIT bank → 128
+  patches × 2786 bytes + a `list.xml` index.
+- The `.patch` payload is wire-format minus the 4-byte SysEx routing
+  header `[0x06, 0x00, BANK, PATCH]`. Verified via ETCD magic at file
+  byte 1762 = wire byte 1766, and patch name at file byte 5 = wire byte 9.
+
+Action taken: `samples/hydrasynth/init-patch.patch` (extracted INIT) and
+`samples/hydrasynth/README.md` committed; `single-init-bank.hydra` is
+gitignored as vendor-redistributable. `INIT_PATCH_BUFFER` is baked from
+the file via `scripts/hydrasynth/bake-init-patch.ts` (one-shot;
+generated `src/devices/hydrasynth-explorer/initPatchBuffer.ts` is
+checked in). 12 structural goldens pass via `hydra:verify-init-buffer`.
+
+**Side-effect finding (queued as task #10 / new BK-036.5):** the factory
+INIT's bipolar values (filter1env1amount=512, filter1keytrack=768)
+suggest the patch buffer encodes values at NRPN_wire / 8 (so bipolar
+center is 512, not 4096 as our `patchEncoder.ts` assumes). Doesn't
+block HW-040 test 1 (we're sending the buffer verbatim, not encoding
+overrides), but blocks `hydra_apply_patch` until corrected.
+
+<details><summary>Original spec (preserved for reference)</summary>
 
 - **For:** BK-036 milestone 2 shipped a `defaultPatchBuffer()` that's
   *structurally* valid (correct size, ETCD magic bytes, version byte,
@@ -144,6 +177,8 @@ Claude picks up from there and moves the item to ⏳ or ✅.
 - **Estimated founder time:** ~5 minutes (Path A) or ~10 minutes
   (Path B).
 
+</details>
+
 ### HW-039 — Hydrasynth Bank A patch-names dump for canonical-state reference 🔜 P1
 
 - **For:** validates our SysEx envelope codec against device wire
@@ -171,7 +206,24 @@ Claude picks up from there and moves the item to ⏳ or ✅.
   but milestone 3 can ship without it; HW-038 is the hard gate.
 - **Estimated founder time:** ~3 minutes.
 
-### HW-040 — Hardware verification of BK-036 milestone 3 once it lands 🔜 P0 (post-milestone-3)
+### HW-040 — Hardware verification of BK-036 milestone 3 once it lands ✅ test 1 PASSED 2026-04-28; tests 2-4 pending
+
+**✅ 2026-04-28 (Session 38) — TEST 1 PASSED** after a long debug arc.
+Five failed runs all returned a textbook full SysEx ack chain
+(Header `19 00` + 22/22 Chunk Acks + Patch Saved `07 00 BB PP` +
+Footer `1B 00`) but were silent on key-press because the device's
+`Pgm Chg RX` setting was Off, silently dropping every Program
+Change. NRPN writes were unaffected throughout (channel 1 confirmed
+working via filter1env1amount silence). After founder flipped
+**MIDI Page 11 knob 4 (Pgm Chg RX) = On** on the device:
+`hydra_navigate_to({slot: "B001"})` moved the display ✓; then
+silence-via-NRPN + `hydra_apply_init_to({slot: "B001", dance:
+"post"})` produced audible patch ✓. Confirms SysEx-to-current-memory
+modifies audible state on the active patch when post-dump PC bounce
+is sent (per spec NOTE 2 — "you will not hear the update unless
+you change to the patch via a PC"). Pre-dump dance NOT needed when
+dumping to the active patch (only for foreign-bank dumps like
+`hydra_apply_init`'s H128 target). Tests 2-4 pending.
 
 - **For:** once milestone 3 ships the MCP tools (`hydra_apply_patch`,
   `hydra_request_patch`, `hydra_load_hydra_file`, rewired
@@ -181,19 +233,23 @@ Claude picks up from there and moves the item to ⏳ or ✅.
   failed.
 - **Setup:** Hydrasynth Explorer connected, Claude Desktop with
   `mcp-midi-tools` connector attached, milestone 3 installed.
-- **Test 1 — recovery primitive:**
+- **Test 1 — recovery primitive (RE-RUN with diagnostic build):**
   1. From Claude Desktop, run a destructive NRPN write that's known
      to silence the device (e.g. `hydra_set_engine_params({ params:
      [{name: "filter1env1amount", value: -64}], freshPatch: true })`
      against an INIT baseline). Confirm device is silent on
      key-press.
-  2. Run `hydra_apply_init` (which now sends INIT_PATCH_BUFFER via
-     SysEx instead of the NRPN prelude). Wire time should report
-     <100ms (was ~300ms via NRPN prelude).
-  3. Press a key. **Pass:** audible saw default. **Fail:** still
-     silent → SysEx write didn't take effect, or
-     `INIT_PATCH_BUFFER` was the wrong dump.
-  4. Signal "HW-040 test 1 done" + audible/silent.
+  2. Run `hydra_apply_init`. Expect wire time ~600-700 ms (the
+     tool description estimate). The response now includes an
+     `HW-040 DIAGNOSTIC` block listing every inbound MIDI
+     message with timestamps, plus a summary of which acks were
+     observed.
+  3. Press a key. **Pass:** audible saw default → fix lands in
+     code under task #10 (BK-036.5 bipolar/scale). **Fail:**
+     still silent → paste the DIAGNOSTIC block back, we triage
+     based on what acks did/didn't arrive.
+  4. Signal "HW-040 test 1 re-run done" + audible/silent + the
+     DIAGNOSTIC block.
 
 - **Test 2 — Van Halen "Jump" rebuild via SysEx:**
   1. Run a `hydra_apply_patch` recipe matching the Van Halen "Jump"

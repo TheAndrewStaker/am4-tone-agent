@@ -46,6 +46,7 @@
  * Goldens for this module live in `scripts/hydrasynth/verify-sysex-patch.ts`.
  */
 import { HYDRASYNTH_NRPNS, type HydrasynthNrpn } from './nrpn.js';
+import { INIT_PATCH_BUFFER } from './initPatchBuffer.js';
 
 /** The full Hydrasynth patch buffer is 2790 bytes (21×128 + 102). */
 export const PATCH_BUFFER_SIZE = 2790;
@@ -444,33 +445,18 @@ export function decodePatch(buf: Uint8Array): Map<string, number> {
 }
 
 /**
- * Build a minimal `PATCH_BUFFER_SIZE`-byte buffer with the spec's known
- * fixed bytes set:
- *   - byte 0    = 0x06 ("Save to RAM" marker)
- *   - byte 4    = 0xC8 (firmware version 2.0.0)
- *   - bytes 1766..1769 = 69, 84, 67, 68 (the "ETCD" magic bytes)
- *   - bytes 2390..2399 alternating -100, -1 per spec line 86
+ * Return a fresh clone of `INIT_PATCH_BUFFER` — the audible factory
+ * INIT patch extracted from ASM Hydrasynth Manager's bundled
+ * `Single INIT Bank.hydra` and baked into source via
+ * `scripts/hydrasynth/bake-init-patch.ts`.
  *
- * This is **NOT** an audible default patch — every other byte is zero,
- * which the spec documents as a near-silent state (filter cutoff 0,
- * envs at zero, etc.). Real audible defaults come from a device-
- * captured INIT patch in BK-036 milestone 3. For now this gives the
- * encoder a structural starting point that won't get rejected outright
- * by the magic-byte gate.
+ * Use as the base buffer for `encodePatch()` when the caller doesn't
+ * supply their own — overrides land on top of an audible-by-construction
+ * default instead of an all-zeros buffer (which would have bipolar
+ * params at their negative extreme = filter slammed shut + silence).
  */
 export function defaultPatchBuffer(): Uint8Array {
-  const buf = new Uint8Array(PATCH_BUFFER_SIZE);
-  buf[PATCH_META.saveMarker] = 0x06;
-  buf[PATCH_META.version]    = 0xc8;
-  for (let i = 0; i < PATCH_MAGIC_BYTES.offsets.length; i++) {
-    buf[PATCH_MAGIC_BYTES.offsets[i]] = PATCH_MAGIC_BYTES.defaults[i];
-  }
-  // Spec line 86: bytes 2390..2399 are always -100, -1, -100, -1, ...
-  // Stored as signed 8-bit: -100 = 0x9C, -1 = 0xFF.
-  for (let i = 0; i < 10; i++) {
-    buf[2390 + i] = i % 2 === 0 ? 0x9c : 0xff;
-  }
-  return buf;
+  return new Uint8Array(INIT_PATCH_BUFFER);
 }
 
 // ---------------------------------------------------------------------------

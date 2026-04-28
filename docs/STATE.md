@@ -6,38 +6,149 @@
 > in **`docs/HARDWARE-TASKS.md`** — check that file alongside this one at
 > session start.
 >
-> **🚨 Next-session pickup checklist (Session 37 onward):**
+> **✅ Session 38 wrap — SysEx-to-current-memory confirmed working
+> on Hydrasynth Explorer.** HW-040 test 1 passed after flipping
+> device-side `Pgm Chg RX = On`. Path forward for milestone 3 is
+> clear: post-dump PC bounce required; pre-dump dance only needed
+> when dumping to a non-active slot.
 >
-> 1. **Open `docs/HARDWARE-TASKS.md` first.** Three new Hydrasynth
->    HW entries (HW-038, HW-039, HW-040) are queued for BK-036
->    milestone 3. **HW-038 is P0 and gates milestone 3.** It's a
->    ~5-minute founder action: dump an INIT-style audible patch
->    from the Hydrasynth via ASM Manager and save it to
->    `samples/hydrasynth/init-patch.patch` (or `.hydra`). If the
->    file isn't there yet, ASK the founder to do HW-038 before
->    starting any milestone 3 work that touches the device — the
->    encoder needs a known-audible 2790-byte base buffer and we
->    can't dump one ourselves until the MCP tool lands.
+> **🚨 Next-session pickup checklist (Session 39 onward):**
 >
-> 2. **If HW-038 is done:** load `samples/hydrasynth/init-patch.*`,
->    unwrap via `unwrapSysex` + `concatChunks` (or treat as a flat
->    2790-byte buffer if the export is decoded), assert size = 2790,
->    print the decoded curated 75-param map for sanity, and embed
->    the buffer as `INIT_PATCH_BUFFER` in a new file
->    `src/devices/hydrasynth-explorer/initPatchBuffer.ts`. Wire
->    `defaultPatchBuffer()` to clone it. Then proceed to milestone 3.
+> 1. **Task #10 unblocked — patch-buffer bipolar/scale fix
+>    (BK-036.5).** Hypothesis: patch values = NRPN_wire / 8
+>    (bipolar center 512, full-scale 1024). Verify against the
+>    INIT_PATCH_BUFFER bytes already in the codebase (filter1env1amount
+>    at byte 316/317 = 512 = display 0; filter1keytrack at byte
+>    322/323 = 768 = some positive value). Fix `PATCH_OFFSETS`
+>    encoding kinds in `src/devices/hydrasynth-explorer/patchEncoder.ts`,
+>    update `verify-sysex-patch` goldens, run preflight.
 >
-> 3. **Milestone 3 = the MCP tool surface.** New tools:
->    `hydra_apply_patch`, `hydra_request_patch`,
->    `hydra_load_hydra_file`. Rewire `hydra_apply_init` to send
->    `INIT_PATCH_BUFFER` via SysEx (retire the NRPN prelude in
->    `src/devices/hydrasynth-explorer/initPatch.ts`). After it
->    ships, run HW-040 (4 founder-driven hardware tests) to gate
->    "milestone 3 done".
+> 2. **Scaffold `hydra_apply_patch({slot, params, dance?})`** —
+>    same shape as `hydra_apply_init_to` but takes a `Map<canonical
+>    name, value>` of overrides. Encode via fixed `encodePatch(overrides,
+>    {base: INIT_PATCH_BUFFER})`, dump via SysEx, post-dump dance
+>    to audibilize. Default dance = "post". HW-040 test 2 (Van Halen
+>    "Jump" recipe) verifies this.
 >
-> Last updated: **2026-04-28** (Session 36 — BK-036 milestones
-> 1+2 shipped: SysEx envelope + patch byte-map encoder).
-> **Two of three BK-036 milestones land in one session.**
+> 3. **Scaffold `hydra_request_patch({slot})`** — needs MIDI input
+>    listener (already shipped via `connectHydrasynth()`'s Input
+>    port). Send `[0x04, 0x00, BANK, PATCH]` SysEx request, collect
+>    22 chunk responses, concatenate via `concatChunks`, decode via
+>    `decodePatch`. HW-040 test 3 verifies.
+>
+> 4. **Scaffold `hydra_load_hydra_file({path})`** — unzip `.hydra`
+>    archive, extract a `.patch` entry, prepend 4-byte routing
+>    header, send via SysEx. Tests 2-4 of HW-040 verify the round
+>    trip.
+>
+> 5. **Optionally — fold pre-dance learning back into `hydra_apply_init`**
+>    The pre-dance was theorized but unproven for the H128 case.
+>    Now that we know post-dance is sufficient when dumping to the
+>    active patch, re-test `hydra_apply_init` (which dumps to H128,
+>    not active) with `dance: "both"` (current behavior) to confirm
+>    it still works under Pgm Chg RX = On. If `dance: "post"` alone
+>    suffices when starting from non-H128, we can drop the pre-dance
+>    for ~350ms wire-time savings.
+>
+> Hard precondition for any tool that uses bank/PC: device must
+> have `Pgm Chg RX = On` (MIDI Page 11 knob 4). Document this in
+> tool descriptions when shipping milestone 3 tools, and consider
+> a one-time "first run" check in the connector setup flow.
+>
+> Last updated: **2026-04-28** (Session 38 — Pgm Chg RX root cause
+> found, HW-040 test 1 passed with `dance: "post"` after device
+> setting flipped, milestone 3 unblocked).
+>
+> **Session 38 highlights — Input listener, diagnostic tools,
+> and root cause: Pgm Chg RX = Off.**
+>
+> - **Root cause for HW-040 silent failures: device-side
+>   Pgm Chg RX = Off.** Per Hydrasynth Owner's Manual pp. 82-83,
+>   MIDI: Page 11 knob 4 controls whether the device receives
+>   Program Change at all. NRPN writes go through fine
+>   (channel 1 confirmed working — silenced filter1env1amount).
+>   SysEx envelopes go through fine (full Header + 22 chunks +
+>   Patch Saved + Footer ack chain observed). But every PC we
+>   sent to navigate to H128 was dropped silently. Adding
+>   `hydra_navigate_to({slot: "B001"})` confirmed: 3 messages
+>   sent, 0 inbound, display stayed on A001. Founder's device
+>   has Pgm Chg RX Off, which is a common conservative default
+>   (prevents accidental patch jumps during performance).
+> - **HW-040 verdict revision:** prior "SysEx-to-current-memory
+>   non-recoverable" conclusion was wrong — was based on tests
+>   that never actually navigated to the dump's target. Real
+>   verdict pending: re-test with Pgm Chg RX = On.
+> - **`hydra_apply_init` now records inbound MIDI** during the apply
+>   (pre-dance → Header send → 22 chunks → Footer → post-dance →
+>   300 ms drain) with full `[+NNNms]` timeline + ack-count
+>   summary in the response.
+> - **New diagnostic tools shipped:**
+>   - `hydra_navigate_to({slot})` — pure bank/PC navigation test,
+>     no SysEx. Used to verify Pgm Chg RX is on.
+>   - `hydra_apply_init_to({slot, dance})` — SysEx dump to
+>     caller-specified slot with optional dance behavior.
+>     Defaulting `dance: "none"` lets us test SysEx-to-current-memory
+>     on the active patch with zero navigation confound.
+> - **`connectHydrasynth()` opens Input + Output.** Input is
+>   best-effort; if no Hydrasynth input port is visible the
+>   `hasInput` flag goes false and the diagnostic reports empty
+>   capture by construction. NRPN/CC tools still work either way.
+> - **`HydrasynthConnection` interface** gains `onMessage(handler)
+>   → unsubscribe` and `hasInput: boolean`. Active-sensing and
+>   timing clock are filtered via `ignoreTypes(false, true, true)`
+>   so the handler only sees meaningful messages.
+> - **STATE.md's "<100 ms" wire-time target was a mistake.** It
+>   ignored the 350 ms of bank/PC dance pauses; the tool
+>   description at server.ts:622 already estimated ~600 ms total,
+>   which lines up with the 683 ms observation. The bug wasn't
+>   timing — it was the silenced PCs.
+> - **Preflight green** after Session 38 work: tsc clean,
+>   12/12 init-buffer, 46/46 sysex-patch, 28/28 sysex-envelope,
+>   61/61 hydra-encoding, smoke-server 22/22.
+>
+> **Session 37 highlights — `.hydra` decoded, INIT baked, apply_init
+> rewired.**
+>
+> - **`.hydra` is a ZIP archive.** ASM Manager's bundled bank files
+>   live at `%USERPROFILE%\Documents\ASM\Hydrasynth\Patch\Packs\`.
+>   `Single INIT Bank.hydra` (373951 B) = ZIP of 128 × 2786-byte
+>   `.patch` entries (named `00Init.patch`..`7fInit.patch`) plus
+>   `list.xml` index. Compression: STORED.
+> - **4-byte file/wire shift.** `.patch` payload = wire buffer minus
+>   the SysEx routing header `[0x06, 0x00, BANK, PATCH]`. Verified
+>   via ETCD magic at file 1762 = wire 1766 and patch name at file
+>   5 = wire 9.
+> - **HW-038 resolved offline** (no device contact). Extracted
+>   `samples/hydrasynth/init-patch.patch` from the ZIP; bank file
+>   itself gitignored as ASM-redistributable. New
+>   `scripts/hydrasynth/bake-init-patch.ts` generates
+>   `src/devices/hydrasynth-explorer/initPatchBuffer.ts` with
+>   `INIT_PATCH_BUFFER` inlined as a 2790-byte `Uint8Array.from([…])`.
+> - **`defaultPatchBuffer()` rewired** to clone `INIT_PATCH_BUFFER`.
+>   Old behavior (zero buffer + magic bytes) was silent-by-construction
+>   anyway — every bipolar param at zero = filter slammed shut.
+> - **`hydra_apply_init` rewired to SysEx.** Sends Header (`F0…18 00…F7`)
+>   → 22 chunks at 5 ms pacing → Footer (`F0…1A 00…F7`). Skips Write
+>   Request so the patch lands in RAM only, no slot clobbered (per
+>   `SysexEncoding.txt:381-382`). ~150 ms wire time vs ~300 ms NRPN.
+> - **12 new structural goldens** in `verify-init-buffer.ts`: size,
+>   routing header, ETCD magic, 2390..2399 sentinel, name decode,
+>   curated decode size, non-zero key params, fresh-clone behavior.
+>   46/46 patch goldens still pass; tsc clean.
+>
+> **Bipolar interpretation finding (queued, not blocking HW-040
+> test 1).** Factory INIT has `filter1env1amount = 0x00 0x02` (= 512
+> u16le) at byte 316/317 and `filter1keytrack = 0x00 0x03` (= 768)
+> at 322/323. Under our existing patchEncoder (BK-037 wire-center
+> 4096), these decode to display -56 and -52 — exactly the silence
+> pattern. Strong hypothesis: patch buffer stores values at
+> NRPN_wire / 8 (bipolar center 512, full-scale 1024). Doesn't break
+> HW-040 test 1 (verbatim send), but blocks `hydra_apply_patch`. New
+> task #10 (BK-036.5) carries this. Verify with HW-040 test 1
+> outcome, then fix encoder, then scaffold apply_patch.
+>
+> Pre-existing — Session 36 — BK-036 milestones 1+2 shipped: SysEx
+> envelope + patch byte-map encoder.
 >
 > **Milestone 2 — `src/devices/hydrasynth-explorer/patchEncoder.ts`
 > (just shipped).** Patch buffer is **2790 bytes** (21×128 +

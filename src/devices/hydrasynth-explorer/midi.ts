@@ -1,20 +1,43 @@
 /**
- * Hydrasynth Explorer — MIDI connection helper (output-only for M1).
+ * Hydrasynth Explorer — MIDI connection helper.
  *
  * Mirrors the shape of `src/protocol/midi.ts` (the AM4 connection
  * helper) but device-scoped: looks for "hydrasynth" / "asm hydra" in
- * port names, opens an Output, exposes a thin `send` interface.
+ * port names, opens both an Output and an Input.
  *
- * Output-only because M1's tool surface (set_param, set_macro,
- * switch_patch, play_note, list_params) only emits MIDI. M5 will add
- * an Input listener for the bidirectional Macro-as-trigger work.
+ * Why the Input port matters: NRPN/CC writes are fire-and-forget on
+ * the Hydrasynth (`docs/devices/hydrasynth-explorer/FIRST-SMOKE.md`
+ * §3 — "The Hydrasynth does not ack CCs"). But SysEx is a *different*
+ * protocol path that DOES emit acks per `SysexEncoding.txt` (lines
+ * 342, 351-352, 377-378): `19 00` after Header `18 00`, `17 00 NN 16`
+ * after every chunk, `1B 00` after Footer `1A 00`, and `07 00 BANK
+ * PATCH` "Patch Saved" after the final chunk. Opening Input lets
+ * `hydra_apply_init` observe these to diagnose silent-on-key-press
+ * failure modes (HW-040 test 1).
+ *
+ * The Input port is best-effort — if the OS doesn't expose a
+ * Hydrasynth input (some USB-MIDI driver configurations expose only
+ * output), we fall back to output-only and `hasInput` flips false.
+ * NRPN/CC tools keep working; only SysEx diagnostics lose visibility.
  */
-import midi, { Output } from 'midi';
+import midi, { Input, Output } from 'midi';
 
 const HYDRA_PORT_NEEDLES = ['hydrasynth', 'asm hydra'];
 
 export interface HydrasynthConnection {
   send: (bytes: number[]) => void;
+  /**
+   * Subscribe to inbound MIDI from the Hydrasynth. Returns an
+   * unsubscribe function. When `hasInput` is false (no input port
+   * found), the handler is registered but will never fire.
+   *
+   * Active-sensing (0xFE) and MIDI timing clock (0xF8) are filtered
+   * by `ignoreTypes(false, true, true)` so the handler only sees
+   * meaningful messages (SysEx, CC, PC, notes).
+   */
+  onMessage: (handler: (bytes: number[]) => void) => () => void;
+  /** True when an input port was successfully opened. */
+  hasInput: boolean;
   close: () => void;
 }
 
@@ -27,6 +50,14 @@ export interface HydrasynthPortInfo {
 function findHydrasynthOutputIndex(out: Output): number {
   for (let i = 0; i < out.getPortCount(); i++) {
     const name = out.getPortName(i).toLowerCase();
+    if (HYDRA_PORT_NEEDLES.some((n) => name.includes(n))) return i;
+  }
+  return -1;
+}
+
+function findHydrasynthInputIndex(input: Input): number {
+  for (let i = 0; i < input.getPortCount(); i++) {
+    const name = input.getPortName(i).toLowerCase();
     if (HYDRA_PORT_NEEDLES.some((n) => name.includes(n))) return i;
   }
   return -1;
@@ -59,15 +90,17 @@ export function listHydrasynthOutputs(): HydrasynthPortInfo[] {
 }
 
 /**
- * Open the Hydrasynth Explorer output. Throws with a diagnostic
- * message if the device isn't visible — caller should surface that
- * to the user (the MCP server catches it and turns it into an MCP
- * error response).
+ * Open the Hydrasynth Explorer output, plus the input if the OS
+ * exposes one. Throws on no output port (the device is unusable
+ * without it); falls back to output-only on no input port (NRPN
+ * writes still work, SysEx loses ack visibility).
+ *
+ * Caller surfaces the throw to the user as an MCP error response.
  */
 export function connectHydrasynth(): HydrasynthConnection {
   const out = new midi.Output();
-  const idx = findHydrasynthOutputIndex(out);
-  if (idx < 0) {
+  const outIdx = findHydrasynthOutputIndex(out);
+  if (outIdx < 0) {
     const visible: string[] = [];
     for (let i = 0; i < out.getPortCount(); i++) {
       visible.push(`[${i}] ${out.getPortName(i)}`);
@@ -79,9 +112,41 @@ export function connectHydrasynth(): HydrasynthConnection {
       `Likely causes: device not powered on, USB cable not seated, or the OS hasn't enumerated it yet (try unplug + replug).`,
     );
   }
-  out.openPort(idx);
+  out.openPort(outIdx);
+
+  const input = new midi.Input();
+  const inIdx = findHydrasynthInputIndex(input);
+  let inputOpen = false;
+  const handlers = new Set<(bytes: number[]) => void>();
+
+  if (inIdx >= 0) {
+    // Don't ignore SysEx (false), do ignore timing clock + active-sensing (true, true).
+    // Wire the listener BEFORE openPort so we don't race the device.
+    input.ignoreTypes(false, true, true);
+    input.on('message', (_dt: number, bytes: number[]) => {
+      for (const h of handlers) {
+        try { h(bytes); } catch { /* swallow handler errors so one bad subscriber can't break others */ }
+      }
+    });
+    input.openPort(inIdx);
+    inputOpen = true;
+  } else {
+    try { input.closePort(); } catch { /* never opened */ }
+  }
+
   return {
     send: (bytes) => out.sendMessage(bytes),
-    close: () => { try { out.closePort(); } catch { /* already closed */ } },
+    onMessage: (handler) => {
+      handlers.add(handler);
+      return () => { handlers.delete(handler); };
+    },
+    hasInput: inputOpen,
+    close: () => {
+      handlers.clear();
+      try { out.closePort(); } catch { /* already closed */ }
+      if (inputOpen) {
+        try { input.closePort(); } catch { /* already closed */ }
+      }
+    },
   };
 }
