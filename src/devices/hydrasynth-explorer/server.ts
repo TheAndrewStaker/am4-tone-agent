@@ -169,6 +169,101 @@ function parseBank(input: string | number): number {
   return letter.charCodeAt(0) - 'A'.charCodeAt(0);
 }
 
+// -- Param-name cheat sheet ----------------------------------------------
+
+/**
+ * Inline cheat sheet of common engine parameter names — shared by both
+ * `hydra_set_engine_param` and `hydra_set_engine_params` descriptions.
+ *
+ * The catalog is large (1175 entries) but most patch-design work uses
+ * the same ~50 parameters. Listing them in the tool description means
+ * Claude doesn't need to call `hydra_list_params` to discover names —
+ * which was burning multiple round-trips per patch build.
+ *
+ * Naming patterns to deduce the rest:
+ *   - Slot families (osc1/2/3, env1/2/3/4/5, lfo1/2/3/4/5, filter1/2,
+ *     mutator1/2/3/4, mod1..32) follow {family}{slot}{field} convention:
+ *     osc1type, env3decaysyncoff, lfo2gain, etc.
+ *   - Time-domain envelope+lfo params have *syncoff* (free-running ms)
+ *     and *syncon* (BPM-synced) variants — use *syncoff* by default.
+ *   - CC-style dot names ("env1.attack", "mixer.osc1_vol", "filter1.res")
+ *     are accepted as aliases everywhere alongside the canonical NRPN
+ *     names — pick whichever feels natural.
+ */
+const ENGINE_PARAM_CHEAT_SHEET = `
+Common parameter names (both styles work — pick whichever):
+
+OSCILLATORS  — osc1/osc2/osc3 (slot-disambiguated):
+  osc1type / osc2type / osc3type           wave selector — accepts names: "Sine", "Triangle", "Saw", "Square", "Pulse 1".."Pulse 6", "Horizon 1..8", and ~200 more (call hydra_list_enum_values("OSC_WAVES"))
+  osc1semi / osc2semi / osc3semi           coarse pitch (-36..+36 semitones)
+  osc1cent / osc2cent / osc3cent           fine tune (-50..+50 cents)
+  osc1mode / osc2mode / osc3mode           "Single" or "WaveScan"
+  osc1wavscan / osc2wavscan                wavescan position
+  osc1keytrack / osc2keytrack / osc3keytrack
+
+MIXER  (canonical or dot-style):
+  mixerosc1vol / mixer.osc1_vol            OSC 1 volume
+  mixerosc2vol / mixer.osc2_vol            OSC 2 volume
+  mixerosc3vol / mixer.osc3_vol            OSC 3 volume
+  mixerosc1pan / mixer.osc1_pan            OSC 1 pan (etc. for osc2/osc3)
+  mixernoisevol / mixer.noise_vol          noise volume
+  mixerringmodvol / mixer.ring_mod_vol     ring-mod volume
+
+FILTER 1  (use names for type — "LP Ladder 12", "LP Ladder 24", "Vowel", "BP 3-Ler", etc., 16 options):
+  filter1type
+  filter1cutoff / filter1.cutoff
+  filter1resonance / filter1.res
+  filter1drive / filter1.drive
+  filter1keytrack / filter1.keytrack
+  filter1env1amt, filter1lfo1amt, filter1velenv
+
+FILTER 2  (only "LP-BP-HP" or "LP-Notch-HP" types):
+  filter2type
+  filter2cutoff, filter2resonance, filter2drive, filter2keytrack
+
+ENVELOPES  — env1 (Amp), env2/3/4/5 (assignable). Default to syncoff variants for free-running times:
+  env1.attack  / env1attacksyncoff
+  env1.decay   / env1decaysyncoff
+  env1.sustain / env1sustain
+  env1.release / env1releasesyncoff
+  env1holdsyncoff, env1delaysyncoff
+  Same shape for env2..env5.
+
+LFOS  (5 of them):
+  lfo1ratesyncoff, lfo1wave, lfo1gain, lfo1phase, lfo1delay
+  Same shape for lfo2..lfo5.
+
+PRE-FX / POST-FX  (use names for type — "Bypass", "Chorus", "Flanger", "Rotary", "Phaser", "Lo-Fi", "Tremolo", "EQ", "Compressor", "Distortion"):
+  prefxtype, postfxtype
+  prefxparam1, prefxparam2, prefxmix
+  postfxparam1, postfxparam2, postfxmix
+
+DELAY / REVERB  (between Pre-FX and Post-FX):
+  delaytype, delaytimesyncoff, delayfeedback, delaymix
+  reverbtype, reverbtime, reverbtone, reverbmix
+
+VOICE / GLOBAL:
+  voiceglidetime, voicelegato, voicemono, voicepolyphony
+  vibratoamount, vibratorate, vibratobpmsync
+
+MUTATORS (4):
+  mutator1mode (use names: "FM-Linear", "WavStack", "Osc Sync", "PW-Orig", "PW-Sqeez", "PW-ASM", "Harmonic", "PhazDiff")
+  mutator1ratio, mutator1depth, mutator1drywet
+  Same shape for mutator2..mutator4.
+
+MOD MATRIX  (32 slots):
+  mod1source, mod1depth, mod1destination
+  ... mod32source / mod32depth / mod32destination
+
+MACROS:
+  macro1value..macro8value (also patch-defined CCs 16-23)
+
+VALUE NOTES:
+  - Numbers 0..128 auto-scale onto each param's wireMax (most engine knobs are 14-bit, wireMax=8192). value=64 → display 64.0 exact, value=128 → max.
+  - Numbers 129..16383 pass through as raw 14-bit wire values.
+  - For type-selector params (osc*type, filter*type, prefxtype, postfxtype, mutator*mode), pass the display name string — auto-resolved.
+`.trim();
+
 // -- Server ---------------------------------------------------------------
 
 const server = new McpServer({
@@ -217,7 +312,7 @@ server.registerTool('hydra_set_param', {
   }
   if (param.category !== 'system') {
     throw new Error(
-      `"${id}" is an engine parameter, not a System CC. Use hydra_set_engine_param("${id.replace('.', '')}", value) instead — it sends NRPN, which is what the device listens on for engine control. (Call hydra_list_params with category="nrpn" for the NRPN parameter catalog.)`,
+      `"${id}" is an engine parameter, not a System CC. Use hydra_set_engine_param("${id}", value) instead — it sends NRPN, accepts the same name, and the device listens on NRPN for engine control. CC-style and canonical NRPN names both resolve.`,
     );
   }
   const conn = ensureMidi();
@@ -331,61 +426,28 @@ server.registerTool('hydra_play_note', {
 
 server.registerTool('hydra_set_engine_param', {
   description: [
-    'Use this tool to set ANY synthesis-engine parameter on the user\'s Hydrasynth',
-    'Explorer via NRPN — 1175 named parameters covering oscillators, mixer, both',
-    'filters, every envelope and LFO, mod matrix, mutators, and Pre-FX/Post-FX type',
-    '(things the manual\'s 117 CCs don\'t reach). The NRPN map is reverse-engineered',
-    'against device by eclab/edisyn (Apache-2.0).',
+    'Set ONE synthesis-engine parameter on the user\'s Hydrasynth Explorer. For',
+    'multi-parameter patch builds use hydra_set_engine_params (batch) instead — one',
+    'tool call beats N, and the server paces the writes correctly.',
+    '',
+    '**DON\'T pre-discover names. Just call this.** This tool already knows every',
+    'engine parameter (1175 of them). The cheat-sheet below covers ~95% of patch-',
+    'building work. Skip hydra_list_params for normal patch building — both the',
+    'CC-style names it returns ("mixer.osc1_vol", "env1.attack") AND the canonical',
+    'NRPN names ("mixerosc1vol", "env1attacksyncoff") work directly here. Only call',
+    'hydra_list_params if a write here genuinely fails on a name you can\'t guess from',
+    'the patterns below.',
     '',
     'Do not produce a written spec instead of calling this tool unless the user',
-    'explicitly asks for a dry run. **For multi-parameter patch builds, use',
-    'hydra_set_engine_params (batch) — one tool call instead of N.**',
+    'explicitly asks for a dry run.',
     '',
-    'NAME RESOLUTION — the tool accepts EITHER naming convention:',
-    '  - CC-catalog style (dot-separated): "mixer.osc1_vol", "filter1.cutoff",',
-    '    "filter1.res", "env1.attack", "env1.sustain". This matches what',
-    '    hydra_list_params returns.',
-    '  - edisyn canonical style (concatenated): "mixerosc1vol", "filter1cutoff",',
-    '    "filter1resonance", "env1attacksyncoff", "env1sustain".',
-    '  - Both forms resolve to the same NRPN entry; pick whichever feels natural.',
+    ENGINE_PARAM_CHEAT_SHEET,
     '',
-    'VALUE — accepts a number 0..16383 OR an enum name string:',
-    '  1. Numbers 0..127 are the easiest mental model. The tool AUTO-SCALES them to',
-    '     the param\'s native range (most engine knobs are 14-bit, 0..8192). So',
-    '     value=127 hits maximum on a 14-bit param, value=64 hits the middle, etc.',
-    '     Pass 128..16383 to bypass auto-scale and write a raw 14-bit value.',
-    '  2. Enum-typed params (osc1type, osc2type, osc3type, filter1type, filter2type,',
-    '     prefxtype, postfxtype, mutator1mode..4mode, mutator{N}sourcefmlin /',
-    '     sourceoscsync, env1trigsrc1..3, etc.) accept a display name string —',
-    '     filter1type="Vowel", prefxtype="Lo-Fi", osc1type="Sine". Sparse encodings',
-    '     (Pre-FX/Post-FX use index×8) are handled automatically.',
+    'IMPORTANT — DEVICE PRECONDITION: writes only respond when Param TX/RX is set to',
+    'NRPN on System Setup → MIDI page 10. If writes seem inert, check that first.',
     '',
-    'EXAMPLES (Tom Petty Breakdown organ recipe):',
-    '  hydra_set_engine_param("osc1type", "Sine")',
-    '  hydra_set_engine_param("osc2type", "Sine")',
-    '  hydra_set_engine_param("osc2semi", 12)              // +1 octave',
-    '  hydra_set_engine_param("mixer.osc1_vol", 100)       // auto-scaled, hits ~6300/8192',
-    '  hydra_set_engine_param("mixer.osc2_vol", 55)        // auto-scaled',
-    '  hydra_set_engine_param("filter1type", "LP Ladder 12")',
-    '  hydra_set_engine_param("filter1.cutoff", 60)        // auto-scaled to wire 3870 = display ~60',
-    '  hydra_set_engine_param("env1.attack", 0)            // instant attack',
-    '  hydra_set_engine_param("env1.decay", 127)           // ~max decay',
-    '  hydra_set_engine_param("env1.sustain", 127)         // ~max sustain',
-    '  hydra_set_engine_param("env1.release", 65)          // medium release',
-    '  hydra_set_engine_param("prefxtype", "Lo-Fi")',
-    '  hydra_set_engine_param("postfxtype", "Rotary")',
-    '',
-    'Multi-slot disambiguation (osc1/2/3, mutator1..4) is handled automatically —',
-    'osc2semi targets oscillator 2 even though osc1semi/osc2semi/osc3semi share an',
-    'NRPN address. No need to compute the slot byte yourself.',
-    '',
-    'IMPORTANT — DEVICE PRECONDITION: NRPN writes only respond when the device\'s',
-    'Param TX/RX setting is NRPN (System Setup → MIDI page 10). With Param TX/RX = CC,',
-    'the device receives the bytes but ignores them. If writes seem inert, that\'s',
-    'the first thing to check.',
-    '',
-    'No wire-ack is expected — consumer MIDI synths don\'t echo NRPN. Confirmation',
-    'is audible / observable on the device only.',
+    'No wire-ack — consumer MIDI synths don\'t echo NRPN. Confirmation is audible /',
+    'observable on the device only.',
   ].join('\n'),
   inputSchema: {
     name: z.string().describe(
@@ -433,36 +495,31 @@ server.registerTool('hydra_set_engine_param', {
 
 server.registerTool('hydra_set_engine_params', {
   description: [
-    'Use this tool to set MANY Hydrasynth Explorer synthesis parameters in ONE call.',
-    '**This is the preferred tool for any multi-knob change** (whole-patch builds,',
-    'multi-section tweaks, recipe-style requests). One tool call instead of N',
-    'individual hydra_set_engine_param calls — Claude Desktop traverses much faster,',
-    'and the server paces NRPN writes (≥2 ms between sequences per edisyn) so the',
-    'device doesn\'t drop messages.',
+    '**Preferred tool for any multi-parameter Hydrasynth patch change** (whole-patch',
+    'builds, recipe-style requests, multi-section tweaks). One tool call beats N',
+    'serial hydra_set_engine_param calls — much faster, and the server paces NRPN',
+    'writes (≥2 ms between sequences) so the device doesn\'t drop messages.',
+    '',
+    '**DON\'T pre-discover names. Just send the batch.** This tool already knows all',
+    '1175 engine parameters. The cheat-sheet below covers ~95% of patch building.',
+    'Skip hydra_list_params for normal use — both CC-style names ("mixer.osc1_vol",',
+    '"env1.attack") and canonical NRPN names ("mixerosc1vol", "env1attacksyncoff")',
+    'work here directly. Only fall back to hydra_list_params if a name genuinely',
+    'fails AND you can\'t guess it from the patterns below.',
     '',
     'Do not produce a written spec instead of calling this tool unless the user',
     'explicitly asks for a dry run.',
     '',
-    'Each entry in `params` is a {name, value} pair with the SAME semantics as',
-    'hydra_set_engine_param:',
-    '  - `name` accepts CC-catalog style ("mixer.osc1_vol", "filter1.cutoff",',
-    '    "env1.attack") OR edisyn canonical style ("mixerosc1vol", "filter1cutoff",',
-    '    "env1attacksyncoff"). Both resolve to the same NRPN.',
-    '  - `value` accepts numbers 0..127 (auto-scaled to 14-bit native range — hits',
-    '    full-scale on most engine params at 127) or 128..16383 (raw wire) or enum',
-    '    name strings for type-typed params (filter1type="Vowel", prefxtype="Lo-Fi",',
-    '    osc1type="Sine").',
-    '  - Multi-slot params (osc2semi, mutator3mode, etc.) auto-disambiguate by name.',
+    ENGINE_PARAM_CHEAT_SHEET,
     '',
-    'EXAMPLE — Tom Petty Breakdown organ patch in one call:',
+    'EXAMPLE — Tom Petty Breakdown organ patch in one batch:',
     '  hydra_set_engine_params({ params: [',
     '    { name: "osc1type", value: "Sine" },',
     '    { name: "osc2type", value: "Sine" },',
-    '    { name: "osc1semi", value: 0 },',
-    '    { name: "osc2semi", value: 12 },',
     '    { name: "filter1type", value: "LP Ladder 12" },',
     '    { name: "prefxtype", value: "Lo-Fi" },',
     '    { name: "postfxtype", value: "Rotary" },',
+    '    { name: "osc2semi", value: 12 },',
     '    { name: "mixer.osc1_vol", value: 100 },',
     '    { name: "mixer.osc2_vol", value: 55 },',
     '    { name: "filter1.cutoff", value: 60 },',
@@ -473,15 +530,13 @@ server.registerTool('hydra_set_engine_params', {
     '    { name: "env1.release", value: 65 },',
     '  ]})',
     '',
-    'ORDERING — per edisyn, structure the list so type-changing writes go first',
-    '(modes, types, LFO waveforms, BPM-sync flags, wavescan waves) followed by',
-    'continuous-value writes (cutoffs, envelopes, mixer, macros). The device needs',
-    'time to reconfigure routing before downstream values land. The tool does not',
-    'reorder for you.',
+    'ORDERING — per edisyn, put type-changing writes first (modes, types, LFO',
+    'waveforms, BPM-sync flags, wavescan waves) followed by continuous-value writes',
+    '(cutoffs, envelopes, mixer, macros). The device needs time to reconfigure',
+    'routing before downstream values land. The tool does NOT reorder for you.',
     '',
     'IMPORTANT — DEVICE PRECONDITION: Param TX/RX must be NRPN on System Setup →',
-    'MIDI page 10. With Param TX/RX = CC, every write in the batch is silently',
-    'ignored. If results look like nothing happened, check that setting first.',
+    'MIDI page 10. With Param TX/RX = CC, the entire batch is silently ignored.',
   ].join('\n'),
   inputSchema: {
     params: z.array(z.object({
@@ -600,10 +655,19 @@ server.registerTool('hydra_list_enum_values', {
 
 server.registerTool('hydra_list_params', {
   description: [
-    'Use this tool to enumerate the Hydrasynth Explorer\'s parameter catalog before',
-    'calling hydra_set_param. Returns id / module / parameter / CC / category for each',
-    'of the 117 charted parameters. Filter by module (e.g. "Filter 1", "ENV 1") to',
-    'narrow the response.',
+    '**Fallback discovery tool — do not call this routinely.** For patch building,',
+    'hydra_set_engine_param and hydra_set_engine_params already know every parameter',
+    'name (1175 NRPN params + 117 CC aliases) and accept both naming conventions',
+    '(dot-style "filter1.cutoff" and canonical "filter1cutoff"). Their tool',
+    'descriptions list the common names and naming patterns. Only call this tool if:',
+    '  - a write actually failed with an "unknown parameter" error, AND',
+    '  - the cheat-sheet in the engine-param tool descriptions doesn\'t cover it.',
+    '',
+    'Returns the manual-chart CC catalog only (117 entries). It does NOT enumerate',
+    'the full 1175 NRPN catalog — for that, see the engine-param tool descriptions',
+    'or hydra_list_enum_values for type/wave/FX selectors.',
+    '',
+    'Filter by module (e.g. "Filter 1", "ENV 1") to narrow the response.',
   ].join('\n'),
   inputSchema: {
     module: z.string().optional().describe('Optional module filter, e.g. "Filter 1", "Macros", "ENV 1", "ARP", "System". Case-insensitive substring match.'),
