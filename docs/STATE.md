@@ -5,8 +5,40 @@
 > hardware tasks (USB captures, round-trip tests, reference dumps) live
 > in **`docs/HARDWARE-TASKS.md`** — check that file alongside this one at
 > session start.
-> Last updated: **2026-04-28** (Session 35 — Hydrasynth pivot to
-> SysEx patch flow). **BK-037 partially shipped, remainder
+> Last updated: **2026-04-28** (Session 36 — BK-036 milestone 1
+> shipped: Hydrasynth SysEx envelope codec). **First of three
+> BK-036 milestones lands.** New module
+> `src/devices/hydrasynth-explorer/sysexEnvelope.ts` exposes
+> `wrapSysex(info)` / `unwrapSysex(msg)` against the documented
+> `F0 00 20 2B 00 6F  <base64 payload>  F7` envelope from
+> `references/SysexEncoding.txt`. Internal CRC-32 (reversed
+> 0xEDB88320) + base64 codec, validated against the spec's
+> worked example byte-exactly: info `[04 00 00 7F]` →
+> wrapped `F0 00 20 2B 00 6F 47 64 74 6A 6B 51 51 41 41 48 38
+> 3D F7` (the base64 ASCII "GdtjkQQAAH8="). 28 new goldens in
+> `verify-sysex-envelope.ts` — CRC sanity (empty, "123456789"
+> → 0xCBF43926, spec example), spec-exact wrap, ASCII payload
+> match, round-trip on every short protocol message
+> (handshake, header/footer, write request, patch request,
+> patch names request, chunk acks, patch saved ack), 132-byte
+> chunk-dump round-trip (chunk header + 128 data bytes from
+> the spec's "Sawpressive GD" example), plus error-path
+> coverage (bad start byte, bad end byte, wrong manufacturer
+> namespace, CRC corruption, truncated message). Wired into
+> `npm test` as `hydra:verify-sysex-envelope`. tsc clean,
+> full preflight green. Pure encoding module, no hardware
+> dependency — unblocks BK-036 milestone 2 (`patchEncoder.ts`
+> for the 2462-byte patch byte-map).
+>
+> **No NRPN regression.** Both paths will coexist: SysEx for
+> whole-patch atomic writes (apply, slot writes, `.hydra`
+> loads); NRPN for single-knob conversational tweaks. The
+> bipolar `displayMin`/`displayMax` semantics from BK-037
+> carry forward into the SysEx patch byte-map encoder when
+> milestone 2 lands.
+>
+> Pre-existing context — Session 35 — Hydrasynth pivot to
+> SysEx patch flow. **BK-037 partially shipped, remainder
 > superseded.** Bipolar auto-scale landed: registry now flags 483
 > bipolar entries (`displayMin`/`displayMax`) auto-detected by
 > gen-nrpn from the `displayed as [-X,Y]` notes pattern;
@@ -666,35 +698,53 @@ float32. One open question remains before the IR can cover full presets:
 
 ## The single next action
 
-**Most-likely next session: BK-036 — Hydrasynth SysEx patch
-flow. Start with the SysEx envelope module (~1 session).**
+**Most-likely next session: BK-036 milestone 2 — Hydrasynth
+patch byte-map encoder (~1 session, no hardware needed).**
 
-The Hydrasynth NRPN-prelude approach (`freshPatch: true` /
-`hydra_apply_init`) is fundamentally bleed-through-prone and
-just landed in a "silent on init" regression that founder chose
-to halt rather than chase further (see top-of-file Session 35
-entry for full context). SysEx sends a complete patch atomically
-— every parameter at a known value, no prelude, no whack-a-mole.
+Milestone 1 (the SysEx envelope codec) shipped this session
+with 28 goldens green — see Session 36 entry above. The
+envelope is pure encoding logic that takes any logical inner
+message (e.g. `[0x18, 0x00]` "header", `[0x04, 0x00, BANK,
+PATCH]` "patch request", `[0x16, 0x00, CHUNK, 0x16, …128
+bytes…]` "chunk dump") and emits the F0…F7 wire bytes with
+correct CRC-32 + base64. The next milestone uses it.
 
-**BK-036 sequencing (per `04-BACKLOG.md`):**
-1. **SysEx envelope module** (~1 session, no hardware needed).
-   New file `src/devices/hydrasynth-explorer/sysexEnvelope.ts`:
-   - `wrapSysex(payload: Uint8Array): number[]` — produces the
-     full F0…F7 message with `F0 00 20 2B 00 6F` header,
-     base64-encoded payload, 4-byte CRC-32, F7 footer.
-   - `unwrapSysex(msg: number[]): Uint8Array` — reverse.
-   - Goldens against edisyn's documented byte-traces in
-     `references/SysexEncoding.txt`.
-   - **Why first:** pure encoding logic; can be developed and
-     verified without touching the device. Unblocks step 2.
-2. **Patch byte-map encoder** (~1 session). `patchEncoder.ts`
-   with `encodePatch(params)` / `decodePatch(buf)` against the
-   2462-byte format documented in `references/SysexPatchFormat.txt`.
-3. **MCP tool surface** (~1 session, hardware verification).
-   `hydra_apply_patch`, `hydra_request_patch`,
-   `hydra_load_hydra_file`. Rewire `hydra_apply_init` to send a
-   SysEx default patch instead of NRPN prelude. INIT_PATCH file
-   retires.
+**Milestone 2: `src/devices/hydrasynth-explorer/patchEncoder.ts`**
+- `encodePatch(params: Map<canonicalName, number>): Uint8Array`
+  → 2462-byte patch buffer, every parameter at the offset
+  documented in `references/SysexPatchFormat.txt`. Hand-pick
+  the ~100-200 params that map cleanly between the canonical
+  NRPN names and the patch byte-map; everything else stays at
+  INIT defaults (a known-good default-patch buffer).
+- `decodePatch(buf: Uint8Array): Map<canonicalName, number>`
+  → reverse, for reading patches from device or `.hydra` files.
+- The 22 chunks are just `slice(0, 128)`, `slice(128, 256)`,
+  …, `slice(2688, 2790=2462+128*?)` — the patch buffer is
+  fixed-size, the last chunk is 102 bytes per the spec.
+- Goldens: re-encode the spec's "Sawpressive GD" patch from
+  the documented chunk traces and assert byte-equality, plus
+  round-trip a hand-built param map.
+- Bipolar carry-over: same display-vs-wire semantics from
+  BK-037 apply here. `filter1env1amount = 0` must encode to
+  the wire-center byte in the patch buffer, not 0.
+
+**After milestone 2: BK-036 milestone 3 — MCP tool surface
+and hardware verification (~1 session, hardware needed).**
+- `hydra_apply_patch({ params, slot? })` via SysEx.
+- `hydra_request_patch({ slot? })` — query device, parse
+  response, return param map.
+- `hydra_load_hydra_file({ path })` — read `.hydra` files,
+  extract `.patch` chunks, send via SysEx.
+- Rewire `hydra_apply_init` to send a known-good SysEx default
+  patch instead of the NRPN prelude. INIT_PATCH file retires.
+
+**Sequencing alternatives for next session.** If milestone 2
+feels too large, the alternative useful work without hardware:
+- (a) Mark milestone 1 as ✅ in `04-BACKLOG.md`'s BK-036
+  entry — already done this session, ready to verify.
+- (b) HW-037 Enhancer first-page knob screenshot (AM4 track)
+  is unaffected and can run in parallel — different device,
+  no contention.
 
 **What survives from BK-037 (do not touch):**
 - Bipolar `displayMin`/`displayMax` registry tags + bipolar branch

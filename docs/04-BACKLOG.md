@@ -2834,16 +2834,18 @@ Skip until explicit user demand materializes.
 
 - **Order of operations (estimated 2–3 focused sessions).**
 
-  1. **SysEx envelope module** (~1 session). New file
-     `src/devices/hydrasynth-explorer/sysexEnvelope.ts`:
-     - `wrapSysex(payload: Uint8Array): number[]` — produces the
-       full F0…F7 message: header, base64 payload, CRC-32, footer.
-     - `unwrapSysex(msg: number[]): Uint8Array` — reverse.
-     - CRC-32 over the data block (one-liner with bitwise math
-       or import from `node-crc`).
-     - Base64 encode/decode (built-in `Buffer`).
-     - Test harness producing byte-exact output against edisyn's
-       documented examples.
+  1. **SysEx envelope module** ✅ shipped 2026-04-28 (Session 36).
+     `src/devices/hydrasynth-explorer/sysexEnvelope.ts` exposes
+     `wrapSysex(info)` / `unwrapSysex(msg)` with internal CRC-32
+     (reversed 0xEDB88320, same as zlib/IEEE 802.3) and base64
+     codec via `node:buffer`. Validated against the spec's worked
+     example byte-exactly: info `[04 00 00 7F]` → wrapped
+     `F0 00 20 2B 00 6F 47 64 74 6A 6B 51 51 41 41 48 38 3D F7`.
+     28 goldens in `scripts/hydrasynth/verify-sysex-envelope.ts`
+     (CRC sanity, spec-exact wrap, ASCII payload match, round-trip
+     on every short protocol message + 132-byte chunk dump, error-
+     path coverage). Wired into `npm test` as
+     `hydra:verify-sysex-envelope`. tsc clean, full preflight green.
 
   2. **Patch byte-map encoder** (~1 session). New file
      `src/devices/hydrasynth-explorer/patchEncoder.ts`:

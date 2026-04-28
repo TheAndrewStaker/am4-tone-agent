@@ -6,6 +6,89 @@ file is the chronological trail that reference is built from.
 
 ---
 
+## 2026-04-28 — Session 36 — Hydrasynth BK-036 milestone 1: SysEx envelope codec
+
+First milestone of BK-036 (Hydrasynth SysEx patch flow) ships.
+Pure encoding work, no hardware needed.
+
+**New file: `src/devices/hydrasynth-explorer/sysexEnvelope.ts`.**
+Two public functions:
+
+- `wrapSysex(info: Uint8Array | ArrayLike<number>): number[]`
+  takes a logical inner message (e.g. `[0x18, 0x00]` for "header",
+  `[0x04, 0x00, BANK, PATCH]` for "patch request", a 132-byte
+  `[0x16, 0x00, CHUNK, 0x16, …128 data bytes…]` for "chunk dump")
+  and returns the full F0…F7 SysEx wire bytes — header
+  `F0 00 20 2B 00 6F`, base64-encoded payload (`[checksum:4]
+  [info:N]`), and `F7` footer.
+- `unwrapSysex(msg: ArrayLike<number>): Uint8Array` reverses it,
+  validating envelope start/end/header bytes, base64 ASCII range,
+  and the four-byte CRC-32 checksum prefix. Throws descriptive
+  errors on every malformed input.
+
+**Checksum implementation.** Standard CRC-32 (reversed 0xEDB88320,
+init 0xFFFFFFFF, xorout 0xFFFFFFFF — same as zlib / IEEE 802.3).
+Per the spec: take CRC = AABBCCDD, write payload checksum bytes as
+`(0xFF-DD) (0xFF-CC) (0xFF-BB) (0xFF-AA)` (reversed byte order
+then each XOR'd with 0xFF). Verified against the spec's worked
+example: `crc32([0x04, 0x00, 0x00, 0x7F]) = 0x6E9C24E6` →
+checksum `0x19 0xDB 0x63 0x91`, base64 `"GdtjkQQAAH8="`.
+
+**Goldens: `scripts/hydrasynth/verify-sysex-envelope.ts` (28
+cases).**
+
+- CRC sanity (3 cases): empty bytes → 0, "123456789" ASCII →
+  0xCBF43926 (the canonical CRC-32 check value), spec example →
+  0x6E9C24E6.
+- Checksum byte derivation (1 case): spec example bytes
+  `[04 00 00 7F]` → `19 DB 63 91`.
+- Spec-exact wrap (3 cases): byte-for-byte match against the
+  spec's `F0 00 20 2B 00 6F 47 64 74 6A 6B 51 51 41 41 48 38 3D
+  F7`; round-trip back to `[04 00 00 7F]`; ASCII payload literally
+  `"GdtjkQQAAH8="`.
+- Round-trip on every short protocol message in the spec (15
+  cases): handshake `[00 00]`, handshake response prefix
+  `[01 00]`, version request `[28 00]`, header/footer/responses
+  `[18 00]/[19 00]/[1A 00]/[1B 00]`, write request/response
+  `[14 00]/[15 00]`, patch requests for two banks, patch names
+  request, two chunk acks (chunks 0 and 21), patch saved ack.
+- 132-byte chunk-dump round-trip (1 case): chunk header + 128
+  data bytes verbatim from the spec's "Sawpressive GD" example —
+  realistic byte distribution at the actual chunk size we'll send
+  during patch writes.
+- Error-path coverage (5 cases): rejects message without F0
+  start, without F7 end, with wrong manufacturer namespace
+  (Roland 0x41), with corrupted base64 byte (CRC catches it),
+  and with a too-short envelope.
+
+**Wired into `npm test`** as `hydra:verify-sysex-envelope`. tsc
+`--noEmit` clean; full `npm run preflight` green (including all
+prior AM4 chains: 110/110 verify-msg, 90/90 verify-cache-params,
+61/61 hydra encoding, etc.).
+
+**What's intentionally NOT here yet.** No 2462-byte patch buffer
+construction (that's milestone 2 — `patchEncoder.ts`). No MCP
+tool surface (milestone 3 — `hydra_apply_patch` / `hydra_request_
+patch` / `hydra_load_hydra_file`). No hardware verification — the
+envelope is pure encoding so it can be locked in goldens; first
+hardware traffic happens after milestone 2 lands.
+
+**Coexistence with NRPN.** The user explicitly asked to confirm
+NRPN survives — yes, both stay. SysEx is the batch primitive
+(whole-patch atomic writes, slot writes, `.hydra` loading). NRPN
+is the conversational primitive (single-knob tweaks like "make it
+brighter", `hydra_set_engine_param[s]` calls). Bipolar
+`displayMin`/`displayMax` semantics from BK-037 carry forward
+into the SysEx patch byte-map encoder when milestone 2 lands.
+
+**Files touched.** New: `src/devices/hydrasynth-explorer/
+sysexEnvelope.ts`, `scripts/hydrasynth/verify-sysex-envelope.ts`.
+Modified: `package.json` (added `hydra:verify-sysex-envelope`
+script + entry in `test` chain). `docs/STATE.md`,
+`docs/04-BACKLOG.md` (BK-036 milestone 1 marked ✅).
+
+---
+
 ## 2026-04-26 — Session 34 — HW-035 + HW-036 Gate / In-Gate decode (10 new params; In-Gate threshold / release curves resolved)
 
 Founder captured 2 pcapngs + 2 screenshots — a Modern Gate slot-

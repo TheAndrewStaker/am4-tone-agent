@@ -27,10 +27,11 @@
     "hydra:gen-nrpn": "tsx scripts/hydrasynth/gen-nrpn.ts",
     "hydra:gen-enums": "tsx scripts/hydrasynth/gen-enums.ts",
     "hydra:verify-encoding": "tsx scripts/hydrasynth/verify-encoding.ts",
+    "hydra:verify-sysex-envelope": "tsx scripts/hydrasynth/verify-sysex-envelope.ts",
     "hydra:server": "tsx src/devices/hydrasynth-explorer/server.ts",
     "server": "tsx src/server/index.ts",
     "build": "tsc",
-    "test": "npm run verify-pack && npm run verify-msg && npm run verify-transpile && npm run verify-enum-lookup && npm run verify-echo && npm run verify-cache-params && npm run hydra:verify-encoding && npm run smoke-server",
+    "test": "npm run verify-pack && npm run verify-msg && npm run verify-transpile && npm run verify-enum-lookup && npm run verify-echo && npm run verify-cache-params && npm run hydra:verify-encoding && npm run hydra:verify-sysex-envelope && npm run smoke-server",
     "test:jest": "jest --testPathIgnorePatterns=integration",
     "test:jest:all": "jest",
     "preflight": "tsc --noEmit && npm test"
