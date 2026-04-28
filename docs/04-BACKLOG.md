@@ -2705,3 +2705,92 @@ Skip until explicit user demand materializes.
   the hardware display. Could be queued as a future research
   item but doesn't block release — AM4-Edit is the
   authoritative readback for these four params.
+
+### BK-035 AM4 tool-description UX polish — research first, then maybe ship
+
+- **For:** evaluate whether porting the Hydrasynth-explorer session's
+  tool-description improvements (Session 2026-04-27 / 28) helps the AM4
+  workflow. Three candidate fixes; **the third is risky and explicitly
+  requires evaluation before shipping.**
+
+- **Context — what we shipped on hydrasynth-explorer.** Three changes
+  collapsed multi-minute Tom-Petty-recipe runs to single-batch
+  end-to-end:
+  1. Embedded a ~50-name cheat-sheet directly in the engine-param
+     tool descriptions, with explicit "DON'T pre-discover names"
+     guidance.
+  2. Added a fuzzy-ranked search across canonical names + aliases +
+     notes; surfaced as smart suggestions in error responses AND as
+     a query-aware fallback `hydra_param_catalog` tool.
+  3. **Demoted / replaced the legacy `hydra_list_params` tool**
+     (117 CCs only, no NRPN coverage, structurally redundant).
+
+- **Why it might apply to AM4.** The AM4 server has 22 tools; the
+  same defensive `list_params` calls before patch builds happen
+  there too. AM4 already has `resolveEnumValue` (so
+  `amp.type="Brit Hi 1"` works) and Unit-typed display-to-wire
+  conversion (no auto-scale needed), so two of the four
+  Hydrasynth-side fixes don't translate. The remaining three —
+  cheat-sheet, smart errors, demote/replace `list_params` —
+  conceptually fit.
+
+- **The risk on AM4 specifically — flagged by founder
+  2026-04-28.** Demoting `list_params` could regress AM4 tone
+  matching. AM4's KNOWN_PARAMS catalog is 132 entries, smaller
+  than Hydrasynth's 1175, and gets used in more diverse / less
+  predictable patch-design conversations than Hydrasynth's 50ish
+  common knobs. If a cheat-sheet doesn't cover the param Claude
+  reaches for, AND the fuzzy error suggestions miss, AND
+  list_params is demoted to "fallback only" — Claude might
+  hallucinate plausible-sounding but wrong names, or just give up.
+  On Hydrasynth this risk is bounded by the 95% cheat-sheet
+  coverage; on AM4 the long-tail patch-design vocabulary might
+  reach further into the catalog.
+
+- **Required before any code change — research + evaluation.**
+  Don't just port the changes blindly. Specifically:
+  1. **Audit existing AM4 tool descriptions** in
+     `src/server/index.ts` to see what's already there. The AM4
+     server is more mature than the Hydrasynth side; some of
+     these fixes may already exist in some form.
+  2. **Sample real AM4 patch-design conversations** (Tom Petty,
+     Neil Young, Allman Brothers, etc. — pick 4-5 archetypal
+     prompts) and watch how Claude builds them on the CURRENT
+     description set. How many `list_params` calls does it make?
+     Is it picking right names from intuition or verifying first?
+  3. **Hypothesis test**: prepare a branch with the cheat-sheet
+     embedded but `list_params` NOT yet demoted. Run the same
+     conversations. Did the cheat-sheet alone cut the
+     `list_params` calls? If yes → cheat-sheet is the load-bearing
+     fix and list-tool demotion may be overkill.
+  4. **Then decide on demotion**. If list_params is still being
+     called pathologically AFTER the cheat-sheet, evaluate whether
+     the catalog tool + smart errors actually cover the calls
+     it's making. If not — keep `list_params` in current shape;
+     just improve descriptions and error suggestions.
+
+- **Acceptance criteria for shipping (any subset):**
+  - Cheat-sheet: shipped if it measurably reduces `list_params`
+    calls in 4 of 5 sample conversations without increasing
+    "unknown parameter" errors.
+  - Smart errors: shipped if fuzzy match resolves the same
+    misses that current dumb-substring catches, plus more.
+  - List_params demotion / replacement: shipped only if (a)
+    cheat-sheet alone doesn't kill the defensive calls AND
+    (b) the proposed catalog/error replacement covers every
+    real-world call observed in the audit. Default to
+    keeping it.
+
+- **Pragmatic order if the research says yes:** ship the
+  cheat-sheet + smart errors as separate commits (low risk,
+  reversible). Hold the list_params demotion separately;
+  ship only with explicit evidence it's net-positive.
+
+- **Estimate:** research + sampling ~1 hour. If shipping all
+  three: another ~2 hours. If shipping cheat-sheet + smart
+  errors only: ~45 min.
+
+- **Priority:** medium — UX polish, not protocol/release-gate
+  work. Queue for after BK-032 first-page coverage closes (the
+  remaining HW-037 enhancer screenshot is the only thing left
+  there).
