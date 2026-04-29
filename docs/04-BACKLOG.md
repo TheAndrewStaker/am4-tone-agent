@@ -3231,13 +3231,75 @@ have no real-hardware lineage at all.
   recipe map. Heavier infrastructure, only worth it if the table
   grows beyond ~15 entries.
 
-**Priority:** P2. Iconic-tone authoring already works once
-`PATCH_OFFSETS` covers the surface (BK-036.5 follow-up); this
-accelerates it but isn't a blocker. Defer until Hydrasynth resumes
-post-AM4-release.
+**Priority:** P1 (bumped from P2 in Session 39). Field-tested in the
+Techno Syndrome session 2026-04-28: even with the SysEx-from-INIT path
+working and PATCH_OFFSETS covering the surface, the model cannot
+reliably architect a "rave stab" / "OB-Xa lead" / etc. from first
+principles. The recipe Claude produced had filter cutoff 30 + sustain 8
+which mathematically guarantees a 1ms blip — exactly what the user
+reported. The cheat-sheet teaches NRPN names but not envelope shapes
+or signal-flow archetypes. A canned recipe library closes the gap and
+moves iconic-tone success from "model-dependent guessing" to "table
+lookup + one parameter sweep." Resume this earlier in Hydrasynth's
+post-AM4-release queue, before more iconic-tone work.
 
 **Estimated effort:** 2-3 hours to seed Option C with 10 well-known
 tone recipes drawn from `ICONIC-TONES.md` + community refs.
 
 **Cross-refs:** `lookup_lineage` (AM4 vendor-scraped lineage tool —
 the conceptual analogue, but Fractal-specific data source).
+
+
+### BK-040 Hydrasynth FX section enable bytes — decode + map in PATCH_OFFSETS
+
+**The bug.** Field-tested in the Techno Syndrome session 2026-04-28:
+`hydra_apply_patch` dumped a patch with `delaytype="Basic Stereo"`,
+`delaywet=17`, `reverbtype="Lush Hall"`, `reverbwet=16`, and the
+follow-up NRPN batch landed those values on the device display — but
+no FX were audible. Likely cause: the patch buffer has separate
+"section enabled" / "section bypass" bits for Pre-FX, Delay, Reverb,
+Post-FX (independent of `prefxtype/delaytype/reverbtype` and the
+hardware front-panel buttons). When `hydra_apply_patch` dumps the
+INIT base, those bits get reset to INIT defaults (likely OFF), gating
+the entire FX chain regardless of type/wet values.
+
+Confirm-or-deny step before coding: have the founder check whether
+the front-panel **PRE / DLY / RVB** buttons are illuminated after a
+fresh `hydra_apply_patch` that includes FX. If those buttons are
+unlit on a patch where wet > 0%, the device-side FX bypass IS the
+gate. Pressing them re-enables the chain. The patch-buffer bytes
+controlling that hardware-button state are then the decode target.
+
+**The fix.** Two-step decode work:
+
+1. Read `docs/devices/hydrasynth-explorer/references/SysexPatchFormat.txt`
+   and `ASMHydrasynth.java` for any byte labelled like
+   `prefxenable` / `prefxonoff` / `prefxbypass` / `delayenable` /
+   `reverbenable` / `postfxenable`. The spec file has many bytes
+   without semantic labels in the FX region (352..420 area for
+   prefx/delay/reverb/postfx); some likely encode section enable.
+2. Add the decoded bytes to `PATCH_OFFSETS` (as `u8`, since
+   enable/bypass is a single bit). Update `hydra_apply_patch` so
+   FX recipes set the enable byte alongside type+wet.
+
+If the spec doesn't document the bytes, capture: have the founder
+toggle the front-panel FX button(s), dump the patch via
+`hydra_request_patch` (when that lands), diff the bytes against an
+unmodified dump. The differing bytes ARE the section-enable bits.
+
+**Workaround until decoded.** `hydra_apply_patch` tool description
+should tell Claude to remind the user to verify front-panel
+PRE/DLY/RVB buttons are lit when applying a patch that uses FX — and
+that the apply_patch path can't toggle hardware-level enables until
+this decode lands. NRPN follow-up writes do NOT include these bits
+either — they only set type/wet/params, not the section enable bit.
+
+**Priority:** P1. Blocks every iconic tone that needs FX (most of
+them). Cheap to ship if a few candidate bytes diff cleanly between
+"FX on" and "FX off" device states.
+
+**Estimated effort:** 30 min if the spec already labels the bytes;
+2-3 hours including capture + diff if we have to derive empirically.
+
+**Cross-refs:** BK-036.5 (PATCH_OFFSETS expansion); HW-041
+real-tone test methodology.
