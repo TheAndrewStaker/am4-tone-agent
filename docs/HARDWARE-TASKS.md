@@ -206,6 +206,70 @@ overrides), but blocks `hydra_apply_patch` until corrected.
   but milestone 3 can ship without it; HW-038 is the hard gate.
 - **Estimated founder time:** ~3 minutes.
 
+### HW-041 — Real-tone retest with display-first API (closes BK-036.5 task #10) 🔜 Pending
+
+**Why:** Session 39 shipped the patch-buffer `/8` scale fix and rewired
+`hydra_apply_patch` to display-first semantics via `resolveNrpnValue`.
+Session 38's filter-sweep test sent wire values; this retest sends
+display values and confirms they show up on the device display
+matching what was sent. Closes the open question from Session 38's
+post-mortem: "did sending 3000 → display max because of /8, or some
+other bug?"
+
+- **Setup:** Hydrasynth Explorer powered, Claude Desktop with
+  `mcp-midi-tools` connector attached, current `hydrasynth-explorer`
+  branch loaded. **Hard precondition:** device-side **MIDI Page 11
+  knob 4 (Pgm Chg RX) = On**. NRPN/CC tools work either way; the
+  apply_patch dance fires PC and silently drops if Off.
+- **Steps:**
+  1. From Claude Desktop:
+     - `hydra_navigate_to({slot: "B001"})` — display should move to B001.
+     - `hydra_apply_patch({slot: "B001", params: [
+         {name: "filter1cutoff", value: 64},      // expect 64.0 on display
+         {name: "filter1resonance", value: 30},   // expect 30.0
+         {name: "filter1env1amount", value: -25}  // expect -25.0 (bipolar)
+       ]})`
+  2. On the device, navigate to the matching parameter pages and
+     read each value on the display.
+  3. Press a key — confirm audible patch (filter sweep with env1
+     pulling cutoff down).
+- **Signal:**
+  - **Pass:** all three display readings match within ±0.5
+    (filter1cutoff = 64.0, filter1resonance = 30.0, filter1env1amount
+    = -25.0). Audible. Reply "HW-041 PASS" with the three readings.
+  - **Fail:** any reading off — capture readings + the tool response
+    block (which lists the resolved wire values for diagnostic). Reply
+    "HW-041 FAIL" with what diverged. The encoder, resolveNrpnValue,
+    or the curated PATCH_OFFSETS table has a residual bug worth
+    chasing before iconic-tone work resumes.
+- **Estimated founder time:** ~5 minutes.
+- **Priority:** P0 — gates iconic-tone smoke test (HW-042 below) and
+  the main-merge plan.
+
+### HW-042 — Iconic-tone smoke test (one full Hydrasynth recipe via SysEx) 🔜 Pending after HW-041 PASS
+
+**Why:** End-to-end proof that an iconic-tone recipe (~6-10 params on
+top of INIT) lands audibly with display-correct readings. This is the
+deliverable the founder asked for in Session 39: "successful patch
+conversation using iconic tones before moving on to AM4."
+
+- **Setup:** Same as HW-041; HW-041 must be PASS.
+- **Steps:**
+  1. Choose one iconic recipe from
+     `docs/devices/hydrasynth-explorer/ICONIC-TONES.md` (or describe
+     a target tone in chat — Claude composes the param map from the
+     current display-first surface).
+  2. `hydra_apply_patch({slot: "B001", params: [...recipe...]})`.
+  3. Spot-check 3-4 display readings against what the response says
+     was sent. Press a key.
+- **Signal:**
+  - **Pass:** patch is audibly the target tone, display readings
+    match. Reply "HW-042 PASS — <recipe name>".
+  - **Fail:** silent / wrong tone / display divergence — capture
+    response block + readings.
+- **Priority:** P0 — closes the "iconic tone via SysEx" line and
+  unblocks main-merge + AM4 priority work.
+
 ### HW-040 — Hardware verification of BK-036 milestone 3 once it lands ✅ test 1 PASSED 2026-04-28; tests 2-4 pending
 
 **✅ 2026-04-28 (Session 38) — TEST 1 PASSED** after a long debug arc.

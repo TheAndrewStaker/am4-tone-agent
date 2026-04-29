@@ -127,23 +127,34 @@ check('PATCH_OFFSETS: every offset within buffer bounds', () => {
 // Low-level encoding kinds.
 // ---------------------------------------------------------------------------
 
-// u16le — used by all 14-bit linear params.
-check('u16le: filter1cutoff value=4096 → bytes 310,311 = 0x00,0x10', () => {
+// u16le — used by all 14-bit linear params. Values are NRPN WIRE
+// (0..8192 typical, 0..16383 for full 14-bit). Encoder writes wire/8 to
+// the bytes per BK-036.5 — confirmed against INIT_PATCH_BUFFER bytes
+// (Session 39): every u16le param in the factory INIT lands at
+// `wire/8` of its sensible default.
+check('u16le: filter1cutoff wire=4096 (display 64.0) → bytes 310,311 = 0x00,0x02 (= patch 512)', () => {
   const buf = new Uint8Array(PATCH_BUFFER_SIZE);
   writePatchValue(buf, buildSpec('filter1cutoff'), 4096);
-  if (buf[310] !== 0x00 || buf[311] !== 0x10) {
+  if (buf[310] !== 0x00 || buf[311] !== 0x02) {
     return `got [${buf[310].toString(16)}, ${buf[311].toString(16)}]`;
   }
   return readPatchValue(buf, buildSpec('filter1cutoff')) === 4096
     ? true : `read-back mismatch`;
 });
 
-check('u16le: filter1cutoff max value=8192 round-trips', () => {
+check('u16le: filter1cutoff max wire=8192 → bytes 0x00,0x04 (= patch 1024, INIT default)', () => {
   const buf = new Uint8Array(PATCH_BUFFER_SIZE);
   writePatchValue(buf, buildSpec('filter1cutoff'), 8192);
   const back = readPatchValue(buf, buildSpec('filter1cutoff'));
-  return back === 8192 && buf[310] === 0x00 && buf[311] === 0x20
+  return back === 8192 && buf[310] === 0x00 && buf[311] === 0x04
     ? true : `back=${back} bytes=${buf[310].toString(16)},${buf[311].toString(16)}`;
+});
+
+check('u16le: filter1cutoff wire=0 → bytes 0x00,0x00 (= patch 0)', () => {
+  const buf = new Uint8Array(PATCH_BUFFER_SIZE);
+  writePatchValue(buf, buildSpec('filter1cutoff'), 0);
+  return buf[310] === 0x00 && buf[311] === 0x00 && readPatchValue(buf, buildSpec('filter1cutoff')) === 0
+    ? true : `bytes=[${buf[310]},${buf[311]}]`;
 });
 
 check('u16le: rejects negative values', () => {
@@ -155,6 +166,16 @@ check('u16le: rejects negative values', () => {
     return e instanceof Error && e.message.includes('out of range')
       ? true : `wrong error: ${e instanceof Error ? e.message : e}`;
   }
+});
+
+check('u16le: non-multiple-of-8 wire value rounds to nearest (spec note: "increments of 8")', () => {
+  const buf = new Uint8Array(PATCH_BUFFER_SIZE);
+  // Wire 2500 → /8 = 312.5 → rounds to 313. Read back: 313*8 = 2504.
+  // The 0.5 ULP loss is unavoidable — the patch buffer literally can't
+  // represent finer granularity. Confirms rounding (not truncation).
+  writePatchValue(buf, buildSpec('filter1resonance'), 2500);
+  const back = readPatchValue(buf, buildSpec('filter1resonance'));
+  return back === 2504 ? true : `back=${back}`;
 });
 
 // s8 — single signed byte with sign-extension.
@@ -241,30 +262,73 @@ check('filter1keytrack mapped to byte 322 (low)/323 (high) per spec line 439', (
     ? true : `got byte=${s.byte} enc=${s.enc}`;
 });
 
-check('bipolar: filter1env1amount wire 4096 (display 0) → bytes 0x00, 0x10 at 316/317', () => {
+check('bipolar: filter1env1amount wire 4096 (display 0) → bytes 0x00, 0x02 at 316/317 (patch byte 512 = spec bipolar center)', () => {
   const buf = new Uint8Array(PATCH_BUFFER_SIZE);
   writePatchValue(buf, buildSpec('filter1env1amount'), 4096);
-  return buf[316] === 0x00 && buf[317] === 0x10
+  return buf[316] === 0x00 && buf[317] === 0x02
     ? true : `got [${buf[316].toString(16)}, ${buf[317].toString(16)}]`;
 });
 
-check('bipolar: filter1keytrack wire 4096 (display 0%) → bytes 0x00, 0x10 at 322/323', () => {
+check('bipolar: filter1keytrack wire 4096 (display 0%) → bytes 0x00, 0x02 at 322/323', () => {
   const buf = new Uint8Array(PATCH_BUFFER_SIZE);
   writePatchValue(buf, buildSpec('filter1keytrack'), 4096);
-  return buf[322] === 0x00 && buf[323] === 0x10
+  return buf[322] === 0x00 && buf[323] === 0x02
     ? true : `got [${buf[322].toString(16)}, ${buf[323].toString(16)}]`;
 });
 
 // Lock the original Van Halen "Jump" silence regression: wire 768
-// = display -52 (the bug case from BK-037). Encoder must round-trip.
-check('regression: filter1env1amount wire 768 (display -52) bytes round-trip', () => {
+// = display -52 (the bug case from BK-037). Encoder must round-trip
+// the WIRE value (encoder applies /8 internally).
+check('regression: filter1env1amount wire 768 (display -52) round-trips through wire-in encoder', () => {
   const buf = new Uint8Array(PATCH_BUFFER_SIZE);
   writePatchValue(buf, buildSpec('filter1env1amount'), 768);
-  if (buf[316] !== 0x00 || buf[317] !== 0x03) {
+  // 768 / 8 = 96 → bytes 0x60, 0x00
+  if (buf[316] !== 0x60 || buf[317] !== 0x00) {
     return `got [${buf[316].toString(16)}, ${buf[317].toString(16)}]`;
   }
   return readPatchValue(buf, buildSpec('filter1env1amount')) === 768
     ? true : 'read-back mismatch';
+});
+
+// BK-036.5 hypothesis confirmation: factory INIT bytes for the curated
+// filter/amp/mixer u16le params decode to the sensible display defaults
+// when read through the wire-in decoder. This locks the universal /8
+// rule against the bundled INIT_PATCH_BUFFER — if a future encoder
+// regression breaks scaling, this is the canary.
+check('INIT_PATCH_BUFFER: filter1cutoff decodes to wire 8192 (display 128.0 max)', () => {
+  const init = defaultPatchBuffer();
+  const wire = readPatchValue(init, buildSpec('filter1cutoff'));
+  return wire === 8192 ? true : `got wire=${wire}`;
+});
+
+check('INIT_PATCH_BUFFER: filter1env1amount decodes to wire 4096 (bipolar display 0)', () => {
+  const init = defaultPatchBuffer();
+  const wire = readPatchValue(init, buildSpec('filter1env1amount'));
+  return wire === 4096 ? true : `got wire=${wire}`;
+});
+
+check('INIT_PATCH_BUFFER: filter1keytrack decodes to wire 6144 (display +100%)', () => {
+  const init = defaultPatchBuffer();
+  const wire = readPatchValue(init, buildSpec('filter1keytrack'));
+  return wire === 6144 ? true : `got wire=${wire}`;
+});
+
+check('INIT_PATCH_BUFFER: amplevel decodes to wire 4096 (display 64.0 mid)', () => {
+  const init = defaultPatchBuffer();
+  const wire = readPatchValue(init, buildSpec('amplevel'));
+  return wire === 4096 ? true : `got wire=${wire}`;
+});
+
+check('INIT_PATCH_BUFFER: mixerosc1vol decodes to wire 8192 (display 128.0 full)', () => {
+  const init = defaultPatchBuffer();
+  const wire = readPatchValue(init, buildSpec('mixerosc1vol'));
+  return wire === 8192 ? true : `got wire=${wire}`;
+});
+
+check('INIT_PATCH_BUFFER: env1sustain decodes to wire 8192 (display 128.0 full sustain)', () => {
+  const init = defaultPatchBuffer();
+  const wire = readPatchValue(init, buildSpec('env1sustain'));
+  return wire === 8192 ? true : `got wire=${wire}`;
 });
 
 // ---------------------------------------------------------------------------
@@ -273,17 +337,17 @@ check('regression: filter1env1amount wire 768 (display -52) bytes round-trip', (
 
 check('encodePatch: applies overrides on default buffer; unspecified params stay default', () => {
   const overrides = new Map<string, number>([
-    ['filter1cutoff', 4096],
-    ['filter1resonance', 1024],
-    ['amplevel', 8192],
+    ['filter1cutoff', 4096],     // wire (display 64.0)
+    ['filter1resonance', 1024],  // wire (display 16.0)
+    ['amplevel', 8192],          // wire (display 128.0 max)
   ]);
   const buf = encodePatch(overrides);
   if (readPatchValue(buf, buildSpec('filter1cutoff')) !== 4096) return 'cutoff';
   if (readPatchValue(buf, buildSpec('filter1resonance')) !== 1024) return 'resonance';
   if (readPatchValue(buf, buildSpec('amplevel')) !== 8192) return 'amplevel';
   // Unspecified bipolar param stays at the default value from the factory
-  // INIT (filter1env1amount = 512 in the bundled INIT_PATCH_BUFFER).
-  if (readPatchValue(buf, buildSpec('filter1env1amount')) !== 512) return 'env1 amount drifted';
+  // INIT (filter1env1amount = 512 patch byte in INIT_PATCH_BUFFER ⇒ wire 4096).
+  if (readPatchValue(buf, buildSpec('filter1env1amount')) !== 4096) return 'env1 amount drifted from INIT';
   // Magic bytes preserved from default.
   if (buf[1766] !== 69 || buf[1767] !== 84 || buf[1768] !== 67 || buf[1769] !== 68) {
     return 'magic bytes corrupted by encodePatch';
@@ -330,18 +394,24 @@ check('decodePatch: returns map containing every PATCH_OFFSETS name', () => {
 });
 
 check('round-trip: encode → decode → encode is byte-stable for a 12-param override', () => {
+  // Wire values for u16le must be multiples of 8 to round-trip exactly
+  // (the patch buffer literally can't represent finer granularity per
+  // the spec note "[0,8192] seemingly only output in increments of 8").
+  // Display authors don't see this — they pass display values which the
+  // tool layer routes through resolveNrpnValue, which always produces
+  // multiples of 8 wire from clean integer display inputs.
   const overrides = new Map<string, number>([
     ['osc1mode', 0],
     ['osc1type', 5],
     ['osc1semi', -12],
     ['osc1cent', -25],
     ['filter1type', 10],
-    ['filter1cutoff', 6000],
-    ['filter1resonance', 2500],
-    ['filter1env1amount', 4864],   // bipolar +12
-    ['filter1keytrack', 6144],     // bipolar +100%
-    ['amplevel', 7000],
-    ['env1sustain', 8192],
+    ['filter1cutoff', 6000],       // wire (display 93.75) — multiple of 8
+    ['filter1resonance', 2496],    // wire (display 39.0) — multiple of 8
+    ['filter1env1amount', 4864],   // wire bipolar +12 (display)
+    ['filter1keytrack', 6144],     // wire bipolar +100%
+    ['amplevel', 7000],            // wire — multiple of 8
+    ['env1sustain', 8192],         // wire max
     ['env1atkcurve', -50],         // s8 negative
   ]);
   const buf1 = encodePatch(overrides);
@@ -484,10 +554,10 @@ check('splitIntoChunks then concatChunks: byte-exact round-trip on default buffe
 
 check('splitIntoChunks then concatChunks: byte-exact round-trip on a populated buffer', () => {
   const buf = encodePatch(new Map<string, number>([
-    ['filter1cutoff', 6000],
-    ['filter1env1amount', 5500],
+    ['filter1cutoff', 6000],        // wire — multiple of 8
+    ['filter1env1amount', 5504],    // wire — multiple of 8
     ['osc1semi', -7],
-    ['amplevel', 7000],
+    ['amplevel', 7000],             // wire — multiple of 8
   ]));
   writePatchName(buf, 'TestPatch01');
   const chunks = splitIntoChunks(buf);

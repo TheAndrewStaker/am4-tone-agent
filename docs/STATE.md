@@ -6,53 +6,82 @@
 > in **`docs/HARDWARE-TASKS.md`** — check that file alongside this one at
 > session start.
 >
-> **✅ Session 38 wrap — SysEx confirmed working on Hydrasynth.**
-> HW-040 test 1 passed after flipping device-side `Pgm Chg RX = On`.
-> Session 37+38 committed as `ec44521` on `hydrasynth-explorer`.
-> `hydra_apply_patch` shipped as milestone-3 prototype (uncommitted
-> on disk pending real-tone test verdict).
+> **✅ Session 39 wrap — BK-036.5 patch-buffer scale fix shipped, display-first API locked.**
+> Verified universal `/8` rule against `INIT_PATCH_BUFFER` bytes:
+> filter1cutoff = patch 1024 ⇒ wire 8192 ⇒ display 128.0 (max);
+> filter1env1amount = patch 512 ⇒ wire 4096 ⇒ bipolar display 0;
+> amplevel = patch 512 ⇒ wire 4096 ⇒ display 64.0 (mid);
+> mixerosc1vol = patch 1024 ⇒ wire 8192 ⇒ display 128 (full);
+> env1sustain = patch 1024 ⇒ wire 8192. Every u16le param in the
+> factory INIT lands at `wire/8` of its sensible default — universal
+> rule confirmed. **Encoder fixed:** `writePatchValue`/`readPatchValue`
+> now apply `/8` for `u16le` only (s16le/u8/s8 unchanged); contract is
+> "wire-in/wire-out" matching `set_param`. **Tool surface upgraded:**
+> `hydra_apply_patch` now routes every `{name, value}` through
+> `resolveNrpnValue` so callers pass display values or enum strings —
+> the same semantics as `hydra_set_param`. Iconic-tone authoring is now
+> "filter1cutoff = 64", "filter1env1amount = -25", "osc1type = Sawtooth".
+> Wire numbers no longer appear in any tool surface.
 >
-> **🚨 Next-session pickup checklist (Session 39 onward):**
+> **Project-wide convention documented.** Display-first is now the
+> rule for AM4 and every future instrument:
+> - `docs/DECISIONS.md` 2026-04-28 entry — why and rejected alternatives.
+> - `CLAUDE.md` — new "Tool API conventions" section near top of file
+>   so future sessions adopt the rule by default.
+> Reference impl is the Hydrasynth `resolveNrpnValue` +
+> `patchEncoder.writePatchValue` pair. AM4 already follows this for
+> `set_param`, but cross-pollination work (next-session task) should
+> double-check `apply_preset` doesn't leak any wire-side semantics.
 >
-> **Strategic context:** founder set the priority order at the end
-> of Session 38 — finish Hydrasynth real-tone validation, plan the
+> **Goldens green:** verify-sysex-patch 46 → 54 (added 8 new INIT-byte
+> + universal-/8 lockdown cases); verify-init-buffer 12/12;
+> verify-sysex-envelope 28/28; hydra-encoding 61/61. Preflight fully
+> green: tsc clean, all goldens, smoke-server 22/22.
+>
+> **🚨 Next-session pickup checklist:**
+>
+> **Strategic context (carried from Session 38):** founder set the
+> priority order — finish Hydrasynth real-tone validation, plan the
 > main-merge, cross-pollinate Hydrasynth wins back into AM4 tools,
-> then **AM4 development takes priority until release**. Hydrasynth
-> resumes post-release. Don't drift into more Hydrasynth scope
-> without an explicit founder green-light.
+> then **AM4 development takes priority until release**. Session 39
+> closed the "task #10 first" question affirmatively and shipped the
+> fix; remaining sequence: real-tone retest → main-merge plan →
+> AM4 cross-pollination → AM4 priority work.
 >
-> 1. **Confirm real-tone test from Session 38 close.** Founder was
->    on B001 with INIT in working memory, about to run:
->    ```
->    hydra_apply_patch({
->      slot: "B001",
->      params: [
->        { name: "filter1cutoff",    value: 3000 },
->        { name: "filter1resonance", value: 11000 }
->      ]
->    })
->    ```
->    Expected: filter closes hard with audible resonance ("vocal /
->    wow" character). If audible → SysEx pipeline is end-to-end
->    proven and `hydra_apply_patch` works for non-bipolar params.
->    If silent → debug the encoder path before anything else.
+> 1. **🔬 Real-tone retest on hardware (HW-041).** Session 38's
+>    sweep used wire values; replay it with display values and
+>    confirm matching display readings. Concrete script:
+>    - `hydra_navigate_to({slot: "B001"})`
+>    - `hydra_apply_patch({slot: "B001", params: [
+>        {name: "filter1cutoff", value: 64},     // expect display 64.0
+>        {name: "filter1resonance", value: 30},  // expect display 30.0
+>        {name: "filter1env1amount", value: -25} // expect display -25 bipolar
+>      ]})`
+>    - Press a key, photograph the device display, confirm each value
+>      matches what was sent. If anything is off, the encoder /8 plus
+>      resolveNrpnValue chain has a residual bug — diagnose before
+>      moving on. **This is the HW-040-style sanity check that closes
+>      out task #10.**
 >
-> 2. **Commit `hydra_apply_patch` once real-tone test passes.**
->    Single-commit checkpoint marking milestone 3 prototype done.
->    NOT a milestone-complete commit (request_patch + .hydra loader
->    + bipolar fix all still pending) — just preserves the
->    audible-validated state.
+> 2. **Iconic-tone smoke test.** Once #1 passes, try one full iconic
+>    tone end-to-end (~6-10 params on top of INIT). Suggested:
+>    a "Van Halen Jump" lead voice (osc1type Saw, osc2type Saw,
+>    osc2 detuned 12 cents, filter1 cutoff 80, resonance 40,
+>    filter1env1amount +35, env1 attack short, sustain mid, reverb
+>    25% wet). Confirm audible + display readings match.
 >
-> 3. **Plan main-merge.** Currently 6 commits ahead on
->    `hydrasynth-explorer` (`ec44521` plus the 5 prior). Conflict
->    surface is mostly Hydra-only files; expected conflicts in
->    `package.json` (test scripts), `docs/STATE.md`, and
->    `docs/HARDWARE-TASKS.md`. Recommend rebase over merge so the
->    Hydra commit chain stays linear. Founder asked for a dry-run
->    before pulling the trigger — do `git fetch origin && git rebase
->    --dry-run origin/main` style preview first.
 >
-> 4. **Cross-pollinate Hydra wins to AM4.** Three candidates:
+> 3. **Plan main-merge.** Now 8+ commits ahead on `hydrasynth-explorer`
+>    after Session 39's fix. Conflict surface is mostly Hydra-only
+>    files; expected conflicts in `package.json` (test scripts),
+>    `docs/STATE.md`, `docs/DECISIONS.md`, `CLAUDE.md` (new Tool API
+>    conventions section), and `docs/HARDWARE-TASKS.md`. Recommend
+>    rebase over merge so the Hydra commit chain stays linear.
+>    Founder asked for a dry-run before pulling the trigger — do
+>    `git fetch origin && git rebase --dry-run origin/main` style
+>    preview first.
+>
+> 4. **Cross-pollinate Hydra wins to AM4.** Four candidates (one new):
 >    - **Inbound-MIDI capture in tool responses.** Adopt the
 >      `[+NNNms] HEX_BYTES` timeline + ack-summary pattern in
 >      selected AM4 diagnostic tools. AM4 already has Input via
@@ -66,13 +95,20 @@
 >      precedent from `hydra_navigate_to`. When a high-level tool
 >      fails inscrutably, having a "bypass the stack" probe saves
 >      multi-session debug arcs (this session's HW-040 lesson).
+>    - **Display-first audit on AM4 tool surfaces.** The new project
+>      convention (`DECISIONS.md` 2026-04-28, `CLAUDE.md` Tool API
+>      conventions) says inputs/outputs use display units, never wire.
+>      `set_param` already follows this; sweep through `apply_preset`,
+>      `set_param` value handling, and any param-set helper to
+>      confirm none silently expects wire bytes. If any leak is
+>      found, fix to match the Hydra `resolveNrpnValue` pattern.
 >
 > 5. **AM4 development takes priority until release.** Resume
 >    BK-032 first-page coverage, BK-029 follow-up items, etc.
->    Hydrasynth backlog for post-release: task #10 (bipolar/scale
->    fix per BK-036.5) → `hydra_request_patch` → `hydra_load_hydra_file`
->    → revisit pre-dance theory for `hydra_apply_init` (now-dropped
->    pre-dance might save ~350 ms wire time).
+>    Hydrasynth backlog for post-release: `hydra_request_patch` →
+>    `hydra_load_hydra_file` → revisit pre-dance theory for
+>    `hydra_apply_init` (now-dropped pre-dance might save ~350 ms
+>    wire time). Task #10 (BK-036.5) closed in Session 39.
 >
 > **Hard precondition reminder:** any Hydrasynth tool that uses
 > bank/PC (apply_init, apply_init_to, apply_patch, navigate_to)
@@ -80,10 +116,13 @@
 > NRPN/CC tools unaffected. Saved as project memory
 > `project_hydrasynth_pgm_chg_rx_requirement.md`.
 >
-> Last updated: **2026-04-28** (Session 38 wrap — Session 37+38
-> committed `ec44521`; `hydra_apply_patch` prototype on disk
-> pending real-tone test; main-merge + cross-pollination + AM4
-> priority queued for Session 39).
+> Last updated: **2026-04-28** (Session 39 wrap — BK-036.5 patch-buffer
+> `/8` scale fix shipped; display-first API locked across the project
+> via `DECISIONS.md` + `CLAUDE.md`; `hydra_apply_patch` now takes
+> display values + enum strings via `resolveNrpnValue`; verify-sysex-
+> patch 46 → 54 with new INIT-byte lockdown cases; preflight green.
+> Next session: HW-041 real-tone retest, then iconic-tone smoke,
+> then main-merge, then AM4 cross-pollination + display-first audit).
 >
 > **Session 38 highlights — Input listener, diagnostic tools,
 > and root cause: Pgm Chg RX = Off.**

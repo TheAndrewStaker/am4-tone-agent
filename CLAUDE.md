@@ -105,6 +105,42 @@ Anti-patterns to avoid:
 - "effect in slot 3" is correct; "effect in position 3" is also OK but
   "slot" matches Fractal's wording
 
+## Tool API conventions (project-wide)
+
+**Display-first.** MCP tool inputs and outputs use **display units** —
+the values a musician reads on the device front panel or in the manual.
+Enum-typed params accept the **display name** as a string. Wire and
+protocol numbers (NRPN 0..16383, packed-float bytes, patch-buffer
+storage scaling) are an internal detail that **never appears in tool
+surfaces**.
+
+This rule applies to **AM4, Hydrasynth, and every future instrument**:
+
+- `set_param({ name: 'amp.gain', value: 4.5 })` — display dB / scaled units
+- `set_param({ name: 'comp.ratio', value: 4 })` — 4:1, not "wire 4"
+- `hydra_set_param({ name: 'filter1cutoff', value: 64 })` — display 0..128
+- `hydra_apply_patch({ params: [{ name: 'filter1env1amount', value: -25 }] })` — bipolar display, not wire
+- `hydra_set_param({ name: 'osc1type', value: 'Sawtooth' })` — enum string
+- `set_block_type({ name: 'amp.type', value: 'Plexi 100W High' })` — enum string
+
+The encoder/protocol layer of each device translates display → wire and
+hides device-specific scaling: NRPN 0..128 auto-scale, bipolar
+centering, the Hydrasynth patch buffer's `wire/8` storage, Fractal's
+`value × scale` packed-float wire format, etc. When adding a new tool or
+a new instrument:
+
+1. **Surface accepts display values and enum strings** (use a single
+   `resolve*Value(entry, value)` helper at the tool boundary).
+2. **Encoders take wire values internally** — tool layer does the
+   display → wire conversion once at the entry point, encoder takes it
+   from there.
+3. **Tool descriptions list iconic examples in display units**, not
+   wire numbers.
+
+Rationale and rejected alternatives are in `docs/DECISIONS.md`
+(2026-04-28 entry). The Hydrasynth `resolveNrpnValue` +
+`patchEncoder.writePatchValue` pair is the reference implementation.
+
 ## Performance budget
 
 MCP tool calls are part of a conversation. Users tolerate short waits

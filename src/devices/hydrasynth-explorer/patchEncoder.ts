@@ -100,21 +100,41 @@ export const PATCH_NAME = {
  *
  * - `u16le`: unsigned 16-bit little-endian. Byte N = LSB, byte N+1 = MSB.
  *   Used by all 14-bit wire-value params (filter cutoff, env timings,
- *   mixer volumes, bipolar centered values, etc.).
+ *   mixer volumes, bipolar centered values, etc.). **The patch buffer
+ *   stores `wire / 8`** — the device's NRPN wire range is `[0, 8192]`
+ *   (or `[0, 16383]` for full 14-bit), but the patch byte-map allocates
+ *   `[0, 1024]` (or `[0, 2048]`) for the same parameter. Confirmed by
+ *   inspecting INIT bytes (Session 39, BK-036.5) — every u16le param
+ *   in the factory INIT lands at `wire/8` of its sensible default
+ *   (filter1cutoff = 1024 patch = 8192 wire = 128.0 max display, etc.).
+ *   `writePatchValue` / `readPatchValue` apply the `/8` scale internally
+ *   so callers always pass NRPN wire values matching `set_param`.
  *
  * - `s16le`: signed 16-bit little-endian (two's complement). Used by
- *   the few params that store full negative ranges across both bytes.
+ *   the few params that store full negative ranges across both bytes
+ *   AT DISPLAY SCALE (e.g. osc1cent stores cents directly: -50..+50
+ *   round-trips as -50..+50, not as a 14-bit ring). No `/8` applied.
  *
  * - `u8`: single unsigned byte at offset N. Byte N+1 is left untouched
- *   on encode (typically 0). Used by enum / mode / boolean params.
+ *   on encode (typically 0). Used by enum / mode / boolean params at
+ *   raw enum-index scale. No `/8` applied.
  *
  * - `s8`: single signed byte at offset N with sign-extension into byte
  *   N+1 (`0xFF` for negative, `0x00` for non-negative). Used by 1-byte
  *   2's complement values like `osc1semi` (-36..+36) where the spec
  *   says "if such a parameter represents a negative value, then it is
- *   sign-extended into the second byte".
+ *   sign-extended into the second byte". Stored at display scale.
+ *   No `/8` applied.
  */
 export type PatchOffsetEncoding = 'u16le' | 's16le' | 'u8' | 's8';
+
+/**
+ * Patch buffer divides every NRPN wire value by this constant for u16le
+ * params. Wire `[0, 8192]` ⇒ patch `[0, 1024]`. Wire `[0, 16383]` ⇒
+ * patch `[0, 2048]`. Bipolar centering happens for free — wire 4096
+ * (display 0) ⇒ patch byte 512, the spec's documented bipolar center.
+ */
+export const PATCH_U16LE_WIRE_DIVISOR = 8;
 
 /** A single curated mapping: canonical NRPN name → patch byte offset. */
 export interface PatchOffsetSpec {
@@ -305,11 +325,19 @@ export function findPatchOffset(name: string): PatchOffsetSpec | undefined {
 // ---------------------------------------------------------------------------
 
 /**
- * Encode `value` into `buf` at `spec.byte` per `spec.enc`.
- * Mutates `buf` in place. Returns nothing.
+ * Encode `value` into `buf` at `spec.byte` per `spec.enc`. Mutates
+ * `buf` in place.
  *
- * Throws if `value` is out of range for the encoding (e.g. > 65535
- * for `u16le`, > 127 or < -128 for `s8`).
+ * **API contract: caller passes NRPN wire values** for `u16le` params
+ * (matching `hydra_set_param` / `resolveNrpnValue` semantics — `0..8192`
+ * for the typical 14-bit knob, `0..16383` for full 14-bit). Encoder
+ * divides by `PATCH_U16LE_WIRE_DIVISOR` (8) before writing the bytes.
+ * For `s16le` / `u8` / `s8`, value is at display/raw scale and is
+ * written as-is.
+ *
+ * Throws if value is out of range or not an integer divisible by 8 for
+ * `u16le` (the patch buffer can't represent finer granularity than the
+ * spec note "[0,8192] seemingly only output in increments of 8").
  */
 export function writePatchValue(buf: Uint8Array, spec: PatchOffsetSpec, value: number): void {
   if (spec.byte < 0 || spec.byte + 1 >= buf.length) {
@@ -320,11 +348,18 @@ export function writePatchValue(buf: Uint8Array, spec: PatchOffsetSpec, value: n
   }
   switch (spec.enc) {
     case 'u16le': {
+      // Wire-in: caller passes NRPN wire 0..16383. Patch byte stores
+      // wire/8. Round to nearest to absorb the spec's "increments of 8"
+      // quantization rather than truncating off-by-one.
       if (value < 0 || value > 0xffff) {
-        throw new Error(`u16le value for "${spec.name}" out of range 0..65535: ${value}`);
+        throw new Error(`u16le wire value for "${spec.name}" out of range 0..65535: ${value}`);
       }
-      buf[spec.byte]     = value & 0xff;
-      buf[spec.byte + 1] = (value >>> 8) & 0xff;
+      const patchByte = Math.round(value / PATCH_U16LE_WIRE_DIVISOR);
+      if (patchByte > 0xffff) {
+        throw new Error(`u16le wire value for "${spec.name}" exceeds patch byte range after /8: ${value}`);
+      }
+      buf[spec.byte]     = patchByte & 0xff;
+      buf[spec.byte + 1] = (patchByte >>> 8) & 0xff;
       return;
     }
     case 's16le': {
@@ -362,7 +397,13 @@ export function writePatchValue(buf: Uint8Array, spec: PatchOffsetSpec, value: n
   }
 }
 
-/** Decode `value` from `buf` at `spec.byte` per `spec.enc`. */
+/**
+ * Decode `value` from `buf` at `spec.byte` per `spec.enc`.
+ *
+ * Returns NRPN wire value for `u16le` (patch byte × 8) so the result
+ * is comparable to what `hydra_set_param` / `resolveNrpnValue` use.
+ * `s16le` / `u8` / `s8` return the raw display/index value.
+ */
 export function readPatchValue(buf: Uint8Array, spec: PatchOffsetSpec): number {
   if (spec.byte < 0 || spec.byte + 1 >= buf.length) {
     throw new Error(`patch offset ${spec.byte} out of bounds for buffer of ${buf.length} bytes`);
@@ -371,7 +412,7 @@ export function readPatchValue(buf: Uint8Array, spec: PatchOffsetSpec): number {
   const hi = buf[spec.byte + 1];
   switch (spec.enc) {
     case 'u16le':
-      return lo | (hi << 8);
+      return (lo | (hi << 8)) * PATCH_U16LE_WIRE_DIVISOR;
     case 's16le': {
       const v = lo | (hi << 8);
       return v >= 0x8000 ? v - 0x10000 : v;

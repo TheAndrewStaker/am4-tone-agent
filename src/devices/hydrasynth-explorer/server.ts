@@ -1103,11 +1103,11 @@ server.registerTool('hydra_apply_init_to', {
 
 server.registerTool('hydra_apply_patch', {
   description: [
-    '**Milestone-3 prototype.** Builds a Hydrasynth patch by applying a',
-    'sparse `Map<name, value>` of overrides on top of the factory INIT',
-    'buffer, then dumps the result via SysEx to the named slot. Defaults',
-    'to a post-dump bank/PC bounce so the patch becomes audible (per',
-    'spec NOTE 2 — confirmed by HW-040 test 1 on 2026-04-28).',
+    'Build a Hydrasynth patch by applying a sparse `Map<name, value>` of',
+    'overrides on top of the factory INIT buffer, then dump the result',
+    'via SysEx to the named slot. Defaults to a post-dump bank/PC bounce',
+    'so the patch becomes audible (per spec NOTE 2 — confirmed by HW-040',
+    'test 1 on 2026-04-28).',
     '',
     'Workflow:',
     '  1. Navigate the device to the slot you intend to modify (e.g.',
@@ -1117,15 +1117,23 @@ server.registerTool('hydra_apply_patch', {
     '  2. Call `hydra_apply_patch({slot: "B001", params: [...]})`.',
     '  3. Press a key.',
     '',
-    'Values are PATCH-BUFFER WIRE values, not display units. For',
-    'non-bipolar params (filter cutoff 0..16383, mixer levels 0..127,',
-    'oscillator semitones as signed bytes) raw wire values work.',
+    'Values are DISPLAY units (matching `hydra_set_param`). The tool',
+    'routes each override through the same `resolveNrpnValue` pipeline,',
+    'so iconic-tone authoring uses the values you read on the device or',
+    'in manuals — never wire/protocol numbers.',
     '',
-    '**Known issue (BK-036.5 / task #10):** bipolar params (env',
-    'amounts, filter keytrack, asymmetric EQ ranges) currently encode',
-    'with the wrong scale — patch buffer stores values at NRPN_wire/8',
-    'with bipolar center 512, but our encoder uses NRPN_wire directly.',
-    'Avoid bipolar params for now or expect off-by-scale results.',
+    'Examples:',
+    '  • Filter cutoff at 64 (display 0..128): `{name: "filter1cutoff", value: 64}`',
+    '  • Resonance at 30:                       `{name: "filter1resonance", value: 30}`',
+    '  • Env1 → Filter at +25 (bipolar -64..+64): `{name: "filter1env1amount", value: 25}`',
+    '  • Filter keytrack at +100% (bipolar -200..+200): `{name: "filter1keytrack", value: 100}`',
+    '  • Osc1 = Saw waveform (enum):            `{name: "osc1type", value: "Sawtooth"}`',
+    '  • Osc1 down 12 semitones (-36..+36):     `{name: "osc1semi", value: -12}`',
+    '  • Pre-FX = Lo-Fi (enum):                 `{name: "prefxtype", value: "Lo-Fi"}`',
+    '',
+    'Internally: bipolar centering, 0..128 auto-scale, and the patch',
+    'buffer\'s `wire/8` storage are all hidden. Encoder writes the right',
+    'bytes for any encoding kind (u16le, s16le, u8, s8).',
     '',
     'Does NOT save to flash (no Write Request). RAM only — modifies',
     'the working memory of the bank specified in `slot`. Hard',
@@ -1138,7 +1146,7 @@ server.registerTool('hydra_apply_patch', {
     ),
     params: z.array(z.object({
       name: z.string().describe('Canonical patch-buffer parameter name (e.g. "filter1cutoff", "osc1type", "mixer.osc1_vol"). Must appear in PATCH_OFFSETS.'),
-      value: z.number().describe('Patch-buffer WIRE value. For non-bipolar params, equals NRPN wire (0..16383). Bipolar params are off-scale until task #10 lands.'),
+      value: z.union([z.number(), z.string()]).describe('Display value (e.g. 64 for filter cutoff, +25 for bipolar env amount, -12 for osc semitones) OR enum string ("Sawtooth", "Lo-Fi", "Vowel"). Auto-routed through resolveNrpnValue — same semantics as hydra_set_param.'),
     })).min(1).describe('Sparse override map applied on top of the factory INIT buffer.'),
     dance: z.enum(['none', 'post', 'both']).optional().describe(
       '`post` (default) = bounce off E064 + return to target after the dump (audibilizes per NOTE 2). `none` = pure dump, no PC. `both` = pre + post (use when you haven\'t pre-navigated to the slot yourself).',
@@ -1150,14 +1158,33 @@ server.registerTool('hydra_apply_patch', {
   const danceMode = dance ?? 'post';
   const startMs = Date.now();
 
-  // Build the override map. Reject non-finite values up front so a
-  // typo doesn't get encoded as NaN bytes.
+  // Build the override map. Each {name, value} runs through the same
+  // resolveNrpnValue pipeline as hydra_set_param so callers pass display
+  // values / enum strings, never wire/protocol numbers. The encoder
+  // expects wire NRPN values and applies its /8 patch-buffer scaling
+  // internally for u16le params.
   const overrides = new Map<string, number>();
+  const resolutions: Array<{ name: string; raw: number | string; wire: number; scaled: boolean; bipolar: boolean }> = [];
   for (const { name, value } of params) {
-    if (!Number.isFinite(value)) {
+    if (typeof value === 'number' && !Number.isFinite(value)) {
       throw new Error(`hydra_apply_patch: param "${name}" has non-finite value ${value}.`);
     }
-    overrides.set(name, value);
+    const entry = findHydraNrpn(name);
+    if (!entry) {
+      const hits = findMatchingNrpns(name, 4);
+      const closest = hits.length > 0
+        ? ` (closest: ${hits.map((h) => h.entry.name).join(', ')})`
+        : '';
+      throw new Error(`hydra_apply_patch: unknown param "${name}"${closest}.`);
+    }
+    let resolved;
+    try {
+      resolved = resolveNrpnValue(entry, value);
+    } catch (err) {
+      throw new Error(`hydra_apply_patch: param "${name}" — ${err instanceof Error ? err.message : String(err)}`);
+    }
+    overrides.set(name, resolved.wire);
+    resolutions.push({ name, raw: value, wire: resolved.wire, scaled: resolved.scaled, bipolar: resolved.bipolar });
   }
 
   // Encode overrides on top of INIT. Routing header bytes 2-3 are
@@ -1229,8 +1256,13 @@ server.registerTool('hydra_apply_patch', {
   lines.push(`Applied ${params.length} override${params.length === 1 ? '' : 's'} to ${target.display} via SysEx (dance=${danceMode}, ${PATCH_CHUNK_COUNT} chunks, ${elapsedMs} ms total).`);
   lines.push('');
   lines.push('Overrides:');
-  for (const { name, value } of params) {
-    lines.push(`  ${name} = ${value}`);
+  for (const r of resolutions) {
+    const rawDisplay = typeof r.raw === 'string' ? `"${r.raw}"` : String(r.raw);
+    let suffix = '';
+    if (r.bipolar) suffix = ` → wire ${r.wire} (bipolar)`;
+    else if (r.scaled) suffix = ` → wire ${r.wire} (auto-scaled 0..128)`;
+    else if (rawDisplay !== String(r.wire)) suffix = ` → wire ${r.wire}`;
+    lines.push(`  ${r.name} = ${rawDisplay}${suffix}`);
   }
   lines.push('');
   lines.push(`Press a key. The active patch should now reflect your overrides on top of an INIT base.`);
