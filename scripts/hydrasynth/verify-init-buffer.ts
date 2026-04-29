@@ -134,9 +134,9 @@ check('curated param decode contains non-zero key params', () => {
   return true;
 });
 
-check('decodePatch returns full curated set (94 entries)', () => {
+check('decodePatch returns full curated set (101 entries — Session 39 +osc2/3 detune)', () => {
   const decoded = decodePatch(INIT_PATCH_BUFFER);
-  return decoded.size === 94 ? true : `got ${decoded.size}, want 94`;
+  return decoded.size === 101 ? true : `got ${decoded.size}, want 101`;
 });
 
 // ---------------------------------------------------------------------------

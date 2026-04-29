@@ -12,11 +12,13 @@ into Claude Desktop (with the connector attached + Param TX/RX = NRPN
 iteration; the green-checked ones become the project's "tones the
 tool can produce" list.
 
-For **every** fresh-patch build, the prompt should include something
-like *"…in one batch with freshPatch true"* so the server prepends
-the neutralize prelude. Without it, leftover state from whatever
-patch was loaded previously can break the recipe mid-build (see the
-2026-04-28 Van Halen Jump session).
+**Fresh-patch builds use `hydra_apply_patch`** (atomic SysEx dump
+starting from factory INIT — audible-by-construction, all hardwired
+routings intact). Do NOT use `hydra_set_engine_params` for fresh
+builds; that path was removed in Session 39 because the NRPN init
+prelude broke factory env→VCA routing (the 2026-04-28 Van Halen Jump
+silence). Use `hydra_set_engine_params` only for incremental tweaks
+on top of an already-loaded patch ("brighter, more chorus").
 
 ## Tier 1 — high recognition, high feasibility (start here)
 
@@ -28,6 +30,10 @@ patch was loaded previously can break the recipe mid-build (see the
 | 4 | **Vangelis "Chariots of Fire"** | Yamaha CS-80 brass | Slow swell brass pad with ring-mod shimmer | *"Send the Vangelis 'Chariots of Fire' main synth pad as a fresh patch — CS-80 brass with that signature swell"* |
 | 5 | **Tom Petty "Breakdown"** | Wurlitzer EP (most likely) — Benmont Tench's intro figure; some sources cite Vox Continental | Soft EP-ish keyboard tone, reference test from session 1. Original instrument under research — treat as "Breakdown intro keys", not a specific synth | *"Send the Tom Petty 'Breakdown' intro keyboard tone to the hydrasynth as a fresh patch — soft, slightly bell-like electric piano character"* |
 | 6 | **Steve Winwood "While You See a Chance"** | Minimoog + Prophet-5 | Mono lead with detuned saws, glide, vibrato, chorus | *"Send a 'While You See a Chance' lead synth tone to the hydrasynth as a fresh patch — Minimoog-style with detuned saws, glide, and Prophet-5 chorus"* |
+| 16a | **Techno Syndrome (1994) — intro synth lead** | 90s rave / industrial; commonly Roland JD-800 stabs + ROMpler era | Aggressive detuned-saw stab, fast filter envelope ("pew"), short percussive amp env, slight grit. Tests fast envelopes + filter drive. | *"Send the intro synthesizer LEAD tone from 'Techno Syndrome' by The Immortals (1994 Mortal Kombat theme) — classic 90s rave stab, percussive detuned saws, heavy filter envelope, slight grit."* |
+| 16b | **Techno Syndrome — pulsing bass line** | Same era; classic 90s industrial bass | Mono detuned saw with low cutoff + envelope, gated/sequenced amp envelope for the "boom-boom-boom-boom" pulse | *"Send the pulsing bass line from 'Techno Syndrome' to the hydrasynth — low detuned saw, gated/percussive, with the rhythmic envelope chop"* |
+| 16c | **Techno Syndrome — atmospheric pad** | Era-typical sample-pad / wavetable | Slow-attack washy pad behind the lead, often with reverb tail | *"Send the atmospheric background pad from 'Techno Syndrome' — slow-attack wash pad, dark, with long reverb"* |
+| 16d | **Techno Syndrome — orchestral hit / stab** | Sample-based brass/orchestral hit, ubiquitous in 90s dance | Fast attack, fast decay brass/orchestral hit; tests Hydrasynth's ability to approximate sample-based hits via wavescan | *"Send the orchestral 'hit' stab from 'Techno Syndrome' — short percussive brass-like attack, like the sample stab between phrases"* |
 
 ## Tier 2 — recognizable but trickier
 
@@ -66,4 +72,5 @@ land at all with ❌.
 |---|---|---|---|---|
 | 2026-04-26 | 5 | Tom Petty "Breakdown" | ✅ | Session 1; required the fixes that became BK-035 (alias, auto-scale) before landing |
 | 2026-04-28 | 6 | Steve Winwood "While You See a Chance" | ✅ | Session 2; minor glitchy artifact from chorus depth, resolved with chorus pull-back |
-| 2026-04-28 | 1 | Van Halen "Jump" | 🟡 | Session 3; landed after INIT button + resend. Surfaced bleed-through bug — fixed in 0e2d9cc with `freshPatch: true` flag. Re-test recommended. |
+| 2026-04-28 | 1 | Van Halen "Jump" | 🟡 | Session 3; landed after INIT button + resend. Surfaced bleed-through bug. Initial fix `freshPatch: true` (0e2d9cc) had its own destructive prelude (BK-037 mod-matrix-target=0 silence). True fix landed Session 39: SysEx-from-INIT via `hydra_apply_patch`, plus `freshPatch` flag removed. Re-test on the new path. |
+| 2026-04-28 | 1 | Van Halen "Jump" (Session 39 follow-up) | ✅ | Field-reproduced the silence symptom on `freshPatch: true`, recovered via `hydra_apply_init`, then rebuilt Jump as incremental NRPN writes on top of audible INIT — musical, all 16 writes accepted. Confirms the 3-tool workflow (apply_init reset → small-batch tweaks) until PATCH_OFFSETS coverage closes. |

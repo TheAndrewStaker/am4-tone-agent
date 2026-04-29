@@ -199,12 +199,19 @@ export const PATCH_OFFSETS: readonly PatchOffsetSpec[] = [
   { name: 'osc1keytrack',       byte:  88, enc: 's8',    label: 'Osc1 Keytrack' },
   { name: 'osc1wavscan',        byte:  90, enc: 'u16le', label: 'Osc 1 Wavescan' },
 
-  // -------- Oscillator 2 (bytes 108–...) --------
+  // -------- Oscillator 2 (bytes 108–118) --------
   { name: 'osc2mode',           byte: 108, enc: 'u8',    label: 'Osc 2 Mode' },
   { name: 'osc2type',           byte: 110, enc: 'u8',    label: 'Osc 2 Wave' },
+  { name: 'osc2semi',           byte: 112, enc: 's8',    label: 'Osc 2 Semitones' },
+  { name: 'osc2cent',           byte: 114, enc: 's16le', label: 'Osc 2 Cents (-50..+50)' },
+  { name: 'osc2keytrack',       byte: 116, enc: 's8',    label: 'Osc 2 Keytrack' },
+  { name: 'osc2wavscan',        byte: 118, enc: 'u16le', label: 'Osc 2 Wavescan' },
 
-  // -------- Oscillator 3 (bytes 136–...) --------
+  // -------- Oscillator 3 (bytes 136–142) --------
   { name: 'osc3type',           byte: 136, enc: 'u8',    label: 'Osc 3 Wave' },
+  { name: 'osc3semi',           byte: 138, enc: 's8',    label: 'Osc 3 Semitones' },
+  { name: 'osc3cent',           byte: 140, enc: 's16le', label: 'Osc 3 Cents (-50..+50)' },
+  { name: 'osc3keytrack',       byte: 142, enc: 's8',    label: 'Osc 3 Keytrack' },
 
   // -------- Ring mod / noise (bytes 264–272) --------
   { name: 'ringmodsource1',     byte: 264, enc: 'u8',    label: 'Ring Mod Source 1' },

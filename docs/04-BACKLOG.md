@@ -3190,3 +3190,54 @@ Skip until explicit user demand materializes.
   is power-cycled or unplugged. Ship before the founder shares
   the tool with non-technical users (they will absolutely unplug
   things).
+
+
+### BK-039 Hydrasynth synth-lineage tone-recipe library
+
+**The ask.** Help an AI agent (or user) "architect" a Hydrasynth tone
+based on a real synth reference — "OB-Xa Jump", "Juno-60 brass",
+"Prophet 5 strings", "MS-20 lead", "DX7 e-piano" — without re-deriving
+the sonic recipe from scratch each time. Same value as `lookup_lineage`
+delivers for AM4 today.
+
+**Honest framing.** ASM Hydrasynth is NOT officially documented as
+modeling specific real synths the way Fractal markets the AM4. The
+mapping has to be community-curated, not vendor-scraped. The few
+exceptions where there IS a real-hardware correspondence:
+
+- `LP Ladder 12` / `LP Ladder 24` filters — Moog ladder topology.
+- `LP/HP/BP/Notch` Steiner-Parker variants — Synthacon / Arturia lineage.
+- `Comb` filter — Karplus-Strong / vocoder family.
+- `Vowel` — formant filter à la MS-20.
+- Filter 2 `LP-BP-HP` — SEM-style state-variable, Oberheim DNA.
+- FX type names (`Rotary`, `Chorus`, `Lo-Fi`) reference generic-classic
+  topologies, not specific gear.
+
+The 200+ ASM-original oscillator wavetables (`Horizon 1..8`, mutators)
+have no real-hardware lineage at all.
+
+**Approach.** Three options, in order of cost:
+
+- **Option C (cheap, recommended)**: embed a 10-15 entry "iconic synth →
+  Hydrasynth recipe sketch" table directly in the `hydra_apply_patch`
+  tool description. Same pattern as the `ENGINE_PARAM_CHEAT_SHEET` —
+  surfaces the lineage knowledge to Claude exactly when authoring
+  tones, zero extra tool calls. Uses what already partially exists
+  in `docs/devices/hydrasynth-explorer/ICONIC-TONES.md`.
+- **Option B**: expand `ICONIC-TONES.md` and require Claude Project
+  knowledge upload. Brittle (Claude Desktop forgets it across
+  conversations) and adds setup friction for end users.
+- **Option A**: build a `hydra_lookup_synth({name})` tool returning a
+  recipe map. Heavier infrastructure, only worth it if the table
+  grows beyond ~15 entries.
+
+**Priority:** P2. Iconic-tone authoring already works once
+`PATCH_OFFSETS` covers the surface (BK-036.5 follow-up); this
+accelerates it but isn't a blocker. Defer until Hydrasynth resumes
+post-AM4-release.
+
+**Estimated effort:** 2-3 hours to seed Option C with 10 well-known
+tone recipes drawn from `ICONIC-TONES.md` + community refs.
+
+**Cross-refs:** `lookup_lineage` (AM4 vendor-scraped lineage tool —
+the conceptual analogue, but Fractal-specific data source).

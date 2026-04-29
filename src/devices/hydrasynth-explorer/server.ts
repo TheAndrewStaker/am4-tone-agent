@@ -46,7 +46,6 @@ import {
   HYDRASYNTH_PARAMS,
   HYDRASYNTH_PARAMS_BY_ID,
 } from './params.js';
-import { INIT_PATCH, type InitPatchEntry } from './initPatch.js';
 import { findHydraNrpn, type HydrasynthNrpn } from './nrpn.js';
 import { HYDRASYNTH_ENUMS } from './enums.js';
 import {
@@ -224,11 +223,11 @@ FILTER 1  (use names for type — "LP Ladder 12", "LP Ladder 24", "Vowel", "BP 3
   filter1resonance / filter1.res
   filter1drive / filter1.drive
   filter1keytrack / filter1.keytrack
-  filter1env1amt, filter1lfo1amt, filter1velenv
+  filter1env1amount, filter1lfo1amount, filter1velenv
 
 FILTER 2  (only "LP-BP-HP" or "LP-Notch-HP" types):
   filter2type
-  filter2cutoff, filter2resonance, filter2drive, filter2keytrack
+  filter2cutoff, filter2resonance, filter2env1amount, filter2lfo1amount, filter2velenv, filter2keytrack
 
 ENVELOPES  — env1 (Amp), env2/3/4/5 (assignable). Default to syncoff variants for free-running times:
   env1.attack  / env1attacksyncoff
@@ -244,12 +243,12 @@ LFOS  (5 of them):
 
 PRE-FX / POST-FX  (use names for type — "Bypass", "Chorus", "Flanger", "Rotary", "Phaser", "Lo-Fi", "Tremolo", "EQ", "Compressor", "Distortion"):
   prefxtype, postfxtype
-  prefxparam1, prefxparam2, prefxmix
-  postfxparam1, postfxparam2, postfxmix
+  prefxparam1, prefxparam2, prefxwet
+  postfxparam1, postfxparam2, postfxwet
 
 DELAY / REVERB  (between Pre-FX and Post-FX):
-  delaytype, delaytimesyncoff, delayfeedback, delaymix
-  reverbtype, reverbtime, reverbtone, reverbmix
+  delaytype, delaytimesyncoff, delayfeedback, delaywet
+  reverbtype, reverbtime, reverbtone, reverbwet
 
 VOICE / GLOBAL:
   voiceglidetime, voicelegato, voicemono, voicepolyphony
@@ -437,28 +436,31 @@ server.registerTool('hydra_play_note', {
 
 server.registerTool('hydra_set_engine_param', {
   description: [
-    'Set ONE synthesis-engine parameter on the user\'s Hydrasynth Explorer. For',
-    'multi-parameter patch builds use hydra_set_engine_params (batch) instead — one',
-    'tool call beats N, and the server paces the writes correctly.',
+    'Set ONE synthesis-engine parameter on the user\'s Hydrasynth Explorer.',
+    'Use for single-knob tweaks on top of an already-loaded patch ("nudge',
+    'cutoff up", "shorten release"). For 2+ knob tweaks use',
+    '`hydra_set_engine_params` (batch). For whole-patch fresh builds use',
+    '`hydra_apply_patch` (atomic SysEx, audible-by-construction).',
     '',
-    '**DON\'T pre-discover names. Just call this.** This tool already knows every',
-    'engine parameter (1175 of them). The cheat-sheet below covers ~95% of patch-',
-    'building work. Skip hydra_param_catalog for normal patch building — both the',
-    'CC-style names it returns ("mixer.osc1_vol", "env1.attack") AND the canonical',
-    'NRPN names ("mixerosc1vol", "env1attacksyncoff") work directly here. Only call',
-    'hydra_param_catalog if a write here genuinely fails on a name you can\'t guess from',
-    'the patterns below.',
+    '**DON\'T pre-discover names. Just call this.** This tool already knows',
+    'every engine parameter (1175 of them). The cheat-sheet below covers',
+    '~95% of patch-tweaking work. Skip hydra_param_catalog for normal use',
+    '— both the CC-style names it returns ("mixer.osc1_vol", "env1.attack")',
+    'AND the canonical NRPN names ("mixerosc1vol", "env1attacksyncoff")',
+    'work directly here. Only call hydra_param_catalog if a write here',
+    'genuinely fails on a name you can\'t guess from the patterns below.',
     '',
-    'Do not produce a written spec instead of calling this tool unless the user',
-    'explicitly asks for a dry run.',
+    'Do not produce a written spec instead of calling this tool unless the',
+    'user explicitly asks for a dry run.',
     '',
     ENGINE_PARAM_CHEAT_SHEET,
     '',
-    'IMPORTANT — DEVICE PRECONDITION: writes only respond when Param TX/RX is set to',
-    'NRPN on System Setup → MIDI page 10. If writes seem inert, check that first.',
+    'IMPORTANT — DEVICE PRECONDITION: writes only respond when Param TX/RX',
+    'is set to NRPN on System Setup → MIDI page 10. If writes seem inert,',
+    'check that first.',
     '',
-    'No wire-ack — consumer MIDI synths don\'t echo NRPN. Confirmation is audible /',
-    'observable on the device only.',
+    'No wire-ack — consumer MIDI synths don\'t echo NRPN. Confirmation is',
+    'audible / observable on the device only.',
   ].join('\n'),
   inputSchema: {
     name: z.string().describe(
@@ -506,78 +508,63 @@ server.registerTool('hydra_set_engine_param', {
 
 server.registerTool('hydra_set_engine_params', {
   description: [
-    '**Preferred tool for any multi-parameter Hydrasynth patch change** (whole-patch',
-    'builds, recipe-style requests, multi-section tweaks). One tool call beats N',
-    'serial hydra_set_engine_param calls — much faster, and the server paces NRPN',
-    'writes (≥2 ms between sequences) so the device doesn\'t drop messages.',
+    '**Use for incremental NRPN tweaks on top of an already-loaded patch** —',
+    'small/medium batches of knob changes, not whole-patch builds. Examples:',
+    '"make it brighter" (raise filter cutoff + resonance), "add some chorus"',
+    '(set prefxtype + prefxwet), "punchier attack" (shorten env1 attack +',
+    'raise env1amount). Each NRPN write is atomic; nothing destructive runs',
+    'before your params land.',
     '',
-    '**DON\'T pre-discover names. Just send the batch.** This tool already knows all',
-    '1175 engine parameters. The cheat-sheet below covers ~95% of patch building.',
-    'Skip hydra_param_catalog for normal use — both CC-style names ("mixer.osc1_vol",',
-    '"env1.attack") and canonical NRPN names ("mixerosc1vol", "env1attacksyncoff")',
-    'work here directly. Only fall back to hydra_param_catalog if a name genuinely',
-    'fails AND you can\'t guess it from the patterns below.',
+    '**For FRESH-PATCH BUILDS, do NOT use this tool — use `hydra_apply_patch`',
+    'instead.** That sends one atomic SysEx dump starting from the factory',
+    'INIT buffer, so all hardwired routings (env1 → VCA, mod matrix, mutators)',
+    'are intact by construction. This tool sends a sequence of NRPN writes',
+    'that can\'t replace destructively-set state from a prior patch — recipes',
+    'fail in subtle ways ("fizzy attack then silence" if env→VCA is missing).',
+    'Whole-patch tone authoring is `hydra_apply_patch`\'s job.',
     '',
-    'Do not produce a written spec instead of calling this tool unless the user',
-    'explicitly asks for a dry run.',
+    '**DON\'T pre-discover names. Just send the batch.** This tool already',
+    'knows all 1175 engine parameters. The cheat-sheet below covers ~95% of',
+    'patch tweaking. Skip hydra_param_catalog for normal use — both CC-style',
+    'names ("mixer.osc1_vol", "env1.attack") and canonical NRPN names',
+    '("mixerosc1vol", "env1attacksyncoff") work here directly. Only fall',
+    'back to hydra_param_catalog if a name genuinely fails AND you can\'t',
+    'guess it from the patterns below.',
+    '',
+    'Do not produce a written spec instead of calling this tool unless the',
+    'user explicitly asks for a dry run.',
     '',
     ENGINE_PARAM_CHEAT_SHEET,
     '',
-    'EXAMPLE — Tom Petty Breakdown organ patch in one batch:',
+    'EXAMPLE — incremental tweaks ("brighter and more saturated"):',
     '  hydra_set_engine_params({ params: [',
-    '    { name: "osc1type", value: "Sine" },',
-    '    { name: "osc2type", value: "Sine" },',
-    '    { name: "filter1type", value: "LP Ladder 12" },',
-    '    { name: "prefxtype", value: "Lo-Fi" },',
-    '    { name: "postfxtype", value: "Rotary" },',
-    '    { name: "osc2semi", value: 12 },',
-    '    { name: "mixer.osc1_vol", value: 100 },',
-    '    { name: "mixer.osc2_vol", value: 55 },',
-    '    { name: "filter1.cutoff", value: 60 },',
-    '    { name: "filter1.res", value: 15 },',
-    '    { name: "env1.attack", value: 0 },',
-    '    { name: "env1.decay", value: 127 },',
-    '    { name: "env1.sustain", value: 127 },',
-    '    { name: "env1.release", value: 65 },',
+    '    { name: "filter1.cutoff", value: 95 },',
+    '    { name: "filter1.res", value: 35 },',
+    '    { name: "filter1drive", value: 25 },',
+    '    { name: "amplevel", value: 100 },',
     '  ]})',
     '',
-    'ORDERING — per edisyn, put type-changing writes first (modes, types, LFO',
-    'waveforms, BPM-sync flags, wavescan waves) followed by continuous-value writes',
-    '(cutoffs, envelopes, mixer, macros). The device needs time to reconfigure',
-    'routing before downstream values land. The tool does NOT reorder for you.',
+    'ORDERING — per edisyn, put type-changing writes first (modes, types,',
+    'LFO waveforms, BPM-sync flags, wavescan waves) followed by continuous-',
+    'value writes (cutoffs, envelopes, mixer, macros). The device needs time',
+    'to reconfigure routing before downstream values land. The tool does NOT',
+    'reorder for you.',
     '',
-    'IMPORTANT — DEVICE PRECONDITION: Param TX/RX must be NRPN on System Setup →',
-    'MIDI page 10. With Param TX/RX = CC, the entire batch is silently ignored.',
-    '',
-    '**FRESH PATCH MODE — `freshPatch: true`.** When building a patch from scratch',
-    '(recipe-style requests like "send a Van Halen Jump tone"), pass freshPatch: true',
-    'so the server prepends a ~100-write neutralize prelude before your params. The',
-    'prelude zeros every mod-matrix slot, mutator wet, LFO gain, and FX wet — exactly',
-    'the invisible state that bleeds through from the previously-loaded patch and',
-    'breaks recipes mid-build. Your params merge ON TOP of the prelude (you win for',
-    'any name you specify), so audible knobs you set in the recipe assert themselves',
-    'and unaddressed knobs land at safe init defaults. Cost: ~300 ms additional wire',
-    'time. Use ALWAYS for fresh-patch builds; default `false` for tweaks to an',
-    'existing patch ("make it brighter") so iterative edits don\'t churn the rest',
-    'of the state.',
+    'IMPORTANT — DEVICE PRECONDITION: Param TX/RX must be NRPN on System',
+    'Setup → MIDI page 10. With Param TX/RX = CC, the entire batch is',
+    'silently ignored.',
   ].join('\n'),
   inputSchema: {
     params: z.array(z.object({
-      name: z.string().describe('Canonical NRPN parameter name (e.g. "filter1type", "osc2semi", "env1attacksyncoff").'),
-      value: z.union([z.number(), z.string()]).describe('Numeric value (0..16383) OR enum display name (e.g. "Vowel", "Lo-Fi", "Sine"). Most non-enum params use only 0..127.'),
+      name: z.string().describe('Canonical NRPN parameter name (e.g. "filter1type", "osc2semi", "env1attacksyncoff") OR CC-style alias ("filter1.cutoff", "mixer.osc1_vol", "env1.attack"). Both resolve.'),
+      value: z.union([z.number(), z.string()]).describe('Display value (0..128 auto-scales for unipolar; signed N for bipolar) OR enum display name string (e.g. "Vowel", "Lo-Fi", "Sine"). See cheat-sheet for value semantics.'),
     }))
-      .min(0)
+      .min(1)
       .max(300)
-      .describe('Ordered list of NRPN writes to send. The server sends each as a 4-CC sequence with ~3 ms between sequences for pacing. Empty array allowed only when freshPatch=true (sends just the prelude).'),
-    freshPatch: z.boolean().optional().describe(
-      'When true, prepend a neutralize prelude (~100 init defaults) before your params so previously-loaded patch state can\'t bleed through. Use for fresh patch builds (recipes). Default false for tweaks to an existing patch.',
-    ),
+      .describe('Ordered list of NRPN writes to send. The server sends each as a 4-CC sequence with ~3 ms between sequences for pacing.'),
   },
-}, async ({ params, freshPatch }) => {
-  if (params.length === 0 && !freshPatch) {
-    throw new Error('params is empty and freshPatch is not set — nothing to send. Pass at least one param, or set freshPatch=true to send the init prelude alone (or use hydra_apply_init for the dedicated recovery primitive).');
-  }
-  return runEngineParamBatch(params, freshPatch ?? false);
+}, async ({ params }) => {
+  return runEngineParamBatch(params);
 });
 
 // hydra_apply_init -------------------------------------------------------
@@ -1283,39 +1270,20 @@ server.registerTool('hydra_apply_patch', {
 });
 
 /**
- * Shared write-batch implementation backing `hydra_set_engine_params` and
- * `hydra_apply_init`. Merges INIT_PATCH (when `freshPatch=true`) with the
- * caller's params — user values win for any name that appears in both —
- * resolves each entry through `resolveNrpnValue`, sends each as a 4-CC
- * sequence with ~3 ms pacing, and formats a response that distinguishes
- * init-prelude writes (one summary line) from user writes (one line each).
+ * Shared write-batch implementation backing `hydra_set_engine_params`.
+ * Resolves each entry through `resolveNrpnValue`, sends each as a 4-CC
+ * sequence with ~3 ms pacing, and formats a response with one line per
+ * write.
  */
 async function runEngineParamBatch(
   params: Array<{ name: string; value: number | string }>,
-  freshPatch: boolean,
 ): Promise<{ content: Array<{ type: 'text'; text: string }> }> {
   const conn = ensureMidi();
   const errors: string[] = [];
-  const sent: { name: string; raw: number | string; resolved: number; resolvedDataMsb?: number; scaled: boolean; bipolar: boolean; wireMax?: number; displayMin?: number; displayMax?: number; fromInit: boolean }[] = [];
+  const sent: { name: string; raw: number | string; resolved: number; resolvedDataMsb?: number; scaled: boolean; bipolar: boolean; wireMax?: number; displayMin?: number; displayMax?: number }[] = [];
 
-  // Server-side merge: when freshPatch is set, lay the INIT_PATCH down
-  // first as a base, then overlay the user's params (later writes win
-  // for any name that appears in both). Each parameter gets sent
-  // exactly once — no redundant traffic. User recipes assert
-  // themselves; unaddressed parameters land at safe defaults instead
-  // of inheriting whatever the previous patch had.
-  let writes: Array<InitPatchEntry & { fromInit: boolean }>;
-  if (freshPatch) {
-    const merged = new Map<string, { value: number | string; fromInit: boolean }>();
-    for (const e of INIT_PATCH) merged.set(e.name, { value: e.value, fromInit: true });
-    for (const p of params) merged.set(p.name, { value: p.value, fromInit: false });
-    writes = Array.from(merged, ([name, { value, fromInit }]) => ({ name, value, fromInit }));
-  } else {
-    writes = params.map((p) => ({ name: p.name, value: p.value, fromInit: false }));
-  }
-
-  for (let i = 0; i < writes.length; i++) {
-    const { name, value } = writes[i]!;
+  for (let i = 0; i < params.length; i++) {
+    const { name, value } = params[i]!;
     const entry = findHydraNrpn(name);
     if (!entry) {
       const hits = findMatchingNrpns(name, 4);
@@ -1338,13 +1306,11 @@ async function runEngineParamBatch(
       continue;
     }
     sendNrpn(conn, DEFAULT_CHANNEL, entry, resolved);
-    sent.push({ name, raw: value, resolved, resolvedDataMsb: entry.dataMsb, scaled, bipolar, wireMax: entry.wireMax, displayMin: entry.displayMin, displayMax: entry.displayMax, fromInit: writes[i]!.fromInit });
-    if (i < writes.length - 1) await sleep(3);
+    sent.push({ name, raw: value, resolved, resolvedDataMsb: entry.dataMsb, scaled, bipolar, wireMax: entry.wireMax, displayMin: entry.displayMin, displayMax: entry.displayMax });
+    if (i < params.length - 1) await sleep(3);
   }
 
-  const userWrites = sent.filter((s) => !s.fromInit);
-  const initWrites = sent.filter((s) => s.fromInit);
-  const userLines = userWrites.map((s) => {
+  const userLines = sent.map((s) => {
     const slotNote = s.resolvedDataMsb !== undefined ? ` [slot ${s.resolvedDataMsb}]` : '';
     let valueNote: string;
     if (typeof s.raw === 'string') {
@@ -1359,12 +1325,7 @@ async function runEngineParamBatch(
     }
     return `  ${s.name} = ${valueNote}${slotNote}`;
   });
-  const initLine = initWrites.length > 0
-    ? `  [+${initWrites.length} init prelude writes — neutralized previous patch state]\n`
-    : '';
-  const lines = userLines.length > 0
-    ? [initLine + 'User params:', ...userLines]
-    : [initLine.trim()];
+  const lines = userLines.length > 0 ? ['Sent params:', ...userLines] : [];
   const errorBlock = errors.length > 0
     ? `\n\nErrors (${errors.length}):\n${errors.map((e) => `  ${e}`).join('\n')}`
     : '';
